@@ -204,10 +204,10 @@ onMounted(async () => {
       </h3>
       <p
         v-if="collectionId"
-        class="lit-meta"
+        class="lit-meta lit-meta--technical"
       >
-        当前 collectionId：
-        <code class="ds-code">{{ collectionId }}</code>
+        <span class="lit-meta__label">临时库 ID</span>
+        <code class="ds-code lit-meta__code">{{ collectionId }}</code>
         <button
           type="button"
           class="ds-btn ds-btn--ghost"
@@ -235,12 +235,12 @@ onMounted(async () => {
       <h3 class="ds-h3 ds-card__title">
         上传文献
       </h3>
-      <div class="ds-row ds-row--center">
-        <label class="ds-field">
+      <div class="ds-row ds-row--center lit-upload-row">
+        <label class="ds-field lit-field-inline">
           分块约长（chunkSize）
           <input
             v-model.number="chunkSize"
-            class="ds-input"
+            class="ds-input ds-input--narrow"
             type="number"
             inputmode="numeric"
             min="128"
@@ -248,7 +248,7 @@ onMounted(async () => {
             step="64"
           >
         </label>
-        <label class="ds-file-label">
+        <label class="ds-file-label ds-file-label--solid lit-file-btn">
           选择文件
           <input
             type="file"
@@ -308,46 +308,50 @@ onMounted(async () => {
         class="ds-textarea"
         placeholder="基于已上传文献提问…"
       />
-      <div class="ds-row">
-        <label class="ds-field">
-          Top-K
-          <input
-            v-model.number="topK"
-            class="ds-input ds-input--narrow"
-            type="number"
-            inputmode="numeric"
-            min="1"
-            max="20"
+      <div class="rag-toolbar">
+        <div class="rag-params">
+          <label class="ds-field lit-field-inline">
+            Top-K
+            <input
+              v-model.number="topK"
+              class="ds-input ds-input--narrow"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="20"
+            >
+          </label>
+          <label class="ds-field lit-field-inline">
+            相似度阈值（0=不过滤）
+            <input
+              v-model.number="threshold"
+              class="ds-input ds-input--xs"
+              type="number"
+              inputmode="decimal"
+              min="0"
+              max="1"
+              step="0.05"
+            >
+          </label>
+        </div>
+        <div class="rag-toolbar__actions">
+          <button
+            type="button"
+            class="ds-btn ds-btn--primary"
+            :disabled="ragLoading || !collectionId"
+            @click="runQuery"
           >
-        </label>
-        <label class="ds-field">
-          相似度阈值（0=不过滤）
-          <input
-            v-model.number="threshold"
-            class="ds-input"
-            type="number"
-            inputmode="decimal"
-            min="0"
-            max="1"
-            step="0.05"
+            {{ ragLoading ? '生成中…' : '检索并生成' }}
+          </button>
+          <button
+            v-if="ragLoading"
+            type="button"
+            class="ds-btn ds-btn--warn"
+            @click="stopRag"
           >
-        </label>
-        <button
-          type="button"
-          class="ds-btn ds-btn--primary"
-          :disabled="ragLoading || !collectionId"
-          @click="runQuery"
-        >
-          {{ ragLoading ? '生成中…' : '检索并生成' }}
-        </button>
-        <button
-          v-if="ragLoading"
-          type="button"
-          class="ds-btn ds-btn--warn"
-          @click="stopRag"
-        >
-          停止
-        </button>
+            停止
+          </button>
+        </div>
       </div>
       <p
         v-if="ragError"
@@ -382,12 +386,58 @@ onMounted(async () => {
   margin-bottom: 0.75rem;
 }
 .lit-meta {
-  font-size: 0.875rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.65rem;
   align-items: center;
   margin: 0;
   color: var(--color-text-secondary);
+}
+.lit-meta--technical {
+  font-size: 0.8125rem;
+}
+.lit-meta__label {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+.lit-meta__code {
+  font-size: 0.6875rem;
+}
+.lit-upload-row {
+  margin-top: 0.5rem;
+  gap: 1rem;
+}
+.lit-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+}
+.lit-field-inline .ds-input--narrow {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
+.lit-file-btn {
+  flex-shrink: 0;
+}
+.rag-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+.rag-params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-right: auto;
+}
+.rag-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
 }
 </style>

@@ -22,7 +22,10 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/components/MarkdownContent.vue'],
+    files: [
+      'src/components/MarkdownContent.vue',
+      'src/components/MarkdownRenderer.vue',
+    ],
     rules: {
       // v-html is intentional; HTML is sanitized in markdownToSafeHtml (DOMPurify).
       'vue/no-v-html': 'off',

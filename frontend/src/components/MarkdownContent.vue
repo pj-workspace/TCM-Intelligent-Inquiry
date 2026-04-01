@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { markdownToSafeHtml } from '@/utils/renderMarkdown'
+/**
+ * 兼容旧 props 名 `source`；实际渲染由 {@link MarkdownRenderer} 统一完成。
+ */
+import MarkdownRenderer from './MarkdownRenderer.vue'
 
 const props = defineProps<{
   source: string
 }>()
-
-const html = computed(() => markdownToSafeHtml(props.source))
 </script>
 
 <template>
-  <div
-    class="ds-markdown"
-    v-html="html"
+  <MarkdownRenderer
+    :content="props.source"
+    streaming
   />
 </template>

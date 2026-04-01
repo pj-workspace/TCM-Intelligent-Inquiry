@@ -206,7 +206,7 @@ onMounted(async () => {
       <h3 class="ds-h3 ds-card__title">
         知识库
       </h3>
-      <div class="ds-row ds-row--top kb-row">
+      <div class="ds-row kb-row">
         <label class="ds-field">
           当前库
           <select
@@ -251,12 +251,12 @@ onMounted(async () => {
       <p class="ds-hint">
         使用 Apache Tika 解析 PDF/Word/TXT 等；分块大小（token 约估）可调整。
       </p>
-      <div class="ds-row ds-row--center">
-        <label class="ds-field">
+      <div class="ds-row ds-row--center kb-upload-row">
+        <label class="ds-field kb-field-inline">
           分块约长（chunkSize）
           <input
             v-model.number="chunkSize"
-            class="ds-input"
+            class="ds-input ds-input--narrow"
             type="number"
             inputmode="numeric"
             min="128"
@@ -264,7 +264,7 @@ onMounted(async () => {
             step="64"
           >
         </label>
-        <label class="ds-file-label">
+        <label class="ds-file-label ds-file-label--solid kb-file-btn">
           选择文件上传
           <input
             type="file"
@@ -322,8 +322,8 @@ onMounted(async () => {
         class="ds-textarea"
         placeholder="输入问题…"
       />
-      <div class="ds-row">
-        <label class="ds-field">
+      <div class="rag-toolbar">
+        <label class="ds-field rag-field-inline">
           Top-K
           <input
             v-model.number="topK"
@@ -334,22 +334,24 @@ onMounted(async () => {
             max="20"
           >
         </label>
-        <button
-          type="button"
-          class="ds-btn ds-btn--primary"
-          :disabled="ragLoading"
-          @click="runQuery"
-        >
-          {{ ragLoading ? '生成中…' : '检索并生成' }}
-        </button>
-        <button
-          v-if="ragLoading"
-          type="button"
-          class="ds-btn ds-btn--warn"
-          @click="stopRag"
-        >
-          停止
-        </button>
+        <div class="rag-toolbar__actions">
+          <button
+            type="button"
+            class="ds-btn ds-btn--primary"
+            :disabled="ragLoading"
+            @click="runQuery"
+          >
+            {{ ragLoading ? '生成中…' : '检索并生成' }}
+          </button>
+          <button
+            v-if="ragLoading"
+            type="button"
+            class="ds-btn ds-btn--warn"
+            @click="stopRag"
+          >
+            停止
+          </button>
+        </div>
       </div>
       <p
         v-if="ragError"
@@ -384,16 +386,59 @@ onMounted(async () => {
   margin-bottom: 1.25rem;
 }
 .kb-row {
-  align-items: flex-end;
+  align-items: center;
+  margin-top: 0;
+  gap: 1rem;
 }
 .kb-create {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
+  flex: 1;
+  min-width: min(100%, 18rem);
 }
 .kb-input {
   flex: 1;
-  min-width: 10rem;
+  min-width: 9rem;
+}
+.kb-upload-row {
+  margin-top: 0.5rem;
+  gap: 1rem;
+}
+.kb-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+}
+.kb-field-inline .ds-input {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
+.kb-file-btn {
+  flex-shrink: 0;
+}
+.rag-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+.rag-field-inline {
+  margin-right: auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+}
+.rag-field-inline .ds-input {
+  width: 5.5rem;
+}
+.rag-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
 }
 </style>

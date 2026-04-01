@@ -133,7 +133,7 @@ onMounted(async () => {
         class="ds-textarea"
         placeholder="描述要让智能体做什么…"
       />
-      <div class="ds-row ds-row--top agent-row">
+      <div class="ds-row agent-row">
         <label
           v-if="bases.length"
           class="ds-field agent-kb"
@@ -188,7 +188,7 @@ onMounted(async () => {
         >
           {{ loading ? '运行中…' : '仅文本运行' }}
         </button>
-        <label class="ds-file-label ds-file-label--solid agent-file">
+        <label class="ds-file-label ds-file-label--btn-secondary agent-file">
           选择图片并运行（多模态）
           <input
             type="file"
@@ -231,16 +231,19 @@ onMounted(async () => {
   margin-bottom: 0.5rem;
 }
 .agent-row {
-  align-items: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
 }
 .agent-kb .ds-select {
   max-width: 100%;
 }
 .agent-actions {
-  align-items: center;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  gap: 0.75rem;
 }
 .agent-file {
-  min-height: 2.75rem;
+  flex-shrink: 0;
 }
 .agent-out {
   margin-top: 1rem;

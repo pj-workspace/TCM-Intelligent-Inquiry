@@ -1,10 +1,32 @@
-/** 常见推理 / 思考块（DeepSeek / Qwen 类、部分开源对齐） */
-const RE_XML_THINK = /^\s*<think>([\s\S]*?)<\/think>\s*/i
-const RE_XML_OPEN = /^\s*<think>/i
+/** 常见推理块：思考标签、redacted_thinking 成对标签、以及 `think` 围栏 */
+type XmlPattern = {
+  full: RegExp
+  open: RegExp
+  close: RegExp
+}
 
-/** `think` … ` */
+/**
+ * 顺序：`<think>…</think>`（原仓库）、`<redacted_thinking>…</redacted_thinking>`（DeepSeek 等）。
+ * 使用 RegExp 字符串构造，避免源文件中的反引号被环境改写。
+ */
+const XML_PATTERNS: XmlPattern[] = [
+  {
+    full: new RegExp('^\\s*<think>([\\s\\S]*?)<\\/think>\\s*', 'i'),
+    open: new RegExp('^\\s*<think>', 'i'),
+    close: new RegExp('<\\/think>', 'i'),
+  },
+  {
+    full: new RegExp(
+      '^\\s*<redacted_thinking>([\\s\\S]*?)<\\/redacted_thinking>\\s*',
+      'i'
+    ),
+    open: new RegExp('^\\s*<redacted_thinking>', 'i'),
+    close: new RegExp('<\\/redacted_thinking>', 'i'),
+  },
+]
+
+/** \u0060think\u0060 … \u0060/think\u0060 */
 const BT_OPEN = '\u0060think\u0060'
-/** ` */
 const BT_CLOSE = '\u0060/think\u0060'
 
 export type ThinkSplit = {
@@ -15,26 +37,26 @@ export type ThinkSplit = {
 
 /**
  * 拆出可折叠「思考」与对外正文（后者按 Markdown 渲染）。
- * 支持：<think>...</think>、`...`</think>``
  */
 export function splitThinkFromAssistant(text: string): ThinkSplit {
   const t = text ?? ''
 
-  const xml = t.match(RE_XML_THINK)
-  if (xml) {
-    return {
-      think: xml[1].trim() || null,
-      rest: t.slice(xml[0].length).trimStart(),
-      thinkIncomplete: false,
+  for (const p of XML_PATTERNS) {
+    const xml = t.match(p.full)
+    if (xml) {
+      return {
+        think: xml[1].trim() || null,
+        rest: t.slice(xml[0].length).trimStart(),
+        thinkIncomplete: false,
+      }
     }
-  }
-
-  if (RE_XML_OPEN.test(t) && !/<\/think>/i.test(t)) {
-    const inner = t.replace(/^\s*<think>\s*/i, '')
-    return {
-      think: inner.trim() || '…',
-      rest: '',
-      thinkIncomplete: true,
+    if (p.open.test(t) && !p.close.test(t)) {
+      const inner = t.replace(p.open, '').trimStart()
+      return {
+        think: inner.trim() || '…',
+        rest: '',
+        thinkIncomplete: true,
+      }
     }
   }
 
@@ -49,10 +71,10 @@ export function splitThinkFromAssistant(text: string): ThinkSplit {
         thinkIncomplete: true,
       }
     }
-    const think = afterOpen.slice(0, closeIdx).trim()
+    const thinkBody = afterOpen.slice(0, closeIdx).trim()
     const rest = afterOpen.slice(closeIdx + BT_CLOSE.length).trimStart()
     return {
-      think: think || null,
+      think: thinkBody || null,
       rest,
       thinkIncomplete: false,
     }

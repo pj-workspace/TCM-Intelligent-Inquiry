@@ -11,9 +11,16 @@ const router = createRouter({
       children: [
         {
           path: 'consultation',
-          name: 'consultation',
-          meta: { title: '问诊' },
-          component: () => import('@/views/consultation/Index.vue'),
+          meta: { title: '问诊', consultation: true },
+          component: () => import('@/layout/ConsultationLayout.vue'),
+          children: [
+            {
+              path: '',
+              name: 'consultation',
+              meta: { title: '问诊' },
+              component: () => import('@/views/consultation/ChatView.vue'),
+            },
+          ],
         },
         {
           path: 'knowledge',

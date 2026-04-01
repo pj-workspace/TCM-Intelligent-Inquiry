@@ -33,7 +33,20 @@ const parsed = computed(() =>
         :open="parsed.thinkIncomplete"
       >
         <summary class="ds-think__summary">
-          {{ parsed.thinkIncomplete ? '推理中…' : '推理过程' }}
+          <svg
+            class="ds-think__chevron"
+            viewBox="0 0 10 10"
+            aria-hidden="true"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              fill="currentColor"
+              d="M2.2 1.4 L7.8 5 L2.2 8.6 Z"
+            />
+          </svg>
+          <span class="ds-think__label">{{
+            parsed.thinkIncomplete ? '推理中…' : '推理过程'
+          }}</span>
         </summary>
         <pre class="ds-think__body">{{ parsed.think }}</pre>
       </details>
