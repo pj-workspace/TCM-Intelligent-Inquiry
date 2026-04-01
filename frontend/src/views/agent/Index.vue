@@ -4,6 +4,12 @@ import { apiClient } from '@/api/client'
 import type { ApiResult } from '@/types/api'
 import type { KnowledgeBase } from '@/types/knowledge'
 import type { AgentRunResponse } from '@/types/agent'
+import {
+  formatHealthStatus,
+  isHealthStatusErr,
+  isHealthStatusOk,
+} from '@/utils/formatHealthStatus'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const health = ref('加载中…')
 const task = ref('请根据图像与知识库摘录，说明该药材可能的名称及使用注意。')
@@ -19,7 +25,7 @@ const result = ref<AgentRunResponse | null>(null)
 async function refreshHealth() {
   try {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/agent/health')
-    health.value = `code=${data.code} ${data.message}`
+    health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
     health.value = e instanceof Error ? e.message : '请求失败'
   }
@@ -30,9 +36,6 @@ async function loadBases() {
     const { data } = await apiClient.get<ApiResult<KnowledgeBase[]>>('/v1/knowledge/bases')
     if (data.code !== 0) throw new Error(data.message)
     bases.value = data.data ?? []
-    if (kbSelection.value === '' && bases.value.length > 0) {
-      kbSelection.value = String(bases.value[0].id)
-    }
   } catch {
     /* 知识库不可用时仍可跑纯对话/识图 */
   }
@@ -96,20 +99,31 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page">
-    <h2>中医智能体</h2>
-    <p class="health">{{ health }}</p>
-    <p class="hint">
+  <div class="ds-page" style="max-width: 45rem">
+    <h2 class="ds-h2">中医智能体</h2>
+    <p
+      class="ds-status agent-health"
+      :class="
+        isHealthStatusErr(health)
+          ? 'ds-status--err'
+          : isHealthStatusOk(health)
+            ? 'ds-status--ok'
+            : ''
+      "
+    >
+      {{ health }}
+    </p>
+    <p class="ds-lead">
       文本对话走默认 Ollama Chat 模型；上传图片时使用配置的视觉模型（如 qwen3-vl）。可选勾选知识库，将先做向量检索再把摘录与任务一并交给模型。
     </p>
 
-    <section class="card">
-      <h3>任务</h3>
-      <textarea v-model="task" rows="4" class="ta" placeholder="描述要让智能体做什么…" />
-      <div class="row">
-        <label v-if="bases.length">
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">任务</h3>
+      <textarea v-model="task" rows="4" class="ds-textarea" placeholder="描述要让智能体做什么…" />
+      <div class="ds-row ds-row--top agent-row">
+        <label v-if="bases.length" class="ds-field agent-kb">
           知识库（可选）
-          <select v-model="kbSelection" class="sel">
+          <select v-model="kbSelection" class="ds-select">
             <option value="">不使用知识库</option>
             <option v-for="b in bases" :key="b.id" :value="String(b.id)">
               {{ b.name }} (id={{ b.id }})
@@ -117,145 +131,84 @@ onMounted(async () => {
           </select>
         </label>
         <template v-if="kbSelection !== ''">
-          <label>
+          <label class="ds-field">
             RAG Top-K
-            <input v-model.number="ragTopK" type="number" min="1" max="20" class="num" />
+            <input
+              v-model.number="ragTopK"
+              class="ds-input ds-input--narrow"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="20"
+            />
           </label>
-          <label>
+          <label class="ds-field">
             相似度阈值
-            <input v-model.number="ragThreshold" type="number" min="0" max="1" step="0.05" class="num" />
+            <input
+              v-model.number="ragThreshold"
+              class="ds-input ds-input--narrow"
+              type="number"
+              inputmode="decimal"
+              min="0"
+              max="1"
+              step="0.05"
+            />
           </label>
         </template>
       </div>
-      <div class="actions">
-        <button type="button" class="btn primary" :disabled="loading" @click="runJsonOnly">
+      <div class="ds-row agent-actions">
+        <button type="button" class="ds-btn ds-btn--primary" :disabled="loading" @click="runJsonOnly">
           {{ loading ? '运行中…' : '仅文本运行' }}
         </button>
-        <label class="file-btn">
+        <label class="ds-file-label ds-file-label--solid agent-file">
           选择图片并运行（多模态）
           <input type="file" accept="image/*" :disabled="loading" @change="onImageChange" />
         </label>
       </div>
-      <p v-if="error" class="err">{{ error }}</p>
-      <div v-if="result" class="out">
-        <p class="meta">
-          <span class="badge">{{ result.mode }}</span>
-          <span v-if="result.knowledgeSources?.length" class="src">
+      <p v-if="error" class="ds-msg--error">{{ error }}</p>
+      <div v-if="result" class="ds-answer agent-out">
+        <p class="agent-result-meta">
+          <span class="ds-badge">{{ result.mode }}</span>
+          <span v-if="result.knowledgeSources?.length" class="ds-muted agent-src">
             知识库来源：{{ result.knowledgeSources.join('、') }}
           </span>
         </p>
-        <div class="body">{{ result.assistant }}</div>
+        <MarkdownContent class="agent-body" :source="result.assistant" />
       </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.page {
-  max-width: 720px;
-}
-h2 {
-  margin-top: 0;
-}
-h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-.health {
-  font-size: 0.85rem;
-  color: #4b5563;
-}
-.hint {
-  font-size: 0.8rem;
-  color: #6b7280;
-  line-height: 1.45;
-  margin-bottom: 1rem;
-}
-.card {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1rem;
-  background: #fff;
-}
-.ta {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  padding: 0.6rem 0.75rem;
-  font-family: inherit;
-  margin-bottom: 0.75rem;
-}
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-.sel,
-.num {
-  margin-left: 0.35rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
-}
-.btn {
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  cursor: pointer;
-}
-.btn.primary {
-  background: #0d9488;
-  border-color: #0f766e;
-  color: #fff;
-}
-.file-btn {
-  font-size: 0.9rem;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: 1px dashed #94a3b8;
-  cursor: pointer;
-}
-.file-btn input {
-  display: none;
-}
-.err {
-  color: #b91c1c;
-  font-size: 0.9rem;
-  margin-top: 0.5rem;
-}
-.out {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid #f3f4f6;
-}
-.meta {
-  font-size: 0.8rem;
-  color: #647488;
+.agent-health {
   margin-bottom: 0.5rem;
 }
-.badge {
-  display: inline-block;
-  background: #ecfdf5;
-  color: #047857;
-  padding: 0.15rem 0.5rem;
-  border-radius: 6px;
-  margin-right: 0.5rem;
+.agent-row {
+  align-items: flex-end;
 }
-.src {
-  display: inline-block;
+.agent-kb .ds-select {
+  max-width: 100%;
 }
-.body {
-  white-space: pre-wrap;
-  line-height: 1.55;
-  font-size: 0.95rem;
+.agent-actions {
+  align-items: center;
+}
+.agent-file {
+  min-height: 2.75rem;
+}
+.agent-out {
+  margin-top: 1rem;
+}
+.agent-result-meta {
+  margin: 0 0 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.agent-src {
+  margin: 0;
+}
+.agent-body {
+  margin: 0;
 }
 </style>

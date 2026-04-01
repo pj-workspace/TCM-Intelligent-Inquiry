@@ -4,6 +4,11 @@ import { apiClient } from '@/api/client'
 import type { ApiResult } from '@/types/api'
 import ChatBubble from '@/components/ChatBubble.vue'
 import { useChat } from '@/composables/useChat'
+import {
+  formatHealthStatus,
+  isHealthStatusErr,
+  isHealthStatusOk,
+} from '@/utils/formatHealthStatus'
 
 const health = ref<string>('加载中…')
 const threadEl = ref<HTMLElement | null>(null)
@@ -38,10 +43,9 @@ watch(
 onMounted(async () => {
   try {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/consultation/health')
-    health.value = `服务正常 code=${data.code} ${data.message}`
+    health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
-    health.value =
-      e instanceof Error ? `后端不可用: ${e.message}` : '后端不可用'
+    health.value = e instanceof Error ? `后端不可用: ${e.message}` : '后端不可用'
   }
   try {
     await newSession()
@@ -70,46 +74,78 @@ function onNewChat() {
 </script>
 
 <template>
-  <div class="page">
-    <header class="header">
-      <h2>中医智能问诊</h2>
-      <p class="health">{{ health }}</p>
-      <p v-if="sessionId != null" class="meta">当前会话 ID：{{ sessionId }}</p>
+  <div class="consult-chat ds-page ds-page--chat ds-main__grow">
+    <header>
+      <h2 class="ds-h2">中医智能问诊</h2>
+      <p
+        class="ds-status"
+        :class="
+          isHealthStatusErr(health)
+            ? 'ds-status--err'
+            : isHealthStatusOk(health)
+              ? 'ds-status--ok'
+              : ''
+        "
+      >
+        {{ health }}
+      </p>
+      <p v-if="sessionId != null" class="consult-meta">当前会话 ID：{{ sessionId }}</p>
     </header>
 
-    <div class="controls">
-      <label class="field">
-        <span>Temperature</span>
-        <input
-          v-model.number="temperature"
-          type="number"
-          min="0"
-          max="2"
-          step="0.1"
-          :disabled="loading"
-        />
-      </label>
-      <label class="field">
-        <span>历史轮数上限</span>
-        <input
-          v-model.number="maxHistoryTurns"
-          type="number"
-          min="1"
-          max="50"
-          step="1"
-          :disabled="loading"
-        />
-      </label>
-      <button type="button" class="btn secondary" :disabled="loading" @click="onNewChat">
+    <details class="ds-details">
+      <summary>模型与上下文参数</summary>
+      <div class="ds-details__body">
+        <div class="ds-row consult-controls">
+          <label class="ds-field">
+            Temperature
+            <input
+              v-model.number="temperature"
+              class="ds-input ds-input--narrow"
+              type="number"
+              inputmode="decimal"
+              min="0"
+              max="2"
+              step="0.1"
+              :disabled="loading"
+            />
+          </label>
+          <label class="ds-field">
+            历史轮数上限
+            <input
+              v-model.number="maxHistoryTurns"
+              class="ds-input ds-input--narrow"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="50"
+              step="1"
+              :disabled="loading"
+            />
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <div class="ds-row consult-actions">
+      <button type="button" class="ds-btn ds-btn--secondary" :disabled="loading" @click="onNewChat">
         新建会话
       </button>
-      <button v-if="loading" type="button" class="btn warn" @click="stop">停止</button>
+      <button v-if="loading" type="button" class="ds-btn ds-btn--warn" @click="stop">停止</button>
     </div>
 
-    <p v-if="error" class="alert">{{ error }}</p>
-    <p v-if="loading && !streamingContent" class="hint">助手思考中…</p>
+    <p v-if="error" class="ds-msg--error">{{ error }}</p>
+    <p v-if="loading && !streamingContent" class="ds-hint" style="margin-top: 0">助手思考中…</p>
 
-    <div ref="threadEl" class="thread">
+    <div ref="threadEl" class="ds-thread" role="region" aria-label="对话内容">
+      <div
+        v-if="messages.length === 0 && !loading && !streamingContent"
+        class="ds-thread-empty"
+      >
+        <p class="ds-thread-empty__title">开始一次问诊</p>
+        <p class="ds-thread-empty__hint">
+          用自然语言描述症状或体质疑问；Enter 发送，Shift+Enter 可换行（若浏览器支持）。
+        </p>
+      </div>
       <ChatBubble
         v-for="(m, i) in messages"
         :key="i"
@@ -123,16 +159,16 @@ function onNewChat() {
       />
     </div>
 
-    <form class="composer" @submit.prevent="onSend">
+    <form class="ds-composer" @submit.prevent="onSend">
       <textarea
         v-model="input"
-        class="input"
+        class="ds-textarea"
         rows="3"
         placeholder="描述症状、体征或想咨询的问题…"
         :disabled="loading"
         @keydown.enter.exact.prevent="onSend"
       />
-      <button type="submit" class="btn primary" :disabled="loading || !input.trim()">
+      <button type="submit" class="ds-btn ds-btn--primary" :disabled="loading || !input.trim()">
         发送
       </button>
     </form>
@@ -140,104 +176,21 @@ function onNewChat() {
 </template>
 
 <style scoped>
-.page {
-  max-width: 640px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 3rem);
-  min-height: 420px;
+.consult-chat {
+  width: 100%;
+  min-height: min(28rem, 52dvh);
 }
-.header h2 {
-  margin: 0 0 0.35rem;
-}
-.health {
-  font-size: 0.8rem;
-  color: #6b7280;
-  margin: 0;
-}
-.meta {
-  font-size: 0.75rem;
-  color: #9ca3af;
+.consult-meta {
   margin: 0.25rem 0 0;
-}
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
-  margin: 1rem 0;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.8rem;
-  color: #4b5563;
-}
-.field input {
-  width: 6rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-}
-.btn {
-  padding: 0.45rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  cursor: pointer;
   font-size: 0.875rem;
+  color: var(--color-text-secondary);
 }
-.btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.consult-controls {
+  margin-top: 0;
 }
-.btn.primary {
-  background: #059669;
-  border-color: #047857;
-  color: #fff;
-}
-.btn.secondary {
-  margin-left: auto;
-}
-.btn.warn {
-  background: #fef3c7;
-  border-color: #f59e0b;
-}
-.alert {
-  color: #b91c1c;
-  font-size: 0.9rem;
-  margin: 0 0 0.5rem;
-}
-.hint {
-  color: #6b7280;
-  font-size: 0.85rem;
-  margin: 0 0 0.5rem;
-}
-.thread {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.5rem 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 0.75rem;
-  background: #f9fafb;
-}
-.composer {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
-  align-items: flex-end;
-}
-.composer .input {
-  flex: 1;
-  resize: vertical;
-  min-height: 4rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: 12px;
-  border: 1px solid #d1d5db;
-  font-family: inherit;
-  font-size: 0.95rem;
+.consult-actions {
+  margin-top: 0.35rem;
+  margin-bottom: 0.25rem;
+  gap: 0.65rem;
 }
 </style>

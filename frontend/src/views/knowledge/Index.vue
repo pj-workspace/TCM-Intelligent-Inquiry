@@ -3,6 +3,12 @@ import { onMounted, ref, watch } from 'vue'
 import { apiClient } from '@/api/client'
 import type { ApiResult } from '@/types/api'
 import type { KnowledgeBase, KnowledgeFileView, KnowledgeQueryResponse } from '@/types/knowledge'
+import {
+  formatHealthStatus,
+  isHealthStatusErr,
+  isHealthStatusOk,
+} from '@/utils/formatHealthStatus'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const health = ref('加载中…')
 const bases = ref<KnowledgeBase[]>([])
@@ -24,7 +30,7 @@ const chunkSize = ref(512)
 async function refreshHealth() {
   try {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/knowledge/health')
-    health.value = `code=${data.code} ${data.message}`
+    health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
     health.value = e instanceof Error ? e.message : '请求失败'
   }
@@ -146,38 +152,60 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page">
-    <h2>中医药知识库（RAG）</h2>
-    <p class="health">{{ health }}</p>
+  <div class="ds-page" style="max-width: 45rem">
+    <h2 class="ds-h2">中医药知识库（RAG）</h2>
+    <p
+      class="ds-status kb-health"
+      :class="
+        isHealthStatusErr(health)
+          ? 'ds-status--err'
+          : isHealthStatusOk(health)
+            ? 'ds-status--ok'
+            : ''
+      "
+    >
+      {{ health }}
+    </p>
 
-    <section class="card">
-      <h3>知识库</h3>
-      <div class="row">
-        <label>
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">知识库</h3>
+      <div class="ds-row ds-row--top kb-row">
+        <label class="ds-field">
           当前库
-          <select v-model.number="selectedBaseId">
+          <select v-model.number="selectedBaseId" class="ds-select">
             <option v-for="b in bases" :key="b.id" :value="b.id">
               {{ b.name }} (id={{ b.id }})
             </option>
           </select>
         </label>
-        <div class="create-inline">
-          <input v-model="newBaseName" placeholder="新库名称" />
-          <input v-model="newBaseEmbed" placeholder="Embedding 模型" />
-          <button type="button" class="btn" @click="createBase">创建</button>
+        <div class="kb-create">
+          <input v-model="newBaseName" class="ds-input kb-input" placeholder="新库名称" />
+          <input v-model="newBaseEmbed" class="ds-input kb-input" placeholder="Embedding 模型" />
+          <button type="button" class="ds-btn ds-btn--primary" @click="createBase">创建知识库</button>
         </div>
       </div>
     </section>
 
-    <section class="card">
-      <h3>上传与文档</h3>
-      <p class="hint">使用 Apache Tika 解析 PDF/Word/TXT 等；分块大小（token 约估）可调整。</p>
-      <div class="row">
-        <label>
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">上传与文档</h3>
+      <p class="ds-hint">
+        使用 Apache Tika 解析 PDF/Word/TXT 等；分块大小（token 约估）可调整。
+      </p>
+      <div class="ds-row ds-row--center">
+        <label class="ds-field">
           分块约长（chunkSize）
-          <input v-model.number="chunkSize" type="number" min="128" max="2048" step="64" />
+          <input
+            v-model.number="chunkSize"
+            class="ds-input"
+            type="number"
+            inputmode="numeric"
+            min="128"
+            max="2048"
+            step="64"
+          />
         </label>
-        <label class="file-wrap">
+        <label class="ds-file-label">
+          选择文件上传
           <input
             type="file"
             :disabled="uploading || selectedBaseId == null"
@@ -185,35 +213,42 @@ onMounted(async () => {
           />
         </label>
       </div>
-      <p v-if="ingestMsg" class="msg">{{ ingestMsg }}</p>
-      <p v-if="loadingFiles">加载文件列表…</p>
-      <ul v-else class="file-list">
+      <p v-if="ingestMsg" class="ds-msg--success">{{ ingestMsg }}</p>
+      <p v-if="loadingFiles" class="ds-muted">加载文件列表…</p>
+      <ul v-else class="ds-list">
         <li v-for="f in files" :key="f.fileUuid">
           <span>{{ f.originalFilename }}</span>
-          <span class="muted">{{ (f.sizeBytes / 1024).toFixed(1) }} KB</span>
-          <button type="button" class="link" @click="removeFile(f.fileUuid)">删除</button>
+          <span class="ds-muted">{{ (f.sizeBytes / 1024).toFixed(1) }} KB</span>
+          <button type="button" class="ds-link-danger" @click="removeFile(f.fileUuid)">删除</button>
         </li>
-        <li v-if="files.length === 0" class="muted">暂无文件</li>
+        <li v-if="files.length === 0"><span class="ds-muted">暂无文件</span></li>
       </ul>
     </section>
 
-    <section class="card">
-      <h3>知识问答</h3>
-      <textarea v-model="queryText" rows="3" class="ta" placeholder="输入问题…" />
-      <div class="row">
-        <label>
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">知识问答</h3>
+      <textarea v-model="queryText" rows="3" class="ds-textarea" placeholder="输入问题…" />
+      <div class="ds-row">
+        <label class="ds-field">
           Top-K
-          <input v-model.number="topK" type="number" min="1" max="20" />
+          <input
+            v-model.number="topK"
+            class="ds-input ds-input--narrow"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            max="20"
+          />
         </label>
-        <button type="button" class="btn primary" :disabled="ragLoading" @click="runQuery">
+        <button type="button" class="ds-btn ds-btn--primary" :disabled="ragLoading" @click="runQuery">
           {{ ragLoading ? '生成中…' : '检索并生成' }}
         </button>
       </div>
-      <p v-if="ragError" class="err">{{ ragError }}</p>
-      <div v-if="ragAnswer" class="answer">
-        <h4>回答</h4>
-        <p class="body">{{ ragAnswer }}</p>
-        <p v-if="ragSources.length" class="sources">
+      <p v-if="ragError" class="ds-msg--error">{{ ragError }}</p>
+      <div v-if="ragAnswer" class="ds-answer">
+        <h4 class="ds-h4">回答</h4>
+        <MarkdownContent class="ds-answer__body" :source="ragAnswer" />
+        <p v-if="ragSources.length" class="ds-answer__sources">
           <strong>来源文件：</strong>{{ ragSources.join('、') }}
         </p>
       </div>
@@ -222,111 +257,20 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page {
-  max-width: 720px;
+.kb-health {
+  margin-bottom: 1.25rem;
 }
-h2 {
-  margin-top: 0;
+.kb-row {
+  align-items: flex-end;
 }
-h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-.health {
-  font-size: 0.85rem;
-  color: #4b5563;
-  margin-bottom: 1rem;
-}
-.card {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fff;
-}
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: center;
-  margin-top: 0.5rem;
-}
-.create-inline {
+.kb-create {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
 }
-.create-inline input {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  width: 10rem;
-}
-.hint {
-  font-size: 0.8rem;
-  color: #6b7280;
-  margin: 0 0 0.5rem;
-}
-.msg {
-  font-size: 0.9rem;
-  color: #047857;
-}
-.file-list {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0;
-}
-.file-list li {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.35rem 0;
-  border-bottom: 1px solid #f3f4f6;
-}
-.muted {
-  color: #9ca3af;
-  font-size: 0.85rem;
-}
-.link {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: #dc2626;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.ta {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  padding: 0.6rem 0.75rem;
-  font-family: inherit;
-  margin-bottom: 0.5rem;
-}
-.btn {
-  padding: 0.45rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  cursor: pointer;
-}
-.btn.primary {
-  background: #059669;
-  border-color: #047857;
-  color: #fff;
-}
-.err {
-  color: #b91c1c;
-  font-size: 0.9rem;
-}
-.answer .body {
-  white-space: pre-wrap;
-  line-height: 1.5;
-  margin: 0.5rem 0;
-}
-.sources {
-  font-size: 0.85rem;
-  color: #4b5563;
+.kb-input {
+  flex: 1;
+  min-width: 10rem;
 }
 </style>

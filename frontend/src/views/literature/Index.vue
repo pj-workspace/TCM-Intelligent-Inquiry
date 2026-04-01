@@ -3,6 +3,12 @@ import { onMounted, ref, watch } from 'vue'
 import { apiClient } from '@/api/client'
 import type { ApiResult } from '@/types/api'
 import type { LiteratureFileView, LiteratureQueryResponse } from '@/types/literature'
+import {
+  formatHealthStatus,
+  isHealthStatusErr,
+  isHealthStatusOk,
+} from '@/utils/formatHealthStatus'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 
 const health = ref('加载中…')
 const collectionId = ref<string | null>(null)
@@ -22,7 +28,7 @@ const ragError = ref<string | null>(null)
 async function refreshHealth() {
   try {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/literature/health')
-    health.value = `code=${data.code} ${data.message}`
+    health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
     health.value = e instanceof Error ? e.message : '请求失败'
   }
@@ -65,10 +71,7 @@ async function onFileChange(e: Event) {
     if (chunkSize.value > 32) {
       fd.append('chunkSize', String(chunkSize.value))
     }
-    const { data } = await apiClient.post<ApiResult<LiteratureFileView>>(
-      '/v1/literature/uploads',
-      fd
-    )
+    const { data } = await apiClient.post<ApiResult<LiteratureFileView>>('/v1/literature/uploads', fd)
     if (data.code !== 0) throw new Error(data.message)
     const row = data.data
     if (row) {
@@ -94,9 +97,7 @@ async function removeFile(fileUuid: string) {
 async function purgeCollection() {
   if (!collectionId.value) return
   if (!confirm('确定删除当前临时文献库及其向量？')) return
-  await apiClient.delete(
-    `/v1/literature/collections/${encodeURIComponent(collectionId.value)}`
-  )
+  await apiClient.delete(`/v1/literature/collections/${encodeURIComponent(collectionId.value)}`)
   collectionId.value = null
   files.value = []
   ragAnswer.value = ''
@@ -146,82 +147,116 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page">
-    <h2>医学文献问答（临时 RAG · Ollama）</h2>
-    <p class="health">{{ health }}</p>
-    <p class="hint">
+  <div class="ds-page" style="max-width: 45rem">
+    <h2 class="ds-h2">医学文献问答（临时 RAG · Ollama）</h2>
+    <p
+      class="ds-status lit-health"
+      :class="
+        isHealthStatusErr(health)
+          ? 'ds-status--err'
+          : isHealthStatusOk(health)
+            ? 'ds-status--ok'
+            : ''
+      "
+    >
+      {{ health }}
+    </p>
+    <p class="ds-lead">
       上传的文献解析、分块与向量化与「知识库」相同，向量元数据使用独立字段，仅在本临时库内检索；可多次向同一库追加文件。
     </p>
 
-    <section class="card">
-      <h3>临时文献库</h3>
-      <p v-if="collectionId" class="meta">
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">临时文献库</h3>
+      <p v-if="collectionId" class="lit-meta">
         当前 collectionId：
-        <code>{{ collectionId }}</code>
-        <button type="button" class="btn ghost" @click="newCollection">新建空库（仅前端切换）</button>
-        <button type="button" class="btn danger" @click="purgeCollection">删除服务端整库</button>
+        <code class="ds-code">{{ collectionId }}</code>
+        <button type="button" class="ds-btn ds-btn--ghost" @click="newCollection">新建空库（仅前端切换）</button>
+        <button type="button" class="ds-btn ds-btn--danger" @click="purgeCollection">删除服务端整库</button>
       </p>
-      <p v-else class="muted">尚未上传：首次上传会自动分配临时库 ID。</p>
+      <p v-else class="ds-muted">尚未上传：首次上传会自动分配临时库 ID。</p>
     </section>
 
-    <section class="card">
-      <h3>上传文献</h3>
-      <div class="row">
-        <label>
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">上传文献</h3>
+      <div class="ds-row ds-row--center">
+        <label class="ds-field">
           分块约长（chunkSize）
-          <input v-model.number="chunkSize" type="number" min="128" max="2048" step="64" />
+          <input
+            v-model.number="chunkSize"
+            class="ds-input"
+            type="number"
+            inputmode="numeric"
+            min="128"
+            max="2048"
+            step="64"
+          />
         </label>
-        <label class="file-wrap">
+        <label class="ds-file-label">
           选择文件
           <input type="file" :disabled="uploading" @change="onFileChange" />
         </label>
       </div>
-      <p v-if="msg" class="msg">{{ msg }}</p>
-      <p v-if="loadingFiles" class="muted">加载列表…</p>
-      <ul v-else class="file-list">
+      <p v-if="msg" class="ds-msg--success">{{ msg }}</p>
+      <p v-if="loadingFiles" class="ds-muted">加载列表…</p>
+      <ul v-else class="ds-list">
         <li v-for="f in files" :key="f.fileUuid || f.id">
           <span>{{ f.originalFilename }}</span>
-          <span class="muted">{{ (f.sizeBytes / 1024).toFixed(1) }} KB</span>
-          <span class="badge">{{ f.status }}</span>
+          <span class="ds-muted">{{ (f.sizeBytes / 1024).toFixed(1) }} KB</span>
+          <span class="ds-badge">{{ f.status }}</span>
           <button
             v-if="f.fileUuid"
             type="button"
-            class="link"
+            class="ds-link-danger"
             @click="removeFile(f.fileUuid)"
           >
             删除
           </button>
         </li>
-        <li v-if="files.length === 0 && collectionId" class="muted">库内暂无文件记录</li>
+        <li v-if="files.length === 0 && collectionId"><span class="ds-muted">库内暂无文件记录</span></li>
       </ul>
     </section>
 
-    <section class="card">
-      <h3>文献问答</h3>
-      <textarea v-model="queryText" rows="3" class="ta" placeholder="基于已上传文献提问…" />
-      <div class="row">
-        <label>
+    <section class="ds-card">
+      <h3 class="ds-h3 ds-card__title">文献问答</h3>
+      <textarea v-model="queryText" rows="3" class="ds-textarea" placeholder="基于已上传文献提问…" />
+      <div class="ds-row">
+        <label class="ds-field">
           Top-K
-          <input v-model.number="topK" type="number" min="1" max="20" />
+          <input
+            v-model.number="topK"
+            class="ds-input ds-input--narrow"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            max="20"
+          />
         </label>
-        <label>
+        <label class="ds-field">
           相似度阈值（0=不过滤）
-          <input v-model.number="threshold" type="number" min="0" max="1" step="0.05" />
+          <input
+            v-model.number="threshold"
+            class="ds-input"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            max="1"
+            step="0.05"
+          />
         </label>
         <button
           type="button"
-          class="btn primary"
+          class="ds-btn ds-btn--primary"
           :disabled="ragLoading || !collectionId"
           @click="runQuery"
         >
           {{ ragLoading ? '生成中…' : '检索并生成' }}
         </button>
       </div>
-      <p v-if="ragError" class="err">{{ ragError }}</p>
-      <div v-if="ragAnswer" class="answer">
-        <h4>回答</h4>
-        <p class="body">{{ ragAnswer }}</p>
-        <p v-if="ragSources.length" class="sources">
+      <p v-if="ragError" class="ds-msg--error">{{ ragError }}</p>
+      <div v-if="ragAnswer" class="ds-answer">
+        <h4 class="ds-h4">回答</h4>
+        <MarkdownContent class="ds-answer__body" :source="ragAnswer" />
+        <p v-if="ragSources.length" class="ds-answer__sources">
           <strong>来源：</strong>{{ ragSources.join('、') }}
         </p>
       </div>
@@ -230,132 +265,16 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page {
-  max-width: 720px;
+.lit-health {
+  margin-bottom: 0.75rem;
 }
-h2 {
-  margin-top: 0;
-}
-h3 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-.health {
-  font-size: 0.85rem;
-  color: #4b5563;
-  margin-bottom: 0.5rem;
-}
-.hint {
-  font-size: 0.8rem;
-  color: #6b7280;
-  margin-bottom: 1rem;
-  line-height: 1.45;
-}
-.meta {
-  font-size: 0.85rem;
+.lit-meta {
+  font-size: 0.875rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-}
-.meta code {
-  font-size: 0.75rem;
-  background: #f3f4f6;
-  padding: 0.2rem 0.4rem;
-  border-radius: 6px;
-}
-.card {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  background: #fff;
-}
-.row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: center;
-  margin-top: 0.5rem;
-}
-.file-wrap input[type='file'] {
-  font-size: 0.85rem;
-}
-.muted {
-  color: #9ca3af;
-  font-size: 0.85rem;
-}
-.msg {
-  font-size: 0.9rem;
-  color: #047857;
-  margin-top: 0.5rem;
-}
-.file-list {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0;
-}
-.file-list li {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.35rem 0;
-  border-bottom: 1px solid #f3f4f6;
-}
-.badge {
-  font-size: 0.7rem;
-  background: #eef2ff;
-  color: #4338ca;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-}
-.link {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: #dc2626;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.ta {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  padding: 0.6rem 0.75rem;
-  font-family: inherit;
-  margin-bottom: 0.5rem;
-}
-.btn {
-  padding: 0.45rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  background: #fff;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.btn.primary {
-  background: #4f46e5;
-  border-color: #4338ca;
-  color: #fff;
-}
-.btn.ghost {
-  border-style: dashed;
-}
-.btn.danger {
-  color: #b91c1c;
-  border-color: #fecaca;
-}
-.err {
-  color: #b91c1c;
-  font-size: 0.9rem;
-}
-.answer .body {
-  white-space: pre-wrap;
-  line-height: 1.5;
-  margin: 0.5rem 0;
-}
-.sources {
-  font-size: 0.85rem;
-  color: #4b5563;
+  margin: 0;
+  color: var(--color-text-secondary);
 }
 </style>

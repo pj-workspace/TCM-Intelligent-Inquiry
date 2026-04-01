@@ -4,79 +4,133 @@ import { useAppStore } from '@/store/appStore'
 
 const app = useAppStore()
 
+function skipToMain(e: Event) {
+  e.preventDefault()
+  document.getElementById('main-content')?.focus({ preventScroll: false })
+}
+
 const links = [
-  { to: '/consultation', label: '智能问诊' },
-  { to: '/knowledge', label: '知识库' },
-  { to: '/literature', label: '文献' },
-  { to: '/agent', label: '智能体' },
+  {
+    to: '/consultation',
+    label: '智能问诊',
+    icon: 'consult',
+  },
+  { to: '/knowledge', label: '知识库', icon: 'book' },
+  { to: '/literature', label: '文献', icon: 'doc' },
+  { to: '/agent', label: '智能体', icon: 'agent' },
 ] as const
 </script>
 
 <template>
-  <div class="layout">
-    <aside class="sidebar">
-      <h1 class="brand">{{ app.title }}</h1>
-      <nav>
+  <div class="ds-shell">
+    <a href="#main-content" class="ds-skip-link" @click="skipToMain">跳到主内容</a>
+    <aside class="ds-sidebar" aria-label="主导航">
+      <div class="ds-brand-row">
+        <div class="ds-brand-mark" aria-hidden="true">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v12.75a2.25 2.25 0 002.25 2.25z"
+            />
+          </svg>
+        </div>
+        <div class="ds-brand-text">
+          <h1 class="ds-brand">
+            {{ app.title }}
+            <span class="ds-brand-sub">Intelligent inquiry</span>
+          </h1>
+        </div>
+      </div>
+      <nav class="ds-nav" aria-label="功能模块">
         <RouterLink
           v-for="item in links"
           :key="item.to"
           :to="item.to"
-          class="nav-link"
+          class="ds-nav-link"
           active-class="active"
         >
+          <span class="ds-nav-icon" aria-hidden="true">
+            <!-- Heroicons-style 24×24，currentColor 继承 -->
+            <svg
+              v-if="item.icon === 'consult'"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              width="22"
+              height="22"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337 5.972 5.972 0 01-3.86-1.59 5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"
+              />
+            </svg>
+            <svg
+              v-else-if="item.icon === 'book'"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              width="22"
+              height="22"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0118 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"
+              />
+            </svg>
+            <svg
+              v-else-if="item.icon === 'doc'"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              width="22"
+              height="22"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+              />
+            </svg>
+            <svg
+              v-else
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              width="22"
+              height="22"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
+              />
+            </svg>
+          </span>
           {{ item.label }}
         </RouterLink>
       </nav>
     </aside>
-    <main class="main">
-      <RouterView />
+    <main id="main-content" class="ds-main" tabindex="-1">
+      <div class="ds-main-body">
+        <RouterView />
+      </div>
     </main>
   </div>
 </template>
-
-<style scoped>
-.layout {
-  display: flex;
-  min-height: 100vh;
-  font-family: system-ui, sans-serif;
-  color: #1a1a1a;
-  background: #f6f7f9;
-}
-.sidebar {
-  width: 220px;
-  padding: 1.25rem 1rem;
-  background: #fff;
-  border-right: 1px solid #e5e7eb;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
-}
-.brand {
-  margin: 0 0 1.25rem;
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-.nav-link {
-  padding: 0.55rem 0.75rem;
-  border-radius: 8px;
-  color: #374151;
-  text-decoration: none;
-  transition: background 0.15s, color 0.15s;
-}
-.nav-link:hover {
-  background: #f3f4f6;
-}
-.nav-link.active {
-  background: #ecfdf5;
-  color: #047857;
-  font-weight: 500;
-}
-.main {
-  flex: 1;
-  padding: 1.5rem 2rem;
-  overflow: auto;
-}
-</style>
