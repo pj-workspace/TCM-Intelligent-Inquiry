@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { apiClient } from '@/api/client'
+import { getErrorMessage } from '@/api/errors'
 import type { ApiResult } from '@/types/api'
 import type { LiteratureFileView, LiteratureQueryResponse } from '@/types/literature'
 import {
@@ -30,7 +31,7 @@ async function refreshHealth() {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/literature/health')
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
-    health.value = e instanceof Error ? e.message : '请求失败'
+    health.value = getErrorMessage(e)
   }
 }
 
@@ -80,7 +81,7 @@ async function onFileChange(e: Event) {
     }
     await loadFiles()
   } catch (e) {
-    msg.value = e instanceof Error ? e.message : '上传失败'
+    msg.value = getErrorMessage(e)
   } finally {
     uploading.value = false
   }
@@ -135,7 +136,7 @@ async function runQuery() {
       ragSources.value = r.sources ?? []
     }
   } catch (e) {
-    ragError.value = e instanceof Error ? e.message : String(e)
+    ragError.value = getErrorMessage(e)
   } finally {
     ragLoading.value = false
   }

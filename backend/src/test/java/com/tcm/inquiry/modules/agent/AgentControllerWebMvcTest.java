@@ -12,15 +12,27 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.tcm.inquiry.config.TcmApiPropertiesConfig;
+
 @WebMvcTest(AgentController.class)
+@Import(TcmApiPropertiesConfig.class)
 class AgentControllerWebMvcTest {
 
     @Autowired private MockMvc mockMvc;
 
     @MockBean private AgentService agentService;
+
+    @Test
+    void moduleInfoOk() throws Exception {
+        mockMvc.perform(get("/api/v1/agent"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.module").value("agent"));
+    }
 
     @Test
     void healthOk() throws Exception {

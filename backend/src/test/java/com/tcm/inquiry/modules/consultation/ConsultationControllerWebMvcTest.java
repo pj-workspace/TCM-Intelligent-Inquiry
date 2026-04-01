@@ -10,11 +10,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
+
+import com.tcm.inquiry.config.TcmApiPropertiesConfig;
 
 import com.tcm.inquiry.modules.consultation.dto.ChatSessionResponse;
 
 @WebMvcTest(ConsultationController.class)
+@Import(TcmApiPropertiesConfig.class)
 class ConsultationControllerWebMvcTest {
 
     @Autowired private MockMvc mockMvc;
@@ -28,6 +32,14 @@ class ConsultationControllerWebMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data").value("consultation"));
+    }
+
+    @Test
+    void moduleInfoOk() throws Exception {
+        mockMvc.perform(get("/api/v1/consultation"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.module").value("consultation"));
     }
 
     @Test

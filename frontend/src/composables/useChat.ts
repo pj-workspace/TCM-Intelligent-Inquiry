@@ -1,4 +1,5 @@
 import { ref, nextTick } from 'vue'
+import { getErrorMessage } from '@/api/errors'
 import { openSseStream } from '@/api/sse'
 import { apiClient } from '@/api/client'
 import type { ApiResult } from '@/types/api'
@@ -123,7 +124,7 @@ export function useChat() {
           messages.value = messages.value.slice(0, -1)
         }
       } else {
-        error.value = e instanceof Error ? e.message : String(e)
+        error.value = getErrorMessage(e)
         messages.value = messages.value.slice(0, -1)
       }
       streamingContent.value = ''

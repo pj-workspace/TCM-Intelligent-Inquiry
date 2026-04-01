@@ -5,7 +5,7 @@ An AI-powered Traditional Chinese Medicine (TCM) intelligent inquiry system for 
 
 - **Backend (Spring Boot 3.3+, Java 17+)**: `cd backend && ./mvnw -q -DskipTests compile` (or `mvn -q -f backend/pom.xml -DskipTests compile`). Run: `./mvnw spring-boot:run` (port **8080**). SQLite file: `backend/data/tcm-inquiry.db` (directory created on startup). **Ollama** base URL defaults to `http://localhost:11434` in `backend/src/main/resources/application.yml`.
 - **Spring AI / Ollama**: Spring AI **1.0.x** uses the dependency `spring-ai-starter-model-ollama` (managed by `spring-ai-bom`; replaces the older `spring-ai-ollama-spring-boot-starter` milestone artifact).
-- **Frontend (Vue 3 + Vite)**: `cd frontend && npm install && npm run dev`. Dev server proxies `/api` → `http://localhost:8080`.
+- **Frontend (Vue 3 + Vite)**: `cd frontend && npm install && npm run dev`。Dev server 将 `/api` 代理到 `http://localhost:8080`。质量检查：`npm run lint`、`npm test`、`npm run build`。
 - **并行开发（多 Composer / fast）**：`backend/pom.xml` 与主 `application.yml` 仅由 **WS1（backend-platform）** 修改；业务仅限各自包：`modules/consultation|knowledge|literature|agent`、`frontend/`。各模块若新增 JPA 实体，须在本包内增加 `*JpaConfig`（`@EntityScan` + `@EnableJpaRepositories`），与咨询/知识/文献现状一致。
 
 ### 阶段一：中医问诊流式对话（已打通）
@@ -24,3 +24,41 @@ An AI-powered Traditional Chinese Medicine (TCM) intelligent inquiry system for 
   - `POST /bases/{kbId}/query`：JSON `{ message, topK?, similarityThreshold? }` → RAG 非流式回答。
 - **配置**：`application.yml` 中 `tcm.knowledge.*`（分块与检索默认参数）、`spring.servlet.multipart` 大小限制；文件落盘目录默认 `data/kb-files/{kbId}/`（在 `backend/data/` 下，已被 `.gitignore` 覆盖）。
 - **前端**：`frontend` 知识库页可选择/创建库、上传、删除与提问。
+
+## 部署与环境变量
+
+### 后端（Spring Boot）
+
+| 变量 / 配置 | 说明 |
+|-------------|------|
+| `spring.profiles.active` | 生产建议 `prod`，加载 [backend/src/main/resources/application-prod.yml](backend/src/main/resources/application-prod.yml) 示例 |
+| `tcm.api.expose-error-details` | `false` 时向客户端隐藏未处理异常的内部详情（对应环境变量 `TCM_API_EXPOSE_ERROR_DETAILS`） |
+| `tcm.api.cors-allowed-origin-patterns` | CORS 来源列表；生产勿长期使用 `*` |
+| `spring.ai.ollama.base-url` | Ollama 地址（如 `http://127.0.0.1:11434`）；环境变量 `SPRING_AI_OLLAMA_BASE_URL` |
+| `spring.datasource.url` | SQLite JDBC URL（默认 `jdbc:sqlite:file:./data/tcm-inquiry.db`） |
+
+### 前端（Vite 构建 / 开发）
+
+| 变量 | 说明 |
+|------|------|
+| `VITE_API_PROXY_TARGET` | 仅开发：`vite` 将 `/api` 代理到该地址（默认 `http://127.0.0.1:8080`） |
+
+生产环境通常由 Nginx/Caddy 将 `/api` 反向代理到后端，静态资源指向 `frontend` 的 `dist/`。
+
+### 容器示例
+
+自仓库根目录：
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+详见 [docker-compose.yml](docker-compose.yml) 注释（容器内访问 Ollama 需设置正确的 `SPRING_AI_OLLAMA_BASE_URL`）。
+
+镜像构建：[backend/Dockerfile](backend/Dockerfile)。
+
+## 安全与贡献
+
+- [SECURITY.md](SECURITY.md) — API 暴露选型、网关限流示例、漏洞报告方式。
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 构建命令与 PR 约定。

@@ -38,6 +38,12 @@ spring:
       # 视觉对话模型名：第二路 ChatModel 在 AiConfig（bean: visionChatModel）中显式配置为 qwen3-vl:2b
 
 tcm:
+  api:
+    # 生产环境请使用 spring.profiles.active=prod 或显式设为 false，避免 500 响应泄露内部异常信息
+    expose-error-details: true
+    # 生产环境请改为具体来源，例如 https://app.example.com
+    cors-allowed-origin-patterns:
+      - "*"
   knowledge:
     # TokenTextSplitter：单块约 tokens，重叠越小切块越碎
     chunk-size: 512

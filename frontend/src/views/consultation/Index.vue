@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch, nextTick } from 'vue'
 import { apiClient } from '@/api/client'
+import { getErrorMessage } from '@/api/errors'
 import type { ApiResult } from '@/types/api'
 import ChatBubble from '@/components/ChatBubble.vue'
 import { useChat } from '@/composables/useChat'
@@ -45,12 +46,12 @@ onMounted(async () => {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/consultation/health')
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
-    health.value = e instanceof Error ? `后端不可用: ${e.message}` : '后端不可用'
+    health.value = `后端不可用: ${getErrorMessage(e)}`
   }
   try {
     await newSession()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '创建会话失败'
+    error.value = getErrorMessage(e)
   }
 })
 
@@ -68,7 +69,7 @@ async function onSend() {
 function onNewChat() {
   if (loading.value) stop()
   newSession().catch((e) => {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = getErrorMessage(e)
   })
 }
 </script>

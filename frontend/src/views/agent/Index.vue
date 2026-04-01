@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { apiClient } from '@/api/client'
+import { getErrorMessage } from '@/api/errors'
 import type { ApiResult } from '@/types/api'
 import type { KnowledgeBase } from '@/types/knowledge'
 import type { AgentRunResponse } from '@/types/agent'
@@ -27,7 +28,7 @@ async function refreshHealth() {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/agent/health')
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
-    health.value = e instanceof Error ? e.message : '请求失败'
+    health.value = getErrorMessage(e)
   }
 }
 
@@ -56,7 +57,7 @@ async function runJsonOnly() {
     if (data.code !== 0) throw new Error(data.message)
     result.value = data.data ?? null
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = getErrorMessage(e)
   } finally {
     loading.value = false
   }
@@ -86,7 +87,7 @@ async function onImageChange(e: Event) {
     if (data.code !== 0) throw new Error(data.message)
     result.value = data.data ?? null
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = getErrorMessage(e)
   } finally {
     loading.value = false
   }

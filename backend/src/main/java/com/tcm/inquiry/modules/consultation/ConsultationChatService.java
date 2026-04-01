@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.tcm.inquiry.config.TcmApiProperties;
 import com.tcm.inquiry.modules.consultation.dto.ConsultationChatRequest;
 import com.tcm.inquiry.modules.consultation.entity.ChatMessage;
 import com.tcm.inquiry.modules.consultation.repository.ChatMessageRepository;
@@ -39,6 +40,7 @@ public class ConsultationChatService {
     private final ChatMessageRepository chatMessageRepository;
     private final ConsultationMessageStore consultationMessageStore;
     private final Executor sseAsyncExecutor;
+    private final TcmApiProperties apiProperties;
 
     @Value("${spring.ai.ollama.chat.options.model:deepseek-r1:8b}")
     private String defaultChatModelName;
@@ -48,12 +50,14 @@ public class ConsultationChatService {
             ChatSessionRepository chatSessionRepository,
             ChatMessageRepository chatMessageRepository,
             ConsultationMessageStore consultationMessageStore,
-            @Qualifier("sseAsyncExecutor") Executor sseAsyncExecutor) {
+            @Qualifier("sseAsyncExecutor") Executor sseAsyncExecutor,
+            TcmApiProperties apiProperties) {
         this.chatModel = chatModel;
         this.chatSessionRepository = chatSessionRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.consultationMessageStore = consultationMessageStore;
         this.sseAsyncExecutor = sseAsyncExecutor;
+        this.apiProperties = apiProperties;
     }
 
     /**
@@ -115,10 +119,7 @@ public class ConsultationChatService {
                                                 emitter.send(
                                                         SseEmitter.event()
                                                                 .name("error")
-                                                                .data(
-                                                                        ex.getMessage() != null
-                                                                                ? ex.getMessage()
-                                                                                : "stream error"));
+                                                                .data(streamErrorMessage(ex)));
                                             } catch (IOException ignored) {
                                                 // ignore
                                             }
@@ -177,5 +178,12 @@ public class ConsultationChatService {
             messages.add(new AssistantMessage(row.getAssistantMessage()));
         }
         return messages;
+    }
+
+    private String streamErrorMessage(Throwable ex) {
+        if (apiProperties.isExposeErrorDetails()) {
+            return ex.getMessage() != null ? ex.getMessage() : "stream error";
+        }
+        return "stream error";
     }
 }

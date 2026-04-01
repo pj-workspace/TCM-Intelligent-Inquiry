@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { apiClient } from '@/api/client'
+import { getErrorMessage } from '@/api/errors'
 import type { ApiResult } from '@/types/api'
 import type { KnowledgeBase, KnowledgeFileView, KnowledgeQueryResponse } from '@/types/knowledge'
 import {
@@ -32,7 +33,7 @@ async function refreshHealth() {
     const { data } = await apiClient.get<ApiResult<string>>('/v1/knowledge/health')
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
-    health.value = e instanceof Error ? e.message : '请求失败'
+    health.value = getErrorMessage(e)
   }
 }
 
@@ -95,7 +96,7 @@ async function onFileChange(e: Event) {
     ingestMsg.value = `已入库：${data.data?.originalFilename ?? ''}`
     await loadFiles()
   } catch (e) {
-    ingestMsg.value = e instanceof Error ? e.message : '上传失败'
+    ingestMsg.value = getErrorMessage(e)
   } finally {
     uploading.value = false
   }
@@ -131,7 +132,7 @@ async function runQuery() {
       ragSources.value = r.sources ?? []
     }
   } catch (e) {
-    ragError.value = e instanceof Error ? e.message : String(e)
+    ragError.value = getErrorMessage(e)
   } finally {
     ragLoading.value = false
   }
@@ -146,7 +147,7 @@ onMounted(async () => {
   try {
     await loadBases()
   } catch (e) {
-    ingestMsg.value = e instanceof Error ? e.message : '加载失败'
+    ingestMsg.value = getErrorMessage(e)
   }
 })
 </script>

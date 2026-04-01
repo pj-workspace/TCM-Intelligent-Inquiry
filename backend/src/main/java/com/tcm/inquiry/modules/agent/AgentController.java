@@ -1,6 +1,7 @@
 package com.tcm.inquiry.modules.agent;
 
-import org.springframework.http.HttpStatus;
+import java.util.Map;
+
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,7 +52,11 @@ public class AgentController {
     }
 
     @GetMapping({"", "/"})
-    public ResponseEntity<ApiResult<Void>> stub() {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(R.notImplemented());
+    public ResponseEntity<ApiResult<Map<String, String>>> moduleInfo() {
+        return ResponseEntity.ok(
+                R.ok(
+                        Map.of(
+                                "module", "agent",
+                                "health", "/api/v1/agent/health")));
     }
 }

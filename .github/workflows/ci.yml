@@ -7,8 +7,25 @@ on:
     branches: [main, master]
 
 jobs:
+  backend-unit:
+    name: Backend unit tests (no Ollama)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Maven test (exclude Ollama live IT)
+        working-directory: backend
+        run: ./mvnw -B test -ntp -Dtest='!com.tcm.inquiry.integration.OllamaLiveIntegrationTest'
+
   backend-ollama:
-    name: Backend (unit + Ollama live IT)
+    name: Backend Ollama live integration
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -42,11 +59,11 @@ jobs:
           ollama pull nomic-embed-text
           ollama list
 
-      - name: Maven test (OLLAMA_LIVE enables integration tests)
+      - name: Maven test (Ollama live IT only)
         working-directory: backend
         env:
           OLLAMA_LIVE: "true"
-        run: ./mvnw -B test -ntp
+        run: ./mvnw -B test -ntp -Dtest=com.tcm.inquiry.integration.OllamaLiveIntegrationTest
 
       - name: Stop Ollama
         if: always()
@@ -61,7 +78,7 @@ jobs:
           path: /tmp/ollama.log
 
   frontend:
-    name: Frontend build
+    name: Frontend lint, test, audit, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,8 +89,11 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: npm ci and build
+      - name: npm ci, lint, test, audit, build
         working-directory: frontend
         run: |
           npm ci
+          npm run lint
+          npm test
+          npm audit --audit-level=high --registry=https://registry.npmjs.org
           npm run build

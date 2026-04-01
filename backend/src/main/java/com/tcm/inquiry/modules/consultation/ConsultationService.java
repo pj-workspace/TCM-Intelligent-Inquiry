@@ -37,15 +37,12 @@ public class ConsultationService {
         return toResponse(saved);
     }
 
-    /** 占位：追加消息逻辑后续接入模型调用。 */
-    public void appendMessage(Long sessionId, String userText, String assistantText) {
-        // stub
-    }
-
-    /** 占位：列出会话；当前委托仓储返回全部，按更新时间倒序更合理可后续加排序参数。 */
+    /** 列出会话，按最近更新时间倒序。 */
     @Transactional(readOnly = true)
     public List<ChatSessionResponse> listSessions() {
-        return chatSessionRepository.findAll().stream().map(this::toResponse).collect(Collectors.toList());
+        return chatSessionRepository.findAllByOrderByUpdatedAtDesc().stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)

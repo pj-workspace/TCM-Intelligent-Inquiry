@@ -1,0 +1,17 @@
+# 示例编排：后端容器 + 数据卷。Ollama 需单独安装或在宿主机运行（默认连接 localhost:11434 在容器内不可用，请设置 SPRING_AI_OLLAMA_BASE_URL 指向可解析的主机名）。
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      TCM_API_EXPOSE_ERROR_DETAILS: "false"
+      # 示例：Ollama 在宿主机时（Linux 可尝试 host.docker.internal，视 Docker 版本而定）
+      # SPRING_AI_OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - tcm-backend-data:/app/data
+volumes:
+  tcm-backend-data:

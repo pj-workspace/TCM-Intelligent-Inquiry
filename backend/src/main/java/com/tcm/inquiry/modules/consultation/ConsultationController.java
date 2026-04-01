@@ -1,8 +1,8 @@
 package com.tcm.inquiry.modules.consultation;
 
 import java.util.List;
+import java.util.Map;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,8 +41,12 @@ public class ConsultationController {
     }
 
     @GetMapping({"", "/"})
-    public ResponseEntity<ApiResult<Void>> stub() {
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(R.notImplemented());
+    public ResponseEntity<ApiResult<Map<String, String>>> moduleInfo() {
+        return ResponseEntity.ok(
+                R.ok(
+                        Map.of(
+                                "module", "consultation",
+                                "health", "/api/v1/consultation/health")));
     }
 
     @GetMapping("/sessions")

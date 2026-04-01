@@ -1,3 +1,5 @@
+import { formatStreamHttpError } from './errors'
+
 export interface SseStreamOptions {
   method?: 'GET' | 'POST'
   headers?: Record<string, string>
@@ -29,12 +31,10 @@ export async function openSseStream(
 
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(
-      `SSE 请求失败: ${res.status} ${res.statusText}${text ? ` — ${text.slice(0, 500)}` : ''}`
-    )
+    throw new Error(formatStreamHttpError(res.status, res.statusText, text))
   }
   if (!res.body) {
-    throw new Error('SSE 响应无 body')
+    throw new Error('流式响应无内容，请稍后重试')
   }
 
   const reader = res.body.getReader()
