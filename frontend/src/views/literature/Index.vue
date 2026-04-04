@@ -10,9 +10,11 @@ import {
   deleteLiteratureDocument,
   getLiteratureHealth,
   listLiteratureCollectionFiles,
+  queryLiteratureCollection,
   uploadLiteratureFile,
 } from '@/api/modules/literature'
-import type { LiteratureFileView } from '@/types/literature'
+import DsAlert from '@/components/common/DsAlert.vue'
+import type { LiteratureFileView, LiteratureQueryResponse } from '@/types/literature'
 import {
   formatHealthStatus,
   isHealthStatusErr,
@@ -32,6 +34,14 @@ const msg = ref('')
 const chunkSize = ref(512)
 /** 与知识库相同：>0 时滑动窗口（码点），chunkSize 为窗口长度 */
 const chunkOverlap = ref(0)
+
+/** —— 检索试答：调用临时库非流式 query，不经过问诊会话，便于上传后立即验召回 —— */
+const probeQuestion = ref('')
+const probeTopK = ref(4)
+const probeSimilarity = ref(0)
+const probeLoading = ref(false)
+const probeError = ref<string | null>(null)
+const probeAnswer = ref<LiteratureQueryResponse | null>(null)
 
 async function refreshHealth() {
   try {
@@ -62,6 +72,9 @@ async function loadFiles() {
 
 watch(collectionId, () => {
   void loadFiles()
+  // 切换或清空临时库时丢弃上一次试答，避免将旧库的答案发在新库上下文下误读
+  probeAnswer.value = null
+  probeError.value = null
 })
 
 /**
@@ -174,6 +187,42 @@ function formatDate(iso: string) {
   }
 }
 
+/**
+ * 对当前 session 中的临时库发起向量检索 + 生成；参数语义与知识库试答、问诊文献模式一致。
+ */
+async function runLiteratureProbe() {
+  const cid = collectionId.value?.trim()
+  if (!cid) {
+    ElMessage.warning('请先上传文献以创建临时库，或从 session 恢复已有库')
+    return
+  }
+  const q = probeQuestion.value.trim()
+  if (!q) {
+    ElMessage.warning('请输入试答问题')
+    return
+  }
+  probeLoading.value = true
+  probeError.value = null
+  probeAnswer.value = null
+  try {
+    const { data } = await queryLiteratureCollection(
+      cid,
+      {
+        message: q,
+        topK: probeTopK.value,
+        similarityThreshold: probeSimilarity.value,
+      },
+      silentAxiosConfig
+    )
+    if (data.code !== 0) throw new Error(data.message || '试答失败')
+    probeAnswer.value = data.data ?? null
+  } catch (e) {
+    probeError.value = getErrorMessage(e)
+  } finally {
+    probeLoading.value = false
+  }
+}
+
 /** 同库各行 expiresAt 对齐，取首条展示即可 */
 const collectionExpiresLabel = computed(() => {
   const row = files.value.find((f) => f.expiresAt)
@@ -251,7 +300,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
     </h2>
     <p class="ds-lead lit-lead">
       上传与解析文献向量（进入 Redis Stack，与知识库 metadata 隔离）；服务端按配置对临时库做 TTL
-      滑动续期与定时清理。问诊请选择「文献库」模式并指定本页临时库 ID。若当前已建临时库，切换到其它路由时会询问是否立即删除服务端整库（亦可保留至 TTL）；关闭或刷新本标签页时会尽力通过浏览器 Beacon 通知服务端释放（与 TTL 互补）。
+      滑动续期与定时清理。下方「检索试答」可在本页单次验库。问诊请选择「文献库」模式并指定本页临时库 ID。若当前已建临时库，切换到其它路由时会询问是否立即删除服务端整库（亦可保留至 TTL）；关闭或刷新本标签页时会尽力通过浏览器 Beacon 通知服务端释放（与 TTL 互补）。
     </p>
     <p
       class="ds-status lit-health"
@@ -303,6 +352,92 @@ onBeforeRouteLeave(async (_to, _from, next) => {
       >
         {{ collectionExpiresLabel }}
       </p>
+    </section>
+
+    <section class="ds-card lit-probe-card">
+      <h3 class="ds-h3 ds-card__title">
+        检索试答
+      </h3>
+      <p class="ds-hint lit-probe-hint">
+        调用临时库非流式 RAG 接口，仅验证当前已入库文献的召回与回答；0 表示相似度阈值不过滤。结果不写入问诊会话。
+      </p>
+      <label class="ds-field lit-probe-field">
+        试答问题
+        <textarea
+          v-model="probeQuestion"
+          class="ds-textarea lit-probe-textarea"
+          rows="3"
+          placeholder="例如：摘要中提到的方剂组成是什么？"
+          :disabled="probeLoading || !collectionId"
+          aria-label="文献临时库试答问题"
+        />
+      </label>
+      <div class="ds-row lit-probe-row">
+        <label class="ds-field lit-field-inline">
+          topK
+          <input
+            v-model.number="probeTopK"
+            class="ds-input ds-input--narrow"
+            type="number"
+            min="1"
+            max="20"
+            step="1"
+            :disabled="probeLoading || !collectionId"
+          >
+        </label>
+        <label class="ds-field lit-field-inline">
+          相似度阈值（0=不过滤）
+          <input
+            v-model.number="probeSimilarity"
+            class="ds-input ds-input--narrow"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            max="1"
+            step="0.05"
+            :disabled="probeLoading || !collectionId"
+          >
+        </label>
+        <button
+          type="button"
+          class="ds-btn ds-btn--primary lit-probe-btn"
+          :disabled="probeLoading || !collectionId"
+          @click="runLiteratureProbe"
+        >
+          {{ probeLoading ? '生成中…' : '发起试答' }}
+        </button>
+      </div>
+      <DsAlert
+        v-if="probeError"
+        class="lit-probe-alert"
+      >
+        {{ probeError }}
+      </DsAlert>
+      <div
+        v-if="probeLoading"
+        class="lit-probe-skeleton"
+        role="status"
+        aria-busy="true"
+        aria-label="试答生成中"
+      >
+        <div class="lit-probe-skeleton__line" />
+        <div class="lit-probe-skeleton__line lit-probe-skeleton__line--mid" />
+        <div class="lit-probe-skeleton__line lit-probe-skeleton__line--short" />
+      </div>
+      <div
+        v-else-if="probeAnswer"
+        class="lit-probe-result"
+      >
+        <p class="lit-probe-meta">
+          召回片段：{{ probeAnswer.retrievedChunks }} 条
+          <template v-if="probeAnswer.sources?.length">
+            ；来源：{{ probeAnswer.sources.join('、') }}
+          </template>
+        </p>
+        <div class="lit-probe-answer">
+          {{ probeAnswer.answer }}
+        </div>
+      </div>
     </section>
 
     <section class="ds-card">
@@ -478,6 +613,78 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 }
 .lit-health {
   margin-bottom: 0.75rem;
+}
+.lit-probe-card {
+  margin-top: 0;
+}
+.lit-probe-hint {
+  margin-top: -0.15rem;
+}
+.lit-probe-field {
+  margin-top: 0.65rem;
+  max-width: min(100%, 40rem);
+}
+.lit-probe-textarea {
+  margin-top: 0.35rem;
+  width: 100%;
+  max-width: min(100%, 40rem);
+}
+.lit-probe-row {
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+}
+.lit-probe-btn {
+  flex-shrink: 0;
+}
+.lit-probe-alert {
+  margin-top: 0.75rem;
+}
+.lit-probe-skeleton {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.lit-probe-skeleton__line {
+  height: 1rem;
+  border-radius: 0.35rem;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-elevated) 0%,
+    var(--color-border) 50%,
+    var(--color-surface-elevated) 100%
+  );
+  background-size: 200% 100%;
+  animation: lit-shimmer 1.2s ease-in-out infinite;
+}
+.lit-probe-skeleton__line--mid {
+  width: 92%;
+}
+.lit-probe-skeleton__line--short {
+  width: 55%;
+}
+.lit-probe-result {
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+.lit-probe-meta {
+  margin: 0 0 0.65rem;
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+  line-height: 1.45;
+}
+.lit-probe-answer {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text);
 }
 .lit-meta {
   display: flex;

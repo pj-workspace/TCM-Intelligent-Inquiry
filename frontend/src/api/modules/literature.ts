@@ -2,7 +2,7 @@ import type { AxiosRequestConfig } from 'axios'
 
 import { apiClient } from '@/api/core/client'
 import type { ApiResult } from '@/types/api'
-import type { LiteratureFileView } from '@/types/literature'
+import type { LiteratureFileView, LiteratureQueryResponse } from '@/types/literature'
 
 export function getLiteratureHealth(config?: AxiosRequestConfig) {
   return apiClient.get<ApiResult<string>>('/v1/literature/health', config)
@@ -46,6 +46,25 @@ export function deleteLiteratureCollection(
 ) {
   return apiClient.delete(
     `/v1/literature/collections/${encodeURIComponent(collectionId)}`,
+    config
+  )
+}
+
+/**
+ * 对指定临时文献库发起一次非流式 RAG 问答（与智能问诊中文献模式同源接口），不写入问诊会话。
+ */
+export function queryLiteratureCollection(
+  collectionId: string,
+  body: {
+    message: string
+    topK?: number
+    similarityThreshold?: number
+  },
+  config?: AxiosRequestConfig
+) {
+  return apiClient.post<ApiResult<LiteratureQueryResponse>>(
+    `/v1/literature/collections/${encodeURIComponent(collectionId)}/query`,
+    body,
     config
   )
 }
