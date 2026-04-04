@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { onBeforeRouteLeave } from 'vue-router'
 import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import { validateIngestChunkParams } from '@/utils/chunkUploadParams'
@@ -166,6 +167,51 @@ const collectionExpiresLabel = computed(() => {
 onMounted(async () => {
   await refreshHealth()
 })
+
+/**
+ * 离开文献管理路由时：若存在活跃临时库，提示是否立即删除服务端向量与元数据（否则仍依赖 TTL）。
+ * 上传进行中禁止跳转，避免半途中断导致状态不一致。
+ */
+onBeforeRouteLeave(async (_to, _from, next) => {
+  if (uploading.value) {
+    ElMessage.warning('正在上传文献，请等待完成后再切换页面')
+    next(false)
+    return
+  }
+  const cid = collectionId.value
+  if (!cid) {
+    next()
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '当前已关联临时文献库，向量仍占用 Redis 与服务端元数据（至 TTL 或定时任务清理）。离开本页前是否立即删除整库？',
+      '离开文献管理',
+      {
+        distinguishCancelAndClose: true,
+        confirmButtonText: '删除服务端整库并离开',
+        cancelButtonText: '保留临时库并离开',
+        type: 'warning',
+      }
+    )
+    try {
+      await deleteLiteratureCollection(cid, silentAxiosConfig)
+      collectionId.value = null
+      files.value = []
+    } catch (e) {
+      ElMessage.error(getErrorMessage(e))
+      next(false)
+      return
+    }
+    next()
+  } catch (action: unknown) {
+    if (action === 'cancel') {
+      next()
+      return
+    }
+    next(false)
+  }
+})
 </script>
 
 <template>
@@ -177,7 +223,7 @@ onMounted(async () => {
     </h2>
     <p class="ds-lead lit-lead">
       上传与解析文献向量（进入 Redis Stack，与知识库 metadata 隔离）；服务端按配置对临时库做 TTL
-      滑动续期与定时清理。问诊请选择「文献库」模式并指定本页临时库 ID。
+      滑动续期与定时清理。问诊请选择「文献库」模式并指定本页临时库 ID。若当前已建临时库，切换到其它路由时会询问是否立即删除服务端整库（亦可保留至 TTL）。
     </p>
     <p
       class="ds-status lit-health"
