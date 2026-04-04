@@ -51,6 +51,61 @@
   --ds-sticky-nav-h: var(--ds-header-height);
 }
 
+/**
+ * 深色模式：与 Element Plus `html.dark` + `dark/css-vars.css` 对齐，
+ * 覆盖本项目的语义色，避免壳层仍停留在浅色背景。
+ */
+html.dark {
+  color-scheme: dark;
+  --color-primary: #a78bfa;
+  --color-primary-hover: #c4b5fd;
+  --color-primary-muted: rgba(167, 139, 250, 0.18);
+  --color-secondary: #8b5cf6;
+  --color-cta: #34d399;
+  --color-cta-hover: #6ee7b7;
+  --color-danger: #f87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.14);
+  --color-warn-bg: rgba(251, 191, 36, 0.14);
+  --color-warn-border: #fbbf24;
+  --color-bg: #0c0c0f;
+  --color-surface: #14141a;
+  --color-surface-elevated: #1a1a22;
+  --color-text: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-muted: #64748b;
+  --color-border: rgba(148, 163, 184, 0.2);
+  --color-border-strong: rgba(167, 139, 250, 0.32);
+  --color-border-neutral: rgba(148, 163, 184, 0.26);
+  --color-border-subtle: rgba(30, 41, 59, 0.55);
+  --color-option-hover: rgba(167, 139, 250, 0.14);
+  --shadow-dropdown:
+    0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.35), 0 4px 20px rgba(0, 0, 0, 0.25);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --focus-ring: 0 0 0 3px rgba(167, 139, 250, 0.45);
+}
+
+html.dark .ds-header {
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+html.dark .ds-markdown .markdown-alert {
+  background: rgba(30, 41, 59, 0.75);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+html.dark .ds-thread {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+html.dark .ds-thread::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+html.dark .ds-thread::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
 /* —— 跳到主内容（键盘 / 辅助技术，不与侧栏品牌层叠） —— */
 .ds-skip-link {
   position: absolute;

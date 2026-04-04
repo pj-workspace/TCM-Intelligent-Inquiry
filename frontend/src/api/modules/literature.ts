@@ -1,36 +1,58 @@
+import type { AxiosRequestConfig } from 'axios'
+
 import { apiClient } from '@/api/core/client'
 import type { ApiResult } from '@/types/api'
 import type { LiteratureFileView } from '@/types/literature'
 
-export function getLiteratureHealth() {
-  return apiClient.get<ApiResult<string>>('/v1/literature/health')
+export function getLiteratureHealth(config?: AxiosRequestConfig) {
+  return apiClient.get<ApiResult<string>>('/v1/literature/health', config)
 }
 
-export function listLiteratureCollectionFiles(collectionId: string) {
+export function listLiteratureCollectionFiles(
+  collectionId: string,
+  config?: AxiosRequestConfig
+) {
   return apiClient.get<ApiResult<LiteratureFileView[]>>(
-    `/v1/literature/collections/${encodeURIComponent(collectionId)}/files`
+    `/v1/literature/collections/${encodeURIComponent(collectionId)}/files`,
+    config
   )
 }
 
-export function uploadLiteratureFile(formData: FormData) {
+export function uploadLiteratureFile(
+  formData: FormData,
+  config?: AxiosRequestConfig
+) {
   return apiClient.post<ApiResult<LiteratureFileView>>(
     '/v1/literature/uploads',
-    formData
+    formData,
+    config
   )
 }
 
-export function deleteLiteratureDocument(collectionId: string, fileUuid: string) {
+export function deleteLiteratureDocument(
+  collectionId: string,
+  fileUuid: string,
+  config?: AxiosRequestConfig
+) {
   return apiClient.delete(
-    `/v1/literature/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(fileUuid)}`
+    `/v1/literature/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(fileUuid)}`,
+    config
   )
 }
 
-export function deleteLiteratureCollection(collectionId: string) {
+export function deleteLiteratureCollection(
+  collectionId: string,
+  config?: AxiosRequestConfig
+) {
   return apiClient.delete(
-    `/v1/literature/collections/${encodeURIComponent(collectionId)}`
+    `/v1/literature/collections/${encodeURIComponent(collectionId)}`,
+    config
   )
 }
 
-export function listLiteratureUploads() {
-  return apiClient.get<ApiResult<LiteratureFileView[]>>('/v1/literature/uploads')
+export function listLiteratureUploads(config?: AxiosRequestConfig) {
+  return apiClient.get<ApiResult<LiteratureFileView[]>>(
+    '/v1/literature/uploads',
+    config
+  )
 }

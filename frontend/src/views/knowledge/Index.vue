@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import DsSelect from '@/components/common/DsSelect.vue'
 import type { DsSelectOption } from '@/components/common/DsSelect.vue'
@@ -41,7 +42,7 @@ const baseSelectOptions = computed<DsSelectOption[]>(() => {
 
 async function refreshHealth() {
   try {
-    const { data } = await getKnowledgeHealth()
+    const { data } = await getKnowledgeHealth(silentAxiosConfig)
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
     health.value = getErrorMessage(e)
@@ -49,7 +50,7 @@ async function refreshHealth() {
 }
 
 async function loadBases() {
-  const { data } = await listKnowledgeBases()
+  const { data } = await listKnowledgeBases(silentAxiosConfig)
   if (data.code !== 0) throw new Error(data.message)
   bases.value = data.data ?? []
   if (selectedBaseId.value == null && bases.value.length > 0) {
@@ -59,10 +60,13 @@ async function loadBases() {
 
 async function createBase() {
   ingestMsg.value = ''
-  const { data } = await createKnowledgeBase({
-    name: newBaseName.value.trim() || '未命名知识库',
-    embeddingModel: newBaseEmbed.value.trim() || 'bge-m3:latest',
-  })
+  const { data } = await createKnowledgeBase(
+    {
+      name: newBaseName.value.trim() || '未命名知识库',
+      embeddingModel: newBaseEmbed.value.trim() || 'bge-m3:latest',
+    },
+    silentAxiosConfig
+  )
   if (data.code !== 0) throw new Error(data.message)
   await loadBases()
   if (data.data) selectedBaseId.value = data.data.id
@@ -76,7 +80,10 @@ async function loadFiles() {
   }
   loadingFiles.value = true
   try {
-    const { data } = await listKnowledgeDocuments(selectedBaseId.value)
+    const { data } = await listKnowledgeDocuments(
+      selectedBaseId.value,
+      silentAxiosConfig
+    )
     if (data.code !== 0) throw new Error(data.message)
     files.value = data.data ?? []
   } finally {
@@ -106,7 +113,11 @@ async function onFileChange(e: Event) {
         if (chunkSize.value > 32) {
           fd.append('chunkSize', String(chunkSize.value))
         }
-        const { data } = await uploadKnowledgeDocument(selectedBaseId.value, fd)
+        const { data } = await uploadKnowledgeDocument(
+          selectedBaseId.value,
+          fd,
+          silentAxiosConfig
+        )
         if (data.code !== 0) throw new Error(data.message)
         ok++
       } catch (err) {
@@ -133,7 +144,11 @@ async function onFileChange(e: Event) {
 async function removeFile(fileUuid: string) {
   if (selectedBaseId.value == null) return
   if (!confirm('确定从该知识库删除此文档及其向量？')) return
-  await deleteKnowledgeDocument(selectedBaseId.value, fileUuid)
+  await deleteKnowledgeDocument(
+    selectedBaseId.value,
+    fileUuid,
+    silentAxiosConfig
+  )
   await loadFiles()
 }
 

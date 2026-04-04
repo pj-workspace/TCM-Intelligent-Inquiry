@@ -1,4 +1,5 @@
 import { ref, nextTick } from 'vue'
+import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import { openSseStream } from '@/api/core/sse'
 import {
@@ -69,7 +70,7 @@ export function useChat() {
   }
 
   async function fetchSessions() {
-    const { data } = await listConsultationSessions()
+    const { data } = await listConsultationSessions(silentAxiosConfig)
     if (data.code !== 0) {
       throw new Error(data.message || '加载会话列表失败')
     }
@@ -78,7 +79,7 @@ export function useChat() {
 
   async function ensureSession() {
     if (sessionId.value != null) return
-    const { data } = await createConsultationSession()
+    const { data } = await createConsultationSession(silentAxiosConfig)
     if (data.code !== 0 || !data.data) {
       throw new Error(data.message || '创建会话失败')
     }
@@ -87,7 +88,10 @@ export function useChat() {
 
   async function loadHistory() {
     if (sessionId.value == null) return
-    const { data } = await listConsultationMessages(sessionId.value)
+    const { data } = await listConsultationMessages(
+      sessionId.value,
+      silentAxiosConfig
+    )
     if (data.code !== 0) {
       throw new Error(data.message || '加载历史失败')
     }
@@ -128,7 +132,7 @@ export function useChat() {
   }
 
   async function deleteSession(id: number) {
-    await deleteConsultationSession(id)
+    await deleteConsultationSession(id, silentAxiosConfig)
     await fetchSessions()
     if (sessionId.value === id) {
       const next = sessions.value[0]
@@ -328,7 +332,7 @@ export function useChat() {
             )
           }
         }
-        const res = await postAgentRunMultipart(fd)
+        const res = await postAgentRunMultipart(fd, silentAxiosConfig)
         data = res.data
       } else {
         const body: Record<string, unknown> = { task: text }
@@ -340,7 +344,7 @@ export function useChat() {
             body.ragSimilarityThreshold = opts.ragSimilarityThreshold
           }
         }
-        const res = await postAgentRunJson(body)
+        const res = await postAgentRunJson(body, silentAxiosConfig)
         data = res.data
       }
       if (data.code !== 0) throw new Error(data.message || '智能体调用失败')

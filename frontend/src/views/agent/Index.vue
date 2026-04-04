@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import DsAlert from '@/components/common/DsAlert.vue'
 import DsSelect from '@/components/common/DsSelect.vue'
@@ -36,7 +37,7 @@ const defaultKbOptions = computed<DsSelectOption[]>(() => [
 
 async function refreshHealth() {
   try {
-    const { data } = await getAgentHealth()
+    const { data } = await getAgentHealth(silentAxiosConfig)
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
     health.value = getErrorMessage(e)
@@ -45,7 +46,7 @@ async function refreshHealth() {
 
 async function loadBases() {
   try {
-    const { data } = await listKnowledgeBases()
+    const { data } = await listKnowledgeBases(silentAxiosConfig)
     if (data.code !== 0) throw new Error(data.message)
     bases.value = data.data ?? []
   } catch {
@@ -57,7 +58,7 @@ async function loadConfig() {
   loadErr.value = null
   loading.value = true
   try {
-    const { data } = await getAgentConfig()
+    const { data } = await getAgentConfig(silentAxiosConfig)
     if (data.code !== 0) throw new Error(data.message)
     const c = data.data
     if (c) {
@@ -79,13 +80,16 @@ async function saveConfig() {
   saveErr.value = null
   loading.value = true
   try {
-    const { data } = await updateAgentConfig({
-      displayName: displayName.value.trim() || '中医智能体',
-      textSystemPrompt: textSystemPrompt.value.trim() || null,
-      visionSystemPrompt: visionSystemPrompt.value.trim() || null,
-      visionModelName: visionModelName.value.trim() || null,
-      defaultKnowledgeBaseId: defaultKnowledgeBaseId.value,
-    })
+    const { data } = await updateAgentConfig(
+      {
+        displayName: displayName.value.trim() || '中医智能体',
+        textSystemPrompt: textSystemPrompt.value.trim() || null,
+        visionSystemPrompt: visionSystemPrompt.value.trim() || null,
+        visionModelName: visionModelName.value.trim() || null,
+        defaultKnowledgeBaseId: defaultKnowledgeBaseId.value,
+      },
+      silentAxiosConfig
+    )
     if (data.code !== 0) throw new Error(data.message)
     saveMsg.value = '已保存'
     await loadConfig()

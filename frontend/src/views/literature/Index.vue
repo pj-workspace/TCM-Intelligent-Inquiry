@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import {
   deleteLiteratureCollection,
@@ -25,7 +26,7 @@ const chunkSize = ref(512)
 
 async function refreshHealth() {
   try {
-    const { data } = await getLiteratureHealth()
+    const { data } = await getLiteratureHealth(silentAxiosConfig)
     health.value = formatHealthStatus(data.code, data.message ?? '')
   } catch (e) {
     health.value = getErrorMessage(e)
@@ -39,7 +40,10 @@ async function loadFiles() {
   }
   loadingFiles.value = true
   try {
-    const { data } = await listLiteratureCollectionFiles(collectionId.value)
+    const { data } = await listLiteratureCollectionFiles(
+      collectionId.value,
+      silentAxiosConfig
+    )
     if (data.code !== 0) throw new Error(data.message)
     files.value = data.data ?? []
   } finally {
@@ -77,7 +81,7 @@ async function onFileChange(e: Event) {
         if (chunkSize.value > 32) {
           fd.append('chunkSize', String(chunkSize.value))
         }
-        const { data } = await uploadLiteratureFile(fd)
+        const { data } = await uploadLiteratureFile(fd, silentAxiosConfig)
         if (data.code !== 0) throw new Error(data.message)
         const row = data.data
         if (row?.tempCollectionId) {
@@ -109,14 +113,18 @@ async function onFileChange(e: Event) {
 async function removeFile(fileUuid: string) {
   if (!collectionId.value) return
   if (!confirm('确定从当前文献库删除此文件及其向量？')) return
-  await deleteLiteratureDocument(collectionId.value, fileUuid)
+  await deleteLiteratureDocument(
+    collectionId.value,
+    fileUuid,
+    silentAxiosConfig
+  )
   await loadFiles()
 }
 
 async function purgeCollection() {
   if (!collectionId.value) return
   if (!confirm('确定删除当前临时文献库及其向量？')) return
-  await deleteLiteratureCollection(collectionId.value)
+  await deleteLiteratureCollection(collectionId.value, silentAxiosConfig)
   collectionId.value = null
   files.value = []
   msg.value = '已清空临时库'

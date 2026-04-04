@@ -8,6 +8,7 @@ import {
   watch,
   nextTick,
 } from 'vue'
+import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import { getAgentConfig } from '@/api/modules/agent'
 import { getConsultationHealth } from '@/api/modules/consultation'
@@ -198,7 +199,7 @@ const streamingRagLog = computed(() => {
 
 async function loadKnowledgeBases() {
   try {
-    const { data } = await listKnowledgeBases()
+    const { data } = await listKnowledgeBases(silentAxiosConfig)
     if (data.code !== 0) return
     knowledgeBases.value = data.data ?? []
   } catch {
@@ -208,7 +209,7 @@ async function loadKnowledgeBases() {
 
 async function loadLiteratureCollections() {
   try {
-    const { data } = await listLiteratureUploads()
+    const { data } = await listLiteratureUploads(silentAxiosConfig)
     if (data.code !== 0) return
     const files = data.data ?? []
     const seen = new Set<string>()
@@ -228,7 +229,7 @@ async function loadLiteratureCollections() {
 
 async function loadAgentDefaults() {
   try {
-    const { data } = await getAgentConfig()
+    const { data } = await getAgentConfig(silentAxiosConfig)
     if (data.code !== 0 || !data.data) return
     const kb = data.data.defaultKnowledgeBaseId
     if (kb != null && visionKnowledgeBaseId.value == null) {
@@ -274,7 +275,7 @@ function toggleSettings() {
 onMounted(async () => {
   document.addEventListener('click', closeSettingsOnOutside)
   try {
-    const { data } = await getConsultationHealth()
+    const { data } = await getConsultationHealth(silentAxiosConfig)
     const line = formatHealthStatus(data.code, data.message ?? '')
     health.value = isHealthStatusErr(line) ? line : ''
   } catch (e) {
