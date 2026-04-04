@@ -59,6 +59,8 @@ const settingsWrapRef = ref<HTMLElement | null>(null)
 const threadEl = ref<HTMLElement | null>(null)
 const input = ref('')
 const temperature = ref(0.7)
+/** 与后端 DEFAULT_TOP_P 保持一致，用户可在高级设置中调整 */
+const topP = ref(0.9)
 const maxHistoryTurns = ref(10)
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const ragTopK = ref(4)
@@ -245,6 +247,7 @@ function buildOmniPayload(skipAppendUser = false): OmniSendPayload {
     literatureThreshold: literatureThreshold.value,
     visionImages: m === 'vision' ? [...pendingImages.value] : [],
     temperature: temperature.value,
+    topP: topP.value,
     maxHistoryTurns: maxHistoryTurns.value,
     ragTopK: ragTopK.value,
     ragSimilarityThreshold: ragSimilarityThreshold.value,
@@ -512,6 +515,19 @@ function canSend() {
                     min="0"
                     max="2"
                     step="0.1"
+                    :disabled="loading"
+                  >
+                </label>
+                <label class="ds-field">
+                  Top-P
+                  <input
+                    v-model.number="topP"
+                    class="ds-input ds-input--narrow"
+                    type="number"
+                    inputmode="decimal"
+                    min="0.000001"
+                    max="1"
+                    step="0.05"
                     :disabled="loading"
                   >
                 </label>

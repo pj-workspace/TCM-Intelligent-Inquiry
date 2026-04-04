@@ -2,9 +2,14 @@ package com.tcm.inquiry.modules.consultation.service;
 
 import java.time.Instant;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tcm.inquiry.modules.consultation.entity.ChatMessage;
 import com.tcm.inquiry.modules.consultation.entity.ChatSession;
 import com.tcm.inquiry.modules.consultation.repository.ChatMessageRepository;
@@ -15,6 +20,11 @@ import com.tcm.inquiry.modules.consultation.repository.ChatSessionRepository;
  */
 @Service
 public class ConsultationMessageStore {
+
+    private static final Logger log = LoggerFactory.getLogger(ConsultationMessageStore.class);
+
+    /** 用于将 topP 等扩展采样参数序列化到 {@link ChatMessage#getGenerationParamsJson()}，便于审计与排障。 */
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private static final String DEFAULT_SESSION_TITLE = "新会话";
     private static final int TITLE_MAX_LEN = 30;
@@ -35,7 +45,8 @@ public class ConsultationMessageStore {
             String userText,
             String assistantText,
             String modelName,
-            Double temperature) {
+            Double temperature,
+            Double topP) {
         ChatSession session =
                 chatSessionRepository.findById(sessionId).orElseThrow();
 
@@ -50,6 +61,16 @@ public class ConsultationMessageStore {
         row.setAssistantMessage(assistantText);
         row.setModelName(modelName);
         row.setTemperature(temperature);
+        // 将本轮实际使用的 Top-P 写入扩展 JSON，与 temperature 列并存，便于对照 Ollama 请求参数。
+        if (topP != null) {
+            try {
+                ObjectNode node = OBJECT_MAPPER.createObjectNode();
+                node.put("topP", topP);
+                row.setGenerationParamsJson(OBJECT_MAPPER.writeValueAsString(node));
+            } catch (JsonProcessingException e) {
+                log.warn("序列化 generationParamsJson 失败 sessionId={}", sessionId, e);
+            }
+        }
         row.setCreatedAt(Instant.now());
         chatMessageRepository.save(row);
 

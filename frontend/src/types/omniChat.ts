@@ -13,6 +13,8 @@ export type OmniSendPayload = {
   /** 视觉模式附图（顺序会传给模型；可为多张） */
   visionImages: File[]
   temperature: number
+  /** Ollama top_p，与后端 ConsultationChatRequest#topP 对应 */
+  topP: number
   maxHistoryTurns: number
   ragTopK: number
   ragSimilarityThreshold: number

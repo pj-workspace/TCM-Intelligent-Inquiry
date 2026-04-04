@@ -39,6 +39,8 @@ public class ConsultationChatService {
     private static final Logger log = LoggerFactory.getLogger(ConsultationChatService.class);
 
     private static final double DEFAULT_TEMPERATURE = 0.7;
+    /** Ollama 常用默认 top_p，与官方示例一致；客户端未传时使用。 */
+    private static final double DEFAULT_TOP_P = 0.9;
     private static final int DEFAULT_MAX_HISTORY_TURNS = 10;
 
     private final ChatModel chatModel;
@@ -82,6 +84,11 @@ public class ConsultationChatService {
 
         double temperature =
                 req.getTemperature() != null ? req.getTemperature() : DEFAULT_TEMPERATURE;
+        // 解析 top_p：显式传入则约束在 (0,1]，避免 Ollama 拒参或异常采样行为
+        double topP =
+                req.getTopP() != null
+                        ? Math.min(1.0, Math.max(1e-6, req.getTopP()))
+                        : DEFAULT_TOP_P;
         int maxTurns =
                 req.getMaxHistoryTurns() != null
                         ? Math.max(1, req.getMaxHistoryTurns())
@@ -150,12 +157,14 @@ public class ConsultationChatService {
         ChatClient chatClient =
                 ChatClient.builder(chatModel).defaultSystem(ConsultationPrompts.SYSTEM).build();
 
+        // 将 temperature / top_p 一并下推到 Ollama Chat API，保证前端滑块与真实推理一致
         var streamSpec =
                 chatClient
                         .prompt()
                         .options(
                                 OllamaOptions.builder()
                                         .temperature(temperature)
+                                        .topP(topP)
                                         .build())
                         .messages(historyMessages)
                         .user(modelUserInput)
@@ -214,7 +223,8 @@ public class ConsultationChatService {
                                                                     userInput,
                                                                     fullReply,
                                                                     defaultChatModelName,
-                                                                    temperature);
+                                                                    temperature,
+                                                                    topP);
                                                         } catch (Exception ex) {
                                                             log.error(
                                                                     "Failed to persist consultation turn sessionId={}",

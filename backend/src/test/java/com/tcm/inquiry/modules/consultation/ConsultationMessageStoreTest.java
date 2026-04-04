@@ -41,7 +41,7 @@ class ConsultationMessageStoreTest {
         ChatSession saved = chatSessionRepository.save(session);
 
         consultationMessageStore.saveTurn(
-                saved.getId(), "hello", "hi there", "m1", 0.5);
+                saved.getId(), "hello", "hi there", "m1", 0.5, 0.9);
 
         List<ChatMessage> rows = chatMessageRepository.findAll();
         assertThat(rows).hasSize(1);
@@ -52,6 +52,10 @@ class ConsultationMessageStoreTest {
                 chatSessionRepository.findById(saved.getId()).orElseThrow();
         assertThat(reloaded.getUpdatedAt()).isNotNull();
         assertThat(reloaded.getTitle()).isEqualTo("hello");
+        assertThat(rows.get(0).getGenerationParamsJson())
+                .isNotNull()
+                .contains("topP")
+                .contains("0.9");
     }
 
     @Test
@@ -61,10 +65,12 @@ class ConsultationMessageStoreTest {
         ChatSession saved = chatSessionRepository.save(session);
 
         consultationMessageStore.saveTurn(
-                saved.getId(), "next user", "reply", "m", 0.5);
+                saved.getId(), "next user", "reply", "m", 0.5, null);
 
         ChatSession reloaded =
                 chatSessionRepository.findById(saved.getId()).orElseThrow();
         assertThat(reloaded.getTitle()).isEqualTo("已有标题");
+        List<ChatMessage> rows = chatMessageRepository.findAll();
+        assertThat(rows.get(0).getGenerationParamsJson()).isNull();
     }
 }

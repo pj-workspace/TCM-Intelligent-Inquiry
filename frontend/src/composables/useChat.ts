@@ -24,6 +24,8 @@ export const CONSULTATION_LAST_SESSION_KEY = 'tcm-consultation-last-session-id'
 
 export type SendOptions = {
   temperature?: number
+  /** 核采样 Top-P；不传则后端使用默认（如 0.9） */
+  topP?: number
   maxHistoryTurns?: number
   scrollRoot?: HTMLElement | null
   /** 可选：问诊时检索该知识库摘录注入模型（与智能体 RAG 同源）。 */
@@ -166,6 +168,7 @@ export function useChat() {
       sessionId: sessionId.value,
       message: text,
       temperature: opts?.temperature,
+      topP: opts?.topP,
       maxHistoryTurns: opts?.maxHistoryTurns,
     }
     if (opts?.knowledgeBaseId != null) {
@@ -388,6 +391,7 @@ export function useChat() {
       }
       return send(userText, {
         temperature: p.temperature,
+        topP: p.topP,
         maxHistoryTurns: p.maxHistoryTurns,
         scrollRoot: p.scrollRoot,
         literatureCollectionId: cid,
@@ -404,6 +408,7 @@ export function useChat() {
       }
       return send(userText, {
         temperature: p.temperature,
+        topP: p.topP,
         maxHistoryTurns: p.maxHistoryTurns,
         scrollRoot: p.scrollRoot,
         knowledgeBaseId: kb,
@@ -414,6 +419,7 @@ export function useChat() {
     }
     return send(userText, {
       temperature: p.temperature,
+      topP: p.topP,
       maxHistoryTurns: p.maxHistoryTurns,
       scrollRoot: p.scrollRoot,
       skipAppendUser: skip,

@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 /**
- * 流式问诊请求。temperature / maxHistoryTurns 可选，由服务端设默认值。
+ * 流式问诊请求。temperature / topP / maxHistoryTurns 可选，由服务端设默认值。
  */
 public class ConsultationChatRequest {
 
@@ -16,6 +16,11 @@ public class ConsultationChatRequest {
 
     /** 覆盖 Ollama 采样温度；null 时使用服务端默认（如 0.7）。 */
     private Double temperature;
+
+    /**
+     * 覆盖 Ollama nucleus 采样 top_p；null 时使用服务端默认（如 0.9）。 值越大则候选词集合越宽。
+     */
+    private Double topP;
 
     /**
      * 参与上下文的历史「轮数」，每轮对应一条 {@link com.tcm.inquiry.modules.consultation.entity.ChatMessage}；
@@ -65,6 +70,14 @@ public class ConsultationChatRequest {
 
     public void setTemperature(Double temperature) {
         this.temperature = temperature;
+    }
+
+    public Double getTopP() {
+        return topP;
+    }
+
+    public void setTopP(Double topP) {
+        this.topP = topP;
     }
 
     public Integer getMaxHistoryTurns() {
