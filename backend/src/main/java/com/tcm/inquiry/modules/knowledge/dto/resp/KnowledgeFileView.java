@@ -8,4 +8,6 @@ public record KnowledgeFileView(
         String fileUuid,
         long sizeBytes,
         String contentType,
+        /** 已向量化分块数；旧数据可能为 null */
+        Integer embedChunkCount,
         Instant createdAt) {}

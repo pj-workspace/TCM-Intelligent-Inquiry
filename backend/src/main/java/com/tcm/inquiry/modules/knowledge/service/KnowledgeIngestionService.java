@@ -17,6 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.tcm.inquiry.modules.knowledge.ai.VectorStoreFilterDeletion;
 import com.tcm.inquiry.modules.knowledge.config.KnowledgeProperties;
 import com.tcm.inquiry.modules.knowledge.dto.resp.KnowledgeFileView;
@@ -28,6 +31,8 @@ import com.tcm.inquiry.modules.knowledge.util.KnowledgeFilenameUtil;
 
 @Service
 public class KnowledgeIngestionService {
+
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeIngestionService.class);
 
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final KnowledgeFileRepository knowledgeFileRepository;
@@ -102,6 +107,7 @@ public class KnowledgeIngestionService {
                 d.getMetadata().put("source", safeName);
             }
 
+            // 先落 Redis 向量索引，再写 MySQL 元数据；失败时外层 catch 会删盘文件并 best-effort 删向量
             vectorStore.add(chunks);
 
             KnowledgeFile row = new KnowledgeFile();
@@ -115,7 +121,16 @@ public class KnowledgeIngestionService {
             row.setContentType(
                     multipart.getContentType() != null ? multipart.getContentType() : "application/octet-stream");
             row.setSizeBytes(multipart.getSize());
+            // 管理端「向量化状态」：当前 Spring AI TokenTextSplitter 无公开 overlap 参数，仅记录块数
+            row.setEmbedChunkCount(chunks.size());
             KnowledgeFile saved = knowledgeFileRepository.save(row);
+
+            log.info(
+                    "知识库入库完成 kbId={} file={} chunks={} chunkSizeTokens≈{}",
+                    knowledgeBaseId,
+                    safeName,
+                    chunks.size(),
+                    chunk);
 
             return toView(saved);
         } catch (RuntimeException e) {
@@ -137,6 +152,7 @@ public class KnowledgeIngestionService {
                 f.getFileUuid(),
                 f.getSizeBytes(),
                 f.getContentType(),
+                f.getEmbedChunkCount(),
                 f.getCreatedAt());
     }
 }

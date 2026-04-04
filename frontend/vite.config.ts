@@ -8,6 +8,24 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    build: {
+      rollupOptions: {
+        output: {
+          /**
+           * 将超大依赖拆出独立 chunk，减轻主包体积与首屏解析压力（仍保留 Vue 核心在主入口链上）。
+           */
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('element-plus')) return 'element-plus'
+            if (id.includes('markdown-it')) return 'markdown-it'
+            if (id.includes('html2canvas') || id.includes('jspdf')) return 'export-pdf'
+            return undefined
+          },
+        },
+      },
+      // element-plus 单包仍较大，拆出后约 1MB；主入口已显著减小
+      chunkSizeWarningLimit: 1100,
+    },
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),

@@ -72,6 +72,7 @@ public class KnowledgeFileService {
                 f.getFileUuid(),
                 f.getSizeBytes(),
                 f.getContentType(),
+                f.getEmbedChunkCount(),
                 f.getCreatedAt());
     }
 }

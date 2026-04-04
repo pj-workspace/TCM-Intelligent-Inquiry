@@ -13,6 +13,8 @@ export type KnowledgeFileView = {
   fileUuid: string
   sizeBytes: number
   contentType: string | null
+  /** 已向量化分块数；旧数据可能为 null */
+  embedChunkCount: number | null
   createdAt: string
 }
 

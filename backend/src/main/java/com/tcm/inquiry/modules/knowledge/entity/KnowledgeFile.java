@@ -40,6 +40,13 @@ public class KnowledgeFile {
 
     private long sizeBytes;
 
+    /**
+     * 本次入库写入向量库的 Document 条数（= TokenTextSplitter 切分后的块数）。
+     * 用于管理端展示「已向量化」规模；历史数据在加字段前可能为 null。
+     */
+    @Column(name = "embed_chunk_count")
+    private Integer embedChunkCount;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -104,6 +111,14 @@ public class KnowledgeFile {
 
     public void setSizeBytes(long sizeBytes) {
         this.sizeBytes = sizeBytes;
+    }
+
+    public Integer getEmbedChunkCount() {
+        return embedChunkCount;
+    }
+
+    public void setEmbedChunkCount(Integer embedChunkCount) {
+        this.embedChunkCount = embedChunkCount;
     }
 
     public Instant getCreatedAt() {

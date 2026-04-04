@@ -241,7 +241,7 @@ onMounted(async () => {
         上传与文档列表
       </h3>
       <p class="ds-hint">
-        使用 Apache Tika 解析 PDF/Word/TXT 等；可多选文件依次入库。分块约长可调整。删除会移除向量切片，需重新上传才能再次检索。
+        使用 Apache Tika 解析 PDF/Word/TXT 等；可多选文件依次入库。分块约长（按 token 计）可调整；当前所用 Spring AI TokenTextSplitter 未开放 overlap 配置，表格中的「向量块数」表示入库切片条数。删除会移除向量切片，需重新上传才能再次检索。
       </p>
       <div class="ds-row ds-row--center kb-upload-row">
         <label class="ds-field kb-field-inline">
@@ -272,12 +272,17 @@ onMounted(async () => {
       >
         {{ ingestMsg }}
       </p>
-      <p
+      <div
         v-if="loadingFiles"
-        class="ds-muted"
+        class="kb-skeleton"
+        role="status"
+        aria-busy="true"
+        aria-label="正在加载文档列表"
       >
-        加载文件列表…
-      </p>
+        <div class="kb-skeleton__row" />
+        <div class="kb-skeleton__row kb-skeleton__row--short" />
+        <div class="kb-skeleton__row" />
+      </div>
       <div
         v-else
         class="kb-table-wrap"
@@ -298,6 +303,9 @@ onMounted(async () => {
                 类型
               </th>
               <th scope="col">
+                向量块数
+              </th>
+              <th scope="col">
                 上传时间
               </th>
               <th scope="col">
@@ -314,6 +322,11 @@ onMounted(async () => {
               <td>{{ (f.sizeBytes / 1024).toFixed(1) }} KB</td>
               <td>{{ f.contentType ?? '—' }}</td>
               <td class="kb-table__mono">
+                {{
+                  f.embedChunkCount != null ? f.embedChunkCount : '—'
+                }}
+              </td>
+              <td class="kb-table__mono">
                 {{ formatDate(f.createdAt) }}
               </td>
               <td>
@@ -328,7 +341,7 @@ onMounted(async () => {
             </tr>
             <tr v-if="files.length === 0">
               <td
-                colspan="5"
+                colspan="6"
                 class="kb-table-empty"
               >
                 <div
@@ -455,6 +468,35 @@ onMounted(async () => {
 }
 .kb-file-btn {
   flex-shrink: 0;
+}
+.kb-skeleton {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.kb-skeleton__row {
+  height: 2.25rem;
+  border-radius: 0.5rem;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-elevated) 0%,
+    var(--color-border) 50%,
+    var(--color-surface-elevated) 100%
+  );
+  background-size: 200% 100%;
+  animation: kb-shimmer 1.2s ease-in-out infinite;
+}
+.kb-skeleton__row--short {
+  width: 70%;
+}
+@keyframes kb-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 .kb-table-wrap {
   margin-top: 0.75rem;

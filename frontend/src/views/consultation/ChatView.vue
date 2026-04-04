@@ -455,244 +455,244 @@ function canSend() {
               aria-label="问诊设置"
               @click.stop
             >
-          <div class="omni-bar omni-bar--panel">
-            <span class="omni-bar__label">会话模式</span>
-            <div
-              class="omni-segmented"
-              role="tablist"
-              aria-label="会话模式"
-            >
-              <button
-                type="button"
-                role="tab"
-                class="omni-segment"
-                :class="mode === 'standard' ? 'omni-segment--active' : ''"
-                :aria-selected="mode === 'standard'"
-                :disabled="loading"
-                @click="mode = 'standard'"
-              >
-                标准问诊
-              </button>
-              <button
-                type="button"
-                role="tab"
-                class="omni-segment"
-                :class="mode === 'knowledge' ? 'omni-segment--active' : ''"
-                :aria-selected="mode === 'knowledge'"
-                :disabled="loading"
-                @click="mode = 'knowledge'"
-              >
-                知识库 RAG
-              </button>
-              <button
-                type="button"
-                role="tab"
-                class="omni-segment"
-                :class="mode === 'literature' ? 'omni-segment--active' : ''"
-                :aria-selected="mode === 'literature'"
-                :disabled="loading"
-                @click="mode = 'literature'"
-              >
-                文献库
-              </button>
-              <button
-                type="button"
-                role="tab"
-                class="omni-segment"
-                :class="mode === 'vision' ? 'omni-segment--active' : ''"
-                :aria-selected="mode === 'vision'"
-                :disabled="loading"
-                @click="mode = 'vision'"
-              >
-                视觉智能体
-              </button>
-            </div>
-
-            <div
-              v-if="mode === 'knowledge' && knowledgeBases.length > 0"
-              class="omni-bar__mount"
-            >
-              <label class="omni-mount-label">
-                挂载知识库
-                <DsSelect
-                  v-model="knowledgeBaseId"
-                  class="omni-select"
-                  :options="knowledgeSelectOptions"
-                  placeholder="请选择"
-                  :disabled="loading"
-                  aria-label="挂载知识库"
-                />
-              </label>
-            </div>
-            <div
-              v-else-if="mode === 'knowledge' && knowledgeBases.length === 0"
-              class="omni-hint"
-            >
-              暂无知识库，请先在「知识库」页创建。
-            </div>
-
-            <div
-              v-if="mode === 'literature'"
-              class="omni-bar__mount"
-            >
-              <label class="omni-mount-label">
-                文献集合
-                <DsSelect
-                  v-model="literatureCollectionId"
-                  class="omni-select"
-                  :options="literatureSelectOptions"
-                  placeholder="请选择"
-                  :disabled="loading"
-                  aria-label="文献集合"
-                />
-              </label>
-              <button
-                type="button"
-                class="ds-btn ds-btn--ghost omni-refresh"
-                :disabled="loading"
-                @click="loadLiteratureCollections"
-              >
-                刷新列表
-              </button>
-            </div>
-
-            <div
-              v-if="mode === 'vision'"
-              class="omni-bar__mount omni-bar__mount--wrap"
-            >
-              <p class="omni-vision-note">
-                非流式调用；可在下方附加图片。默认 System / 视觉模型在「智能体」配置页修改。
-              </p>
-              <label
-                v-if="knowledgeBases.length > 0"
-                class="omni-check"
-              >
-                <input
-                  v-model="visionUseKnowledgeBase"
-                  type="checkbox"
-                  :disabled="loading"
+              <div class="omni-bar omni-bar--panel">
+                <span class="omni-bar__label">会话模式</span>
+                <div
+                  class="omni-segmented"
+                  role="tablist"
+                  aria-label="会话模式"
                 >
-                同时挂载知识库
-              </label>
-              <label
-                v-if="visionUseKnowledgeBase && knowledgeBases.length > 0"
-                class="omni-mount-label"
-              >
-                知识库
-                <DsSelect
-                  v-model="visionKnowledgeBaseId"
-                  class="omni-select"
-                  :options="visionKbSelectOptions"
-                  placeholder="请选择"
-                  :disabled="loading"
-                  aria-label="视觉模式知识库"
-                />
-              </label>
-            </div>
-          </div>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="omni-segment"
+                    :class="mode === 'standard' ? 'omni-segment--active' : ''"
+                    :aria-selected="mode === 'standard'"
+                    :disabled="loading"
+                    @click="mode = 'standard'"
+                  >
+                    标准问诊
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="omni-segment"
+                    :class="mode === 'knowledge' ? 'omni-segment--active' : ''"
+                    :aria-selected="mode === 'knowledge'"
+                    :disabled="loading"
+                    @click="mode = 'knowledge'"
+                  >
+                    知识库 RAG
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="omni-segment"
+                    :class="mode === 'literature' ? 'omni-segment--active' : ''"
+                    :aria-selected="mode === 'literature'"
+                    :disabled="loading"
+                    @click="mode = 'literature'"
+                  >
+                    文献库
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="omni-segment"
+                    :class="mode === 'vision' ? 'omni-segment--active' : ''"
+                    :aria-selected="mode === 'vision'"
+                    :disabled="loading"
+                    @click="mode = 'vision'"
+                  >
+                    视觉智能体
+                  </button>
+                </div>
 
-          <details class="consult-adv consult-adv--panel">
-            <summary class="consult-adv__summary">
-              模型、RAG 参数与上下文
-            </summary>
-            <div class="consult-adv__body">
-              <div class="ds-row consult-controls consult-controls--wrap">
-                <label class="ds-field">
-                  Temperature
-                  <input
-                    v-model.number="temperature"
-                    class="ds-input ds-input--narrow"
-                    type="number"
-                    inputmode="decimal"
-                    min="0"
-                    max="2"
-                    step="0.1"
+                <div
+                  v-if="mode === 'knowledge' && knowledgeBases.length > 0"
+                  class="omni-bar__mount"
+                >
+                  <label class="omni-mount-label">
+                    挂载知识库
+                    <DsSelect
+                      v-model="knowledgeBaseId"
+                      class="omni-select"
+                      :options="knowledgeSelectOptions"
+                      placeholder="请选择"
+                      :disabled="loading"
+                      aria-label="挂载知识库"
+                    />
+                  </label>
+                </div>
+                <div
+                  v-else-if="mode === 'knowledge' && knowledgeBases.length === 0"
+                  class="omni-hint"
+                >
+                  暂无知识库，请先在「知识库」页创建。
+                </div>
+
+                <div
+                  v-if="mode === 'literature'"
+                  class="omni-bar__mount"
+                >
+                  <label class="omni-mount-label">
+                    文献集合
+                    <DsSelect
+                      v-model="literatureCollectionId"
+                      class="omni-select"
+                      :options="literatureSelectOptions"
+                      placeholder="请选择"
+                      :disabled="loading"
+                      aria-label="文献集合"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="ds-btn ds-btn--ghost omni-refresh"
                     :disabled="loading"
+                    @click="loadLiteratureCollections"
                   >
-                </label>
-                <label class="ds-field">
-                  Top-P
-                  <input
-                    v-model.number="topP"
-                    class="ds-input ds-input--narrow"
-                    type="number"
-                    inputmode="decimal"
-                    min="0.000001"
-                    max="1"
-                    step="0.05"
-                    :disabled="loading"
+                    刷新列表
+                  </button>
+                </div>
+
+                <div
+                  v-if="mode === 'vision'"
+                  class="omni-bar__mount omni-bar__mount--wrap"
+                >
+                  <p class="omni-vision-note">
+                    非流式调用；可在下方附加图片。默认 System / 视觉模型在「智能体」配置页修改。
+                  </p>
+                  <label
+                    v-if="knowledgeBases.length > 0"
+                    class="omni-check"
                   >
-                </label>
-                <label class="ds-field">
-                  历史轮数上限
-                  <input
-                    v-model.number="maxHistoryTurns"
-                    class="ds-input ds-input--narrow"
-                    type="number"
-                    inputmode="numeric"
-                    min="1"
-                    max="50"
-                    step="1"
-                    :disabled="loading"
+                    <input
+                      v-model="visionUseKnowledgeBase"
+                      type="checkbox"
+                      :disabled="loading"
+                    >
+                    同时挂载知识库
+                  </label>
+                  <label
+                    v-if="visionUseKnowledgeBase && knowledgeBases.length > 0"
+                    class="omni-mount-label"
                   >
-                </label>
-                <template v-if="mode === 'knowledge' || (mode === 'vision' && visionUseKnowledgeBase)">
-                  <label class="ds-field">
-                    RAG topK
-                    <input
-                      v-model.number="ragTopK"
-                      class="ds-input ds-input--narrow"
-                      type="number"
-                      min="1"
-                      max="20"
-                      step="1"
+                    知识库
+                    <DsSelect
+                      v-model="visionKnowledgeBaseId"
+                      class="omni-select"
+                      :options="visionKbSelectOptions"
+                      placeholder="请选择"
                       :disabled="loading"
-                    >
+                      aria-label="视觉模式知识库"
+                    />
                   </label>
-                  <label class="ds-field">
-                    知识库相似度阈值
-                    <input
-                      v-model.number="ragSimilarityThreshold"
-                      class="ds-input ds-input--narrow"
-                      type="number"
-                      inputmode="decimal"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      :disabled="loading"
-                    >
-                  </label>
-                </template>
-                <template v-if="mode === 'literature'">
-                  <label class="ds-field">
-                    文献 topK
-                    <input
-                      v-model.number="literatureTopK"
-                      class="ds-input ds-input--narrow"
-                      type="number"
-                      min="1"
-                      max="20"
-                      step="1"
-                      :disabled="loading"
-                    >
-                  </label>
-                  <label class="ds-field">
-                    文献相似度（0=不过滤）
-                    <input
-                      v-model.number="literatureThreshold"
-                      class="ds-input ds-input--narrow"
-                      type="number"
-                      inputmode="decimal"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      :disabled="loading"
-                    >
-                  </label>
-                </template>
+                </div>
               </div>
-            </div>
-          </details>
+
+              <details class="consult-adv consult-adv--panel">
+                <summary class="consult-adv__summary">
+                  模型、RAG 参数与上下文
+                </summary>
+                <div class="consult-adv__body">
+                  <div class="ds-row consult-controls consult-controls--wrap">
+                    <label class="ds-field">
+                      Temperature
+                      <input
+                        v-model.number="temperature"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        inputmode="decimal"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        :disabled="loading"
+                      >
+                    </label>
+                    <label class="ds-field">
+                      Top-P
+                      <input
+                        v-model.number="topP"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        inputmode="decimal"
+                        min="0.000001"
+                        max="1"
+                        step="0.05"
+                        :disabled="loading"
+                      >
+                    </label>
+                    <label class="ds-field">
+                      历史轮数上限
+                      <input
+                        v-model.number="maxHistoryTurns"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        inputmode="numeric"
+                        min="1"
+                        max="50"
+                        step="1"
+                        :disabled="loading"
+                      >
+                    </label>
+                    <template v-if="mode === 'knowledge' || (mode === 'vision' && visionUseKnowledgeBase)">
+                      <label class="ds-field">
+                        RAG topK
+                        <input
+                          v-model.number="ragTopK"
+                          class="ds-input ds-input--narrow"
+                          type="number"
+                          min="1"
+                          max="20"
+                          step="1"
+                          :disabled="loading"
+                        >
+                      </label>
+                      <label class="ds-field">
+                        知识库相似度阈值
+                        <input
+                          v-model.number="ragSimilarityThreshold"
+                          class="ds-input ds-input--narrow"
+                          type="number"
+                          inputmode="decimal"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          :disabled="loading"
+                        >
+                      </label>
+                    </template>
+                    <template v-if="mode === 'literature'">
+                      <label class="ds-field">
+                        文献 topK
+                        <input
+                          v-model.number="literatureTopK"
+                          class="ds-input ds-input--narrow"
+                          type="number"
+                          min="1"
+                          max="20"
+                          step="1"
+                          :disabled="loading"
+                        >
+                      </label>
+                      <label class="ds-field">
+                        文献相似度（0=不过滤）
+                        <input
+                          v-model.number="literatureThreshold"
+                          class="ds-input ds-input--narrow"
+                          type="number"
+                          inputmode="decimal"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          :disabled="loading"
+                        >
+                      </label>
+                    </template>
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
         </div>

@@ -81,7 +81,7 @@ class KnowledgeControllerWebMvcTest {
                         knowledgeIngestionService.ingest(eq(1L), any(), any()))
                 .thenReturn(
                         new KnowledgeFileView(
-                                1L, "f.pdf", "uuid-1", 100, "application/pdf", Instant.now()));
+                                1L, "f.pdf", "uuid-1", 100, "application/pdf", 3, Instant.now()));
 
         mockMvc.perform(
                         org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
@@ -89,6 +89,7 @@ class KnowledgeControllerWebMvcTest {
                                 .file(new org.springframework.mock.web.MockMultipartFile(
                                         "file", "f.pdf", "application/pdf", "x".getBytes())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.fileUuid").value("uuid-1"));
+                .andExpect(jsonPath("$.data.fileUuid").value("uuid-1"))
+                .andExpect(jsonPath("$.data.embedChunkCount").value(3));
     }
 }
