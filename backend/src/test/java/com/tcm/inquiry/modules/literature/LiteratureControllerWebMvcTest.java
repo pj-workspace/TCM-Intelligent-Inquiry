@@ -56,7 +56,8 @@ class LiteratureControllerWebMvcTest {
                         10L,
                         "application/pdf",
                         LiteratureUploadStatus.READY,
-                        Instant.now());
+                        Instant.now(),
+                        null);
         org.mockito.Mockito.when(literatureManageService.listCollection("col-1"))
                 .thenReturn(List.of(v));
 

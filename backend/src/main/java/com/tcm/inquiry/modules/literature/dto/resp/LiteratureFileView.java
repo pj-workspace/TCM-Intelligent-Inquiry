@@ -12,4 +12,6 @@ public record LiteratureFileView(
         long sizeBytes,
         String contentType,
         LiteratureUploadStatus status,
-        Instant createdAt) {}
+        Instant createdAt,
+        /** 临时库统一过期时间；null 表示历史数据或未启用字段 */
+        Instant expiresAt) {}

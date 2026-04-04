@@ -100,6 +100,7 @@ public class LiteratureManageService {
                 u.getSizeBytes() != null ? u.getSizeBytes() : 0L,
                 u.getContentType() != null ? u.getContentType() : "application/octet-stream",
                 u.getStatus(),
-                u.getCreatedAt());
+                u.getCreatedAt(),
+                u.getExpiresAt());
     }
 }

@@ -1,6 +1,8 @@
 package com.tcm.inquiry.modules.literature.service;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -112,7 +114,13 @@ public class LiteratureIngestionService {
                     multipart.getContentType() != null ? multipart.getContentType() : "application/octet-stream");
             row.setSizeBytes(multipart.getSize());
             row.setStatus(LiteratureUploadStatus.READY);
+            // 滑动 TTL：从本次入库起算 vectorTtlHours；随后将同一 collection 内所有行对齐到该时刻
+            int ttlH = Math.max(1, literatureProperties.getVectorTtlHours());
+            Instant expiresAt = Instant.now().plus(Duration.ofHours(ttlH));
+            row.setExpiresAt(expiresAt);
             LiteratureUpload saved = literatureUploadRepository.save(row);
+            // 关键：多文件同一临时库共用一条「到期时间」，任意新上传都会整库顺延，避免用户边聊边传时中途被误删
+            literatureUploadRepository.bumpExpiresAtForCollection(collection, expiresAt);
 
             return toView(saved);
         } catch (RuntimeException e) {
@@ -135,6 +143,7 @@ public class LiteratureIngestionService {
                 u.getSizeBytes() != null ? u.getSizeBytes() : 0L,
                 u.getContentType() != null ? u.getContentType() : "application/octet-stream",
                 u.getStatus(),
-                u.getCreatedAt());
+                u.getCreatedAt(),
+                u.getExpiresAt());
     }
 }

@@ -46,6 +46,13 @@ public class LiteratureUpload {
     @Column(nullable = false)
     private Instant createdAt;
 
+    /**
+     * 文献临时库的统一过期时刻（同一 temp_collection_id 下多行在每次上传后会被批量刷新为相同值）。
+     * 定时任务扫描 expires_at &lt; now 的集合并执行与手动删除等价的清理。历史数据为 null 时不参与自动 TTL 清理。
+     */
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
     @PrePersist
     void prePersist() {
         if (createdAt == null) {
@@ -126,5 +133,13 @@ public class LiteratureUpload {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(Instant expiresAt) {
+        this.expiresAt = expiresAt;
     }
 }

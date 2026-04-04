@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { getErrorMessage } from '@/api/core/errors'
 import {
   deleteLiteratureCollection,
@@ -136,6 +136,13 @@ function formatDate(iso: string) {
   }
 }
 
+/** 同库各行 expiresAt 对齐，取首条展示即可 */
+const collectionExpiresLabel = computed(() => {
+  const row = files.value.find((f) => f.expiresAt)
+  if (!row?.expiresAt) return ''
+  return `当前临时库向量与文件计划在 ${formatDate(row.expiresAt)} 自动清理（任一新上传会将整库有效期顺延）。`
+})
+
 onMounted(async () => {
   await refreshHealth()
 })
@@ -149,7 +156,8 @@ onMounted(async () => {
       文献库管理
     </h2>
     <p class="ds-lead lit-lead">
-      上传与解析文献向量；基于文献的问答请在「智能问诊」中选择「文献库」并指定本页显示的临时库 ID。
+      上传与解析文献向量（进入 Redis Stack，与知识库 metadata 隔离）；服务端按配置对临时库做 TTL
+      滑动续期与定时清理。问诊请选择「文献库」模式并指定本页临时库 ID。
     </p>
     <p
       class="ds-status lit-health"
@@ -194,6 +202,12 @@ onMounted(async () => {
         class="ds-muted"
       >
         尚未上传：首次上传会自动分配临时库 ID。
+      </p>
+      <p
+        v-if="collectionExpiresLabel"
+        class="ds-hint lit-ttl-hint"
+      >
+        {{ collectionExpiresLabel }}
       </p>
     </section>
 

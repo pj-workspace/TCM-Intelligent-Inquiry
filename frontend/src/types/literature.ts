@@ -9,6 +9,8 @@ export interface LiteratureFileView {
   contentType: string
   status: LiteratureUploadStatus
   createdAt: string
+  /** ISO-8601；临时库统一过期时刻，每次上传同库会顺延 */
+  expiresAt?: string | null
 }
 
 export interface LiteratureQueryResponse {

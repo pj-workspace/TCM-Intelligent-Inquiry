@@ -24,3 +24,6 @@ spring:
 tcm:
   ollama:
     vision-model: tinyllama
+  literature:
+    # 集成测试 profile 下关闭定时清理，避免侧效；TTL 字段仍可由业务写入
+    cleanup-enabled: false

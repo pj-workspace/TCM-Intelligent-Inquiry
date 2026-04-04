@@ -7,6 +7,7 @@ import java.nio.file.Path;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.ai.vectorstore.redis.autoconfigure.RedisVectorStoreAutoConfiguration;
 
 /**
@@ -15,6 +16,7 @@ import org.springframework.ai.vectorstore.redis.autoconfigure.RedisVectorStoreAu
  * 避免与默认自动配置重复注册 {@link org.springframework.ai.vectorstore.VectorStore} Bean。</p>
  */
 @SpringBootApplication(exclude = {RedisVectorStoreAutoConfiguration.class})
+@EnableScheduling
 public class TcmInquiryApplication {
 
     public static void main(String[] args) {

@@ -8,7 +8,7 @@ spring:
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:tcm_inquiry}?createDatabaseIfNotExist=true&characterEncoding=utf8&allowPublicKeyRetrieval=true&useSSL=false
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:root}
+    password: ${MYSQL_PASSWORD:pj123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     database-platform: org.hibernate.dialect.MySQLDialect
@@ -63,6 +63,10 @@ tcm:
     storage-dir: data/kb-files
   literature:
     storage-dir: data/literature-files
+    # 临时文献向量 + 文件：无新上传时最长保留（小时）；同一 collection 每上传一次整库顺延
+    vector-ttl-hours: 24
+    cleanup-enabled: true
+    cleanup-fixed-delay-ms: 300000
   ollama:
     vision-model: qwen3-vl:2b
   # 文本智能体：是否启用 Spring AI 工具循环（knowledge_retrieval_tool + herb_image_recognition_tool）
