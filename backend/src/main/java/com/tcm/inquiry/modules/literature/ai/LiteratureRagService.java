@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.tcm.inquiry.common.sse.SsePhaseEvents;
 import com.tcm.inquiry.config.TcmApiProperties;
 import com.tcm.inquiry.modules.knowledge.ai.KnowledgeContextBundle;
 import com.tcm.inquiry.modules.knowledge.config.KnowledgeProperties;
@@ -82,35 +83,39 @@ public class LiteratureRagService {
         return new LiteratureQueryResponse(answer, new ArrayList<>(bundle.sources()), bundle.retrievedChunks());
     }
 
-    /** 与 {@link com.tcm.inquiry.modules.knowledge.ai.KnowledgeRagService#streamQuery} 协议一致。 */
+    /**
+     * 与 {@link com.tcm.inquiry.modules.knowledge.ai.KnowledgeRagService#streamQuery} 协议一致（含 {@code
+     * phase} 编排事件）。
+     */
     public SseEmitter streamQuery(String tempCollectionId, LiteratureQueryRequest req) {
-        KnowledgeContextBundle bundle = retrieveContext(tempCollectionId, req);
-        String userPrompt = buildUserPrompt(bundle, req.getMessage());
-
         SseEmitter emitter = new SseEmitter(600_000L);
-        try {
-            emitter.send(
-                    SseEmitter.event()
-                            .name("meta")
-                            .data(
-                                    Map.of(
-                                            "sources",
-                                            bundle.sources(),
-                                            "retrievedChunks",
-                                            bundle.retrievedChunks())));
-        } catch (IOException e) {
-            emitter.completeWithError(e);
-            return emitter;
-        }
-
-        ChatClient client =
-                ChatClient.builder(chatModel).defaultSystem(LiteratureRagPrompts.RAG_SYSTEM).build();
-        var streamSpec = client.prompt().user(userPrompt).stream();
-
-        AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
         sseAsyncExecutor.execute(
-                () ->
+                () -> {
+                    try {
+                        SsePhaseEvents.sendPhase(
+                                emitter, "rag_retrieval", "临时文献库向量检索中…");
+                        KnowledgeContextBundle bundle = retrieveContext(tempCollectionId, req);
+                        emitter.send(
+                                SseEmitter.event()
+                                        .name("meta")
+                                        .data(
+                                                Map.of(
+                                                        "sources",
+                                                        bundle.sources(),
+                                                        "retrievedChunks",
+                                                        bundle.retrievedChunks())));
+                        SsePhaseEvents.sendPhase(
+                                emitter, "model_stream", "大模型流式生成中…");
+
+                        String userPrompt = buildUserPrompt(bundle, req.getMessage());
+                        ChatClient client =
+                                ChatClient.builder(chatModel)
+                                        .defaultSystem(LiteratureRagPrompts.RAG_SYSTEM)
+                                        .build();
+                        var streamSpec = client.prompt().user(userPrompt).stream();
+                        AtomicReference<Throwable> errorRef = new AtomicReference<>();
+
                         streamSpec
                                 .content()
                                 .subscribeOn(Schedulers.boundedElastic())
@@ -148,7 +153,19 @@ public class LiteratureRagService {
                                             }
                                             emitter.complete();
                                         })
-                                .subscribe());
+                                .subscribe();
+                    } catch (Exception ex) {
+                        try {
+                            emitter.send(
+                                    SseEmitter.event()
+                                            .name("error")
+                                            .data(streamErrorMessage(ex)));
+                        } catch (IOException ignored) {
+                            // ignore
+                        }
+                        emitter.completeWithError(ex);
+                    }
+                });
 
         emitter.onTimeout(emitter::complete);
         emitter.onCompletion(() -> {});

@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.tcm.inquiry.common.sse.SsePhaseEvents;
 import com.tcm.inquiry.config.TcmApiProperties;
 import com.tcm.inquiry.modules.consultation.ai.ConsultationPrompts;
 import com.tcm.inquiry.modules.consultation.dto.ConsultationChatRequest;
@@ -57,7 +58,7 @@ public class ConsultationChatService {
      * 便于在代码侧组装 {@link OllamaOptions#builder()} 时使用与全局 Bean 一致的模型名；
      * 实际部署前请在 Ollama 中执行 {@code ollama pull} 确保本地已存在该 Tag。
      */
-    @Value("${spring.ai.ollama.chat.options.model:gemma4:e4b}")
+    @Value("${spring.ai.ollama.chat.options.model:gemma4:e2b}")
     private String defaultChatModelName;
 
     public ConsultationChatService(
@@ -80,7 +81,13 @@ public class ConsultationChatService {
     }
 
     /**
-     * 建立 SSE：拉历史 →（可选）检索知识库并发 {@code meta} → 流式调用 Ollama → 结束后异步落库。
+     * 建立 SSE 流水线（对齐 claw-code「事件化编排」思路）：
+     * <ul>
+     *   <li>立即返回 {@link SseEmitter}，检索与生成均在异步线程中执行，首包即可为 {@code event: phase}；
+     *   <li>RAG 场景：{@code phase: rag_retrieval} → 向量检索 → {@code event: meta} → {@code phase: model_stream}
+     *       → token 增量 → {@code [DONE]}；
+     *   <li>纯问诊：{@code phase: model_stream} → 流式正文。
+     * </ul>
      */
     public SseEmitter streamChat(ConsultationChatRequest req) {
         if (!chatSessionRepository.existsById(req.getSessionId())) {
@@ -107,58 +114,128 @@ public class ConsultationChatService {
             throw new IllegalArgumentException("不能同时挂载知识库与文献库");
         }
 
-        KnowledgeContextBundle kbBundle = null;
-        KnowledgeContextBundle litBundle = null;
-        String modelUserInput;
-        if (req.getKnowledgeBaseId() != null) {
-            kbBundle =
-                    knowledgeRagService.retrieveContext(
-                            req.getKnowledgeBaseId(),
-                            userInput,
-                            req.getRagTopK(),
-                            req.getRagSimilarityThreshold());
-            modelUserInput =
-                    "【知识库摘录】\n"
-                            + kbBundle.contextText()
-                            + "\n\n【用户主诉】\n"
-                            + userInput;
-        } else if (hasLiterature) {
-            litBundle =
-                    literatureRagService.retrieveContextForConsultation(
-                            litRaw.trim(),
-                            userInput,
-                            req.getLiteratureRagTopK(),
-                            req.getLiteratureSimilarityThreshold());
-            modelUserInput =
-                    "【文献摘录】\n"
-                            + litBundle.contextText()
-                            + "\n\n【用户主诉】\n"
-                            + userInput;
-        } else {
-            modelUserInput = userInput;
-        }
-
         SseEmitter emitter = new SseEmitter(600_000L);
-        if (kbBundle != null || litBundle != null) {
-            try {
-                Map<String, Object> metaPayload = new LinkedHashMap<>();
-                if (kbBundle != null) {
-                    metaPayload.put("sources", kbBundle.sources());
-                    metaPayload.put("retrievedChunks", kbBundle.retrievedChunks());
-                    metaPayload.put("knowledgeBaseId", req.getKnowledgeBaseId());
-                } else {
-                    metaPayload.put("sources", litBundle.sources());
-                    metaPayload.put("retrievedChunks", litBundle.retrievedChunks());
-                    metaPayload.put("literatureCollectionId", litRaw.trim());
-                }
-                emitter.send(
-                        SseEmitter.event().name("meta").data(metaPayload));
-            } catch (IOException e) {
-                emitter.completeWithError(e);
-                return emitter;
-            }
-        }
+        sseAsyncExecutor.execute(
+                () ->
+                        runConsultationStreamPipeline(
+                                emitter,
+                                req,
+                                historyMessages,
+                                userInput,
+                                litRaw,
+                                hasLiterature,
+                                temperature,
+                                topP));
 
+        emitter.onTimeout(
+                () -> {
+                    log.warn("SSE timeout sessionId={}", req.getSessionId());
+                    emitter.complete();
+                });
+        emitter.onCompletion(() -> log.debug("SSE completed sessionId={}", req.getSessionId()));
+
+        return emitter;
+    }
+
+    /**
+     * 异步执行 RAG（如有）与大模型流式段；任一步失败则 {@code event: error} 并 completeWithError。
+     */
+    private void runConsultationStreamPipeline(
+            SseEmitter emitter,
+            ConsultationChatRequest req,
+            List<Message> historyMessages,
+            String userInput,
+            String litRaw,
+            boolean hasLiterature,
+            double temperature,
+            double topP) {
+        try {
+            String modelUserInput;
+            if (req.getKnowledgeBaseId() != null) {
+                SsePhaseEvents.sendPhase(
+                        emitter, "rag_retrieval", "企业知识库向量检索中…");
+                KnowledgeContextBundle kbBundle =
+                        knowledgeRagService.retrieveContext(
+                                req.getKnowledgeBaseId(),
+                                userInput,
+                                req.getRagTopK(),
+                                req.getRagSimilarityThreshold());
+                modelUserInput =
+                        "【知识库摘录】\n"
+                                + kbBundle.contextText()
+                                + "\n\n【用户主诉】\n"
+                                + userInput;
+                sendKnowledgeMeta(emitter, kbBundle, req.getKnowledgeBaseId());
+                SsePhaseEvents.sendPhase(
+                        emitter, "model_stream", "大模型流式生成中…");
+            } else if (hasLiterature) {
+                SsePhaseEvents.sendPhase(
+                        emitter, "rag_retrieval", "临时文献库向量检索中…");
+                KnowledgeContextBundle litBundle =
+                        literatureRagService.retrieveContextForConsultation(
+                                litRaw.trim(),
+                                userInput,
+                                req.getLiteratureRagTopK(),
+                                req.getLiteratureSimilarityThreshold());
+                modelUserInput =
+                        "【文献摘录】\n"
+                                + litBundle.contextText()
+                                + "\n\n【用户主诉】\n"
+                                + userInput;
+                sendLiteratureMeta(emitter, litBundle, litRaw.trim());
+                SsePhaseEvents.sendPhase(
+                        emitter, "model_stream", "大模型流式生成中…");
+            } else {
+                SsePhaseEvents.sendPhase(
+                        emitter, "model_stream", "连接本地大模型…");
+                modelUserInput = userInput;
+            }
+
+            subscribeConsultationModelStream(
+                    emitter, req, historyMessages, modelUserInput, temperature, topP, userInput);
+        } catch (Exception ex) {
+            log.warn(
+                    "consultation pipeline error sessionId={}",
+                    req.getSessionId(),
+                    ex);
+            try {
+                emitter.send(
+                        SseEmitter.event().name("error").data(streamErrorMessage(ex)));
+            } catch (IOException ignored) {
+                // 客户端已断开时忽略
+            }
+            emitter.completeWithError(ex);
+        }
+    }
+
+    private void sendKnowledgeMeta(
+            SseEmitter emitter, KnowledgeContextBundle bundle, Long knowledgeBaseId)
+            throws IOException {
+        Map<String, Object> metaPayload = new LinkedHashMap<>();
+        metaPayload.put("sources", bundle.sources());
+        metaPayload.put("retrievedChunks", bundle.retrievedChunks());
+        metaPayload.put("knowledgeBaseId", knowledgeBaseId);
+        emitter.send(SseEmitter.event().name("meta").data(metaPayload));
+    }
+
+    private void sendLiteratureMeta(
+            SseEmitter emitter, KnowledgeContextBundle bundle, String collectionId)
+            throws IOException {
+        Map<String, Object> metaPayload = new LinkedHashMap<>();
+        metaPayload.put("sources", bundle.sources());
+        metaPayload.put("retrievedChunks", bundle.retrievedChunks());
+        metaPayload.put("literatureCollectionId", collectionId);
+        emitter.send(SseEmitter.event().name("meta").data(metaPayload));
+    }
+
+    private void subscribeConsultationModelStream(
+            SseEmitter emitter,
+            ConsultationChatRequest req,
+            List<Message> historyMessages,
+            String modelUserInput,
+            double temperature,
+            double topP,
+            String userInput) {
         ChatClient chatClient =
                 ChatClient.builder(chatModel).defaultSystem(ConsultationPrompts.SYSTEM).build();
 
@@ -178,76 +255,65 @@ public class ConsultationChatService {
         StringBuilder assistantAcc = new StringBuilder();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
-        sseAsyncExecutor.execute(
-                () ->
-                        streamSpec
-                                .content()
-                                .subscribeOn(Schedulers.boundedElastic())
-                                .doOnNext(
-                                        token -> {
-                                            assistantAcc.append(token);
-                                            try {
-                                                emitter.send(SseEmitter.event().data(token));
-                                            } catch (IOException e) {
-                                                errorRef.compareAndSet(null, e);
-                                                emitter.completeWithError(e);
-                                            }
-                                        })
-                                .doOnError(
-                                        ex -> {
-                                            log.warn("consultation stream error", ex);
-                                            errorRef.compareAndSet(null, ex);
-                                            try {
-                                                emitter.send(
-                                                        SseEmitter.event()
-                                                                .name("error")
-                                                                .data(streamErrorMessage(ex)));
-                                            } catch (IOException ignored) {
-                                                // ignore
-                                            }
-                                            emitter.completeWithError(ex);
-                                        })
-                                .doOnComplete(
-                                        () -> {
-                                            if (errorRef.get() != null) {
-                                                return;
-                                            }
-                                            try {
-                                                emitter.send(SseEmitter.event().data("[DONE]"));
-                                            } catch (IOException e) {
-                                                emitter.completeWithError(e);
-                                                return;
-                                            }
-                                            emitter.complete();
-                                            String fullReply = assistantAcc.toString();
-                                            sseAsyncExecutor.execute(
-                                                    () -> {
-                                                        try {
-                                                            consultationMessageStore.saveTurn(
-                                                                    req.getSessionId(),
-                                                                    userInput,
-                                                                    fullReply,
-                                                                    defaultChatModelName,
-                                                                    temperature,
-                                                                    topP);
-                                                        } catch (Exception ex) {
-                                                            log.error(
-                                                                    "Failed to persist consultation turn sessionId={}",
-                                                                    req.getSessionId(),
-                                                                    ex);
-                                                        }
-                                                    });
-                                        })
-                                .subscribe());
-
-        emitter.onTimeout(
-                () -> {
-                    log.warn("SSE timeout sessionId={}", req.getSessionId());
-                    emitter.complete();
-                });
-        emitter.onCompletion(() -> log.debug("SSE completed sessionId={}", req.getSessionId()));
-
-        return emitter;
+        streamSpec
+                .content()
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnNext(
+                        token -> {
+                            assistantAcc.append(token);
+                            try {
+                                emitter.send(SseEmitter.event().data(token));
+                            } catch (IOException e) {
+                                errorRef.compareAndSet(null, e);
+                                emitter.completeWithError(e);
+                            }
+                        })
+                .doOnError(
+                        ex -> {
+                            log.warn("consultation stream error", ex);
+                            errorRef.compareAndSet(null, ex);
+                            try {
+                                emitter.send(
+                                        SseEmitter.event()
+                                                .name("error")
+                                                .data(streamErrorMessage(ex)));
+                            } catch (IOException ignored) {
+                                // ignore
+                            }
+                            emitter.completeWithError(ex);
+                        })
+                .doOnComplete(
+                        () -> {
+                            if (errorRef.get() != null) {
+                                return;
+                            }
+                            try {
+                                emitter.send(SseEmitter.event().data("[DONE]"));
+                            } catch (IOException e) {
+                                emitter.completeWithError(e);
+                                return;
+                            }
+                            emitter.complete();
+                            String fullReply = assistantAcc.toString();
+                            sseAsyncExecutor.execute(
+                                    () -> {
+                                        try {
+                                            consultationMessageStore.saveTurn(
+                                                    req.getSessionId(),
+                                                    userInput,
+                                                    fullReply,
+                                                    defaultChatModelName,
+                                                    temperature,
+                                                    topP);
+                                        } catch (Exception ex) {
+                                            log.error(
+                                                    "Failed to persist consultation turn sessionId={}",
+                                                    req.getSessionId(),
+                                                    ex);
+                                        }
+                                    });
+                        })
+                .subscribe();
     }
 
     private List<Message> buildHistoryMessages(Long sessionId, int maxTurns) {

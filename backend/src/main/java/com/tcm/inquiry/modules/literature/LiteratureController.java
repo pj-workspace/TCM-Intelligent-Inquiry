@@ -83,6 +83,7 @@ public class LiteratureController {
         return ResponseEntity.ok(R.ok(literatureRagService.query(collectionId, body)));
     }
 
+    /** 临时文献库 RAG 流式回答，事件序列与知识库 {@code /query/stream} 一致（含 {@code phase}）。 */
     @PostMapping(
             value = "/collections/{collectionId}/query/stream",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)

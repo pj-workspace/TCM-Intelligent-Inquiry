@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
+import { openSseStream } from '@/api/core/sse'
 import { validateIngestChunkParams } from '@/utils/chunkUploadParams'
+import MarkdownContent from '@/components/business/MarkdownContent.vue'
 import DsSelect from '@/components/common/DsSelect.vue'
 import type { DsSelectOption } from '@/components/common/DsSelect.vue'
 import {
@@ -12,7 +14,7 @@ import {
   getKnowledgeHealth,
   listKnowledgeBases,
   listKnowledgeDocuments,
-  queryKnowledgeBase,
+  knowledgeQueryStreamUrl,
   uploadKnowledgeDocument,
 } from '@/api/modules/knowledge'
 import DsAlert from '@/components/common/DsAlert.vue'
@@ -47,6 +49,10 @@ const probeSimilarity = ref(0)
 const probeLoading = ref(false)
 const probeError = ref<string | null>(null)
 const probeAnswer = ref<KnowledgeQueryResponse | null>(null)
+/** 流式试答：正文累积与后端编排阶段文案（phase 事件） */
+const probeStreamText = ref('')
+const probePhaseLabel = ref<string | null>(null)
+let probeAbort: AbortController | null = null
 
 const baseSelectOptions = computed<DsSelectOption[]>(() => {
   if (bases.value.length === 0) {
@@ -194,10 +200,12 @@ watch(selectedBaseId, () => {
   void loadFiles()
   probeAnswer.value = null
   probeError.value = null
+  probeStreamText.value = ''
+  probePhaseLabel.value = null
 })
 
 /**
- * 对当前选中库发起一次向量检索 + 模型生成，用于验收文档是否被正确召回（与问诊「知识库 RAG」参数语义一致）。
+ * 对当前选中库发起 SSE 流式 RAG 试答（与问诊流式协议一致：phase → meta → token），便于观察检索与生成阶段。
  */
 async function runKnowledgeProbe() {
   if (selectedBaseId.value == null) {
@@ -209,25 +217,72 @@ async function runKnowledgeProbe() {
     ElMessage.warning('请输入试答问题')
     return
   }
+  probeAbort?.abort()
+  probeAbort = new AbortController()
   probeLoading.value = true
   probeError.value = null
   probeAnswer.value = null
+  probeStreamText.value = ''
+  probePhaseLabel.value = null
+  let retrievedChunks = 0
+  let sources: string[] = []
   try {
-    const { data } = await queryKnowledgeBase(
-      selectedBaseId.value,
-      {
-        message: q,
-        topK: probeTopK.value,
-        similarityThreshold: probeSimilarity.value,
+    await openSseStream(
+      knowledgeQueryStreamUrl(selectedBaseId.value),
+      (chunk) => {
+        probeStreamText.value += chunk
       },
-      silentAxiosConfig
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: q,
+          topK: probeTopK.value,
+          similarityThreshold: probeSimilarity.value,
+        }),
+        signal: probeAbort.signal,
+        onNamedEvent: (name, data) => {
+          if (name === 'phase') {
+            try {
+              const o = JSON.parse(data) as { label?: string }
+              if (typeof o.label === 'string') probePhaseLabel.value = o.label
+            } catch {
+              /* ignore */
+            }
+            return
+          }
+          if (name === 'meta') {
+            try {
+              const o = JSON.parse(data) as {
+                sources?: string[]
+                retrievedChunks?: number
+              }
+              if (Array.isArray(o.sources)) sources = o.sources
+              if (typeof o.retrievedChunks === 'number') {
+                retrievedChunks = o.retrievedChunks
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        },
+      }
     )
-    if (data.code !== 0) throw new Error(data.message || '试答失败')
-    probeAnswer.value = data.data ?? null
+    probeAnswer.value = {
+      answer: probeStreamText.value,
+      sources,
+      retrievedChunks,
+    }
   } catch (e) {
-    probeError.value = getErrorMessage(e)
+    if ((e as Error)?.name === 'AbortError') {
+      probeError.value = null
+    } else {
+      probeError.value = getErrorMessage(e)
+    }
   } finally {
     probeLoading.value = false
+    probePhaseLabel.value = null
+    probeAbort = null
   }
 }
 
@@ -308,7 +363,7 @@ onMounted(async () => {
         检索试答
       </h3>
       <p class="ds-hint kb-probe-hint">
-        调用与问诊同源的非流式接口，仅验证当前库的召回与回答质量；0 表示相似度阈值不过滤。结果不写入任何问诊会话。
+        走与问诊同源的 SSE 流式接口（含 phase / meta），便于观察检索与生成阶段；0 表示相似度阈值不过滤。结果不写入任何问诊会话。
       </p>
       <label class="ds-field kb-probe-field">
         试答问题
@@ -362,8 +417,22 @@ onMounted(async () => {
       >
         {{ probeError }}
       </DsAlert>
+      <p
+        v-if="probeLoading && probePhaseLabel"
+        class="kb-probe-phase"
+        role="status"
+        aria-live="polite"
+      >
+        {{ probePhaseLabel }}
+      </p>
       <div
-        v-if="probeLoading"
+        v-if="probeLoading && probeStreamText"
+        class="kb-probe-answer kb-probe-answer--stream"
+      >
+        <MarkdownContent :source="probeStreamText" />
+      </div>
+      <div
+        v-else-if="probeLoading"
         class="kb-probe-skeleton"
         role="status"
         aria-busy="true"
@@ -384,7 +453,7 @@ onMounted(async () => {
           </template>
         </p>
         <div class="kb-probe-answer">
-          {{ probeAnswer.answer }}
+          <MarkdownContent :source="probeAnswer.answer" />
         </div>
       </div>
     </section>
@@ -718,6 +787,16 @@ onMounted(async () => {
 .kb-probe-alert {
   margin-top: 0.75rem;
 }
+.kb-probe-phase {
+  margin: 0.75rem 0 0;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  background: rgba(99, 102, 241, 0.07);
+  border-radius: 0.45rem;
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
 .kb-probe-skeleton {
   margin-top: 0.85rem;
   display: flex;
@@ -759,8 +838,13 @@ onMounted(async () => {
   margin: 0;
   font-size: 0.9375rem;
   line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
   color: var(--color-text);
+}
+.kb-probe-answer--stream {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px dashed rgba(99, 102, 241, 0.22);
 }
 </style>

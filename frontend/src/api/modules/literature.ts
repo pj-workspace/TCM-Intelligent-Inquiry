@@ -69,6 +69,11 @@ export function queryLiteratureCollection(
   )
 }
 
+/** SSE 流式试答（phase / meta 与知识库 stream 一致）。 */
+export function literatureQueryStreamUrl(collectionId: string): string {
+  return `/api/v1/literature/collections/${encodeURIComponent(collectionId)}/query/stream`
+}
+
 export function listLiteratureUploads(config?: AxiosRequestConfig) {
   return apiClient.get<ApiResult<LiteratureFileView[]>>(
     '/v1/literature/uploads',

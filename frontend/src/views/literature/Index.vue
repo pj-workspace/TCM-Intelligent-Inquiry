@@ -4,13 +4,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { onBeforeRouteLeave } from 'vue-router'
 import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
+import { openSseStream } from '@/api/core/sse'
 import { validateIngestChunkParams } from '@/utils/chunkUploadParams'
+import MarkdownContent from '@/components/business/MarkdownContent.vue'
 import {
   deleteLiteratureCollection,
   deleteLiteratureDocument,
   getLiteratureHealth,
   listLiteratureCollectionFiles,
-  queryLiteratureCollection,
+  literatureQueryStreamUrl,
   uploadLiteratureFile,
 } from '@/api/modules/literature'
 import DsAlert from '@/components/common/DsAlert.vue'
@@ -42,6 +44,9 @@ const probeSimilarity = ref(0)
 const probeLoading = ref(false)
 const probeError = ref<string | null>(null)
 const probeAnswer = ref<LiteratureQueryResponse | null>(null)
+const probeStreamText = ref('')
+const probePhaseLabel = ref<string | null>(null)
+let probeAbort: AbortController | null = null
 
 async function refreshHealth() {
   try {
@@ -75,6 +80,8 @@ watch(collectionId, () => {
   // 切换或清空临时库时丢弃上一次试答，避免将旧库的答案发在新库上下文下误读
   probeAnswer.value = null
   probeError.value = null
+  probeStreamText.value = ''
+  probePhaseLabel.value = null
 })
 
 /**
@@ -188,7 +195,7 @@ function formatDate(iso: string) {
 }
 
 /**
- * 对当前 session 中的临时库发起向量检索 + 生成；参数语义与知识库试答、问诊文献模式一致。
+ * 对当前临时库发起 SSE 流式 RAG 试答（phase / meta 与知识库 stream 一致）。
  */
 async function runLiteratureProbe() {
   const cid = collectionId.value?.trim()
@@ -201,25 +208,72 @@ async function runLiteratureProbe() {
     ElMessage.warning('请输入试答问题')
     return
   }
+  probeAbort?.abort()
+  probeAbort = new AbortController()
   probeLoading.value = true
   probeError.value = null
   probeAnswer.value = null
+  probeStreamText.value = ''
+  probePhaseLabel.value = null
+  let retrievedChunks = 0
+  let sources: string[] = []
   try {
-    const { data } = await queryLiteratureCollection(
-      cid,
-      {
-        message: q,
-        topK: probeTopK.value,
-        similarityThreshold: probeSimilarity.value,
+    await openSseStream(
+      literatureQueryStreamUrl(cid),
+      (chunk) => {
+        probeStreamText.value += chunk
       },
-      silentAxiosConfig
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: q,
+          topK: probeTopK.value,
+          similarityThreshold: probeSimilarity.value,
+        }),
+        signal: probeAbort.signal,
+        onNamedEvent: (name, data) => {
+          if (name === 'phase') {
+            try {
+              const o = JSON.parse(data) as { label?: string }
+              if (typeof o.label === 'string') probePhaseLabel.value = o.label
+            } catch {
+              /* ignore */
+            }
+            return
+          }
+          if (name === 'meta') {
+            try {
+              const o = JSON.parse(data) as {
+                sources?: string[]
+                retrievedChunks?: number
+              }
+              if (Array.isArray(o.sources)) sources = o.sources
+              if (typeof o.retrievedChunks === 'number') {
+                retrievedChunks = o.retrievedChunks
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        },
+      }
     )
-    if (data.code !== 0) throw new Error(data.message || '试答失败')
-    probeAnswer.value = data.data ?? null
+    probeAnswer.value = {
+      answer: probeStreamText.value,
+      sources,
+      retrievedChunks,
+    }
   } catch (e) {
-    probeError.value = getErrorMessage(e)
+    if ((e as Error)?.name === 'AbortError') {
+      probeError.value = null
+    } else {
+      probeError.value = getErrorMessage(e)
+    }
   } finally {
     probeLoading.value = false
+    probePhaseLabel.value = null
+    probeAbort = null
   }
 }
 
@@ -359,7 +413,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
         检索试答
       </h3>
       <p class="ds-hint lit-probe-hint">
-        调用临时库非流式 RAG 接口，仅验证当前已入库文献的召回与回答；0 表示相似度阈值不过滤。结果不写入问诊会话。
+        走临时库 SSE 流式 RAG（phase / meta），便于观察检索与生成；0 表示相似度阈值不过滤。结果不写入问诊会话。
       </p>
       <label class="ds-field lit-probe-field">
         试答问题
@@ -413,8 +467,22 @@ onBeforeRouteLeave(async (_to, _from, next) => {
       >
         {{ probeError }}
       </DsAlert>
+      <p
+        v-if="probeLoading && probePhaseLabel"
+        class="lit-probe-phase"
+        role="status"
+        aria-live="polite"
+      >
+        {{ probePhaseLabel }}
+      </p>
       <div
-        v-if="probeLoading"
+        v-if="probeLoading && probeStreamText"
+        class="lit-probe-answer lit-probe-answer--stream"
+      >
+        <MarkdownContent :source="probeStreamText" />
+      </div>
+      <div
+        v-else-if="probeLoading"
         class="lit-probe-skeleton"
         role="status"
         aria-busy="true"
@@ -435,7 +503,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
           </template>
         </p>
         <div class="lit-probe-answer">
-          {{ probeAnswer.answer }}
+          <MarkdownContent :source="probeAnswer.answer" />
         </div>
       </div>
     </section>
@@ -641,6 +709,16 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 .lit-probe-alert {
   margin-top: 0.75rem;
 }
+.lit-probe-phase {
+  margin: 0.75rem 0 0;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  background: rgba(99, 102, 241, 0.07);
+  border-radius: 0.45rem;
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
 .lit-probe-skeleton {
   margin-top: 0.85rem;
   display: flex;
@@ -682,9 +760,14 @@ onBeforeRouteLeave(async (_to, _from, next) => {
   margin: 0;
   font-size: 0.9375rem;
   line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
   color: var(--color-text);
+}
+.lit-probe-answer--stream {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.5rem;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px dashed rgba(99, 102, 241, 0.22);
 }
 .lit-meta {
   display: flex;

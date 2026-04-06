@@ -46,6 +46,7 @@ const {
   error,
   streamingContent,
   ragMeta,
+  streamPhase,
   sendOmni,
   stop,
 } = chat
@@ -62,10 +63,12 @@ const {
   clearPendingImages,
 } = useOmniChatContext()
 
-/** 仿 claw-code CLI 分阶段进度文案 + Braille 帧，便于用户理解 RAG / 流式 / 智能体各自耗时 */
+/** 仿 claw-code CLI 分阶段进度：优先展示后端 {@code event: phase}，缺省时再用前端启发式文案 */
 const { spinChar } = useBrailleSpinner(loading)
 const orchestrationLabel = computed(() => {
   if (!loading.value) return ''
+  const server = streamPhase.value?.label?.trim()
+  if (server) return server
   const stream = streamingContent.value.trim()
   if (mode.value === 'vision') {
     if (!stream) return '智能体编排中（ReAct / 工具 / 视觉）'

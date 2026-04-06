@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.tcm.inquiry.common.sse.SsePhaseEvents;
 import com.tcm.inquiry.config.TcmApiProperties;
 import com.tcm.inquiry.modules.knowledge.config.KnowledgeProperties;
 import com.tcm.inquiry.modules.knowledge.dto.req.KnowledgeQueryRequest;
@@ -71,42 +72,43 @@ public class KnowledgeRagService {
     }
 
     /**
-     * RAG 流式回答：先发 {@code event: meta}（JSON：sources、retrievedChunks），再 {@code message} 增量文本，最后
-     * {@code data: [DONE]}。
+     * RAG 流式回答：先发 {@code event: phase}（检索/生成），再 {@code meta}，正文增量同问诊，最后 {@code
+     * [DONE]}。
      */
     public SseEmitter streamQuery(Long knowledgeBaseId, KnowledgeQueryRequest req) {
-        KnowledgeContextBundle bundle =
-                retrieveContext(
-                        knowledgeBaseId,
-                        req.getMessage(),
-                        req.getTopK(),
-                        req.getSimilarityThreshold());
-        String userPrompt = buildUserPrompt(bundle, req.getMessage());
-
         SseEmitter emitter = new SseEmitter(600_000L);
-        try {
-            emitter.send(
-                    SseEmitter.event()
-                            .name("meta")
-                            .data(
-                                    Map.of(
-                                            "sources",
-                                            bundle.sources(),
-                                            "retrievedChunks",
-                                            bundle.retrievedChunks())));
-        } catch (IOException e) {
-            emitter.completeWithError(e);
-            return emitter;
-        }
-
-        ChatClient client =
-                ChatClient.builder(chatModel).defaultSystem(KnowledgeRagPrompts.RAG_SYSTEM).build();
-        var streamSpec = client.prompt().user(userPrompt).stream();
-
-        AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
         sseAsyncExecutor.execute(
-                () ->
+                () -> {
+                    try {
+                        SsePhaseEvents.sendPhase(
+                                emitter, "rag_retrieval", "知识库向量检索中…");
+                        KnowledgeContextBundle bundle =
+                                retrieveContext(
+                                        knowledgeBaseId,
+                                        req.getMessage(),
+                                        req.getTopK(),
+                                        req.getSimilarityThreshold());
+                        emitter.send(
+                                SseEmitter.event()
+                                        .name("meta")
+                                        .data(
+                                                Map.of(
+                                                        "sources",
+                                                        bundle.sources(),
+                                                        "retrievedChunks",
+                                                        bundle.retrievedChunks())));
+                        SsePhaseEvents.sendPhase(
+                                emitter, "model_stream", "大模型流式生成中…");
+
+                        String userPrompt = buildUserPrompt(bundle, req.getMessage());
+                        ChatClient client =
+                                ChatClient.builder(chatModel)
+                                        .defaultSystem(KnowledgeRagPrompts.RAG_SYSTEM)
+                                        .build();
+                        var streamSpec = client.prompt().user(userPrompt).stream();
+                        AtomicReference<Throwable> errorRef = new AtomicReference<>();
+
                         streamSpec
                                 .content()
                                 .subscribeOn(Schedulers.boundedElastic())
@@ -144,12 +146,21 @@ public class KnowledgeRagService {
                                             }
                                             emitter.complete();
                                         })
-                                .subscribe());
-
-        emitter.onTimeout(
-                () -> {
-                    emitter.complete();
+                                .subscribe();
+                    } catch (Exception ex) {
+                        try {
+                            emitter.send(
+                                    SseEmitter.event()
+                                            .name("error")
+                                            .data(streamErrorMessage(ex)));
+                        } catch (IOException ignored) {
+                            // ignore
+                        }
+                        emitter.completeWithError(ex);
+                    }
                 });
+
+        emitter.onTimeout(emitter::complete);
         emitter.onCompletion(() -> {});
 
         return emitter;

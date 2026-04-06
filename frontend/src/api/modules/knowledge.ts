@@ -72,3 +72,8 @@ export function queryKnowledgeBase(
     config
   )
 }
+
+/** SSE 流式试答（与后端 query/stream 同源，含 phase / meta 事件）。 */
+export function knowledgeQueryStreamUrl(knowledgeBaseId: number): string {
+  return `/api/v1/knowledge/bases/${knowledgeBaseId}/query/stream`
+}

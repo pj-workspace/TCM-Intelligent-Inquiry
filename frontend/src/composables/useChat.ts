@@ -48,6 +48,12 @@ export type ConsultationRagMeta = {
   literatureCollectionId?: string
 }
 
+/** 后端 {@code event: phase} 负载（与 claw-code 编排进度语义对齐，供顶栏状态条展示）。 */
+export type StreamPhasePayload = {
+  phase: string
+  label: string
+}
+
 /**
  * 中医问诊：会话列表、历史加载、SSE 流式发送、打字机状态与错误处理。
  */
@@ -61,6 +67,8 @@ export function useChat() {
   const streamingContent = ref('')
   /** 当前回合知识库检索摘要（仅当本轮请求携带 knowledgeBaseId 且收到 meta 时有效） */
   const ragMeta = ref<ConsultationRagMeta | null>(null)
+  /** 本轮 SSE 编排阶段（由后端 {@code event: phase} 推送，优先于前端猜阶段文案） */
+  const streamPhase = ref<StreamPhasePayload | null>(null)
   let abort: AbortController | null = null
 
   function persistLastSession(id: number | null) {
@@ -108,6 +116,7 @@ export function useChat() {
     error.value = null
     streamingContent.value = ''
     ragMeta.value = null
+    streamPhase.value = null
     sessionId.value = id
     try {
       await loadHistory()
@@ -124,6 +133,7 @@ export function useChat() {
     messages.value = []
     streamingContent.value = ''
     ragMeta.value = null
+    streamPhase.value = null
     error.value = null
     await ensureSession()
     if (sessionId.value != null) persistLastSession(sessionId.value)
@@ -160,6 +170,7 @@ export function useChat() {
 
     error.value = null
     ragMeta.value = null
+    streamPhase.value = null
     if (!opts?.skipAppendUser) {
       messages.value = [...messages.value, { role: 'user', content: text }]
     }
@@ -212,6 +223,23 @@ export function useChat() {
           body: JSON.stringify(body),
           signal: abort.signal,
           onNamedEvent: (name, data) => {
+            if (name === 'phase') {
+              try {
+                const o = JSON.parse(data) as {
+                  phase?: string
+                  label?: string
+                }
+                if (typeof o.label === 'string') {
+                  streamPhase.value = {
+                    phase: typeof o.phase === 'string' ? o.phase : '',
+                    label: o.label,
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+              return
+            }
             if (name !== 'meta') return
             try {
               const o = JSON.parse(data) as Record<string, unknown>
@@ -247,6 +275,7 @@ export function useChat() {
         { role: 'assistant', content: assistant },
       ]
       streamingContent.value = ''
+      streamPhase.value = null
       await fetchSessions()
     } catch (e: unknown) {
       if ((e as Error)?.name === 'AbortError') {
@@ -266,9 +295,11 @@ export function useChat() {
         }
       }
       streamingContent.value = ''
+      streamPhase.value = null
     } finally {
       loading.value = false
       abort = null
+      streamPhase.value = null
       scrollToBottom(opts?.scrollRoot ?? null)
     }
   }
@@ -303,6 +334,7 @@ export function useChat() {
 
     error.value = null
     ragMeta.value = null
+    streamPhase.value = null
     const names = images.map((f) => f.name).join('、')
     const userLabel =
       images.length > 0 ? `${text}\n\n（附图${images.length}张：${names}）` : text
@@ -358,6 +390,7 @@ export function useChat() {
       }
     } finally {
       loading.value = false
+      streamPhase.value = null
       scrollToBottom(opts?.scrollRoot ?? null)
     }
   }
@@ -426,6 +459,7 @@ export function useChat() {
     error,
     streamingContent,
     ragMeta,
+    streamPhase,
     fetchSessions,
     ensureSession,
     loadHistory,

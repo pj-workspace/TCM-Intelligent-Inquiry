@@ -77,9 +77,8 @@ public class ConsultationController {
     }
 
     /**
-     * 纯文本流式问诊：SSE。若请求含 {@code knowledgeBaseId}，首包 {@code event: meta}（JSON：sources、
-     * retrievedChunks、knowledgeBaseId），与知识库流式问答一致；随后 {@code message} 增量文本，结束前
-     * {@code data: [DONE]}。错误时可能收到 {@code event: error}。
+     * 纯文本流式问诊：SSE。RAG 时顺序为 {@code event: phase}（检索）→ {@code meta} → {@code phase}（流式生成）→
+     * 正文 token；纯问诊为 {@code phase} → token。结束前 {@code [DONE]}，异常时 {@code event: error}。
      */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody ConsultationChatRequest body) {

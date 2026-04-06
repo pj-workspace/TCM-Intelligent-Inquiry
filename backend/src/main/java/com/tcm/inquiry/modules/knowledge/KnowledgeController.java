@@ -100,7 +100,7 @@ public class KnowledgeController {
     }
 
     /**
-     * 知识库 RAG 流式回答（SSE）：首包 {@code event: meta}，正文增量同问诊 chat，结束 {@code [DONE]}。
+     * 知识库 RAG 流式回答（SSE）：{@code phase}（检索/生成）→ {@code meta} → 正文增量，结束 {@code [DONE]}。
      */
     @PostMapping(value = "/bases/{kbId}/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter queryStream(
