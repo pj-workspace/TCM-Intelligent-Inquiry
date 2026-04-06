@@ -34,11 +34,7 @@ function savePersisted(p: Persisted) {
   }
 }
 
-/**
- * 问诊侧偏好：可选默认知识库 / 文献库 ID（持久化至 localStorage）。
- * 待发附图由问诊页的输入区组件（如 ChatInputBox）自行维护。
- */
-export function useOmniChatContext() {
+function createOmniChatContext() {
   const saved = loadPersisted()
 
   const knowledgeBaseId = ref<number | null>(saved?.knowledgeBaseId ?? null)
@@ -62,4 +58,17 @@ export function useOmniChatContext() {
     knowledgeBaseId,
     literatureCollectionId,
   }
+}
+
+let omniSingleton: ReturnType<typeof createOmniChatContext> | null = null
+
+/**
+ * 问诊侧偏好：可选默认知识库 / 文献库 ID（持久化至 localStorage）。
+ * 待发附图由问诊页的输入区组件（如 ChatInputBox）自行维护。
+ *
+ * 单例：供 ChatView 与 ChatSettingsDrawer 等共享同一份挂载状态。
+ */
+export function useOmniChatContext() {
+  if (!omniSingleton) omniSingleton = createOmniChatContext()
+  return omniSingleton
 }

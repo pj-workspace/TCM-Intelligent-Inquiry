@@ -56,10 +56,7 @@ function saveSessionUi(p: SessionUiPrefs) {
   }
 }
 
-/**
- * 问诊 ChatView 专用：模型/RAG 偏好持久化（localStorage）+ 设置面板/高级区展开态（sessionStorage）。
- */
-export function useConsultChatPrefs() {
+function createConsultChatPrefs() {
   const initial = loadModelPrefs()
   const temperature = ref(initial.temperature)
   const topP = ref(initial.topP)
@@ -125,4 +122,17 @@ export function useConsultChatPrefs() {
     advOpen,
     onConsultAdvToggle,
   }
+}
+
+let consultPrefsSingleton: ReturnType<typeof createConsultChatPrefs> | null =
+  null
+
+/**
+ * 问诊 ChatView 专用：模型/RAG 偏好持久化（localStorage）+ 设置面板/高级区展开态（sessionStorage）。
+ *
+ * 单例：供 ChatView 与 ChatSettingsDrawer 等共享同一套偏好与抽屉开关状态。
+ */
+export function useConsultChatPrefs() {
+  if (!consultPrefsSingleton) consultPrefsSingleton = createConsultChatPrefs()
+  return consultPrefsSingleton
 }
