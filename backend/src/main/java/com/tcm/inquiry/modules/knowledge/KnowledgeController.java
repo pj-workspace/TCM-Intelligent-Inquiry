@@ -74,6 +74,10 @@ public class KnowledgeController {
         return ResponseEntity.ok(R.ok(knowledgeFileService.listFiles(knowledgeBaseId)));
     }
 
+    /**
+     * 上传文档：请求线程仅校验、落盘并写入 {@code PENDING} 元数据，向量化在 {@code ingestionTaskExecutor} 中异步执行；
+     * 响应体中的 {@link KnowledgeFileView#status()} 反映排队/处理进度，可轮询列表接口获取最终状态。
+     */
     @PostMapping(value = "/bases/{kbId}/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResult<KnowledgeFileView>> uploadDocument(
             @PathVariable("kbId") Long knowledgeBaseId,

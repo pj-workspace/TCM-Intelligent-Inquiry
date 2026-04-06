@@ -12,7 +12,7 @@ import {
 } from '@/api/modules/literature'
 import LiteratureFileTable from '@/views/literature/components/LiteratureFileTable.vue'
 import LiteratureProbeChat from '@/views/literature/components/LiteratureProbeChat.vue'
-import { useLiteratureUpload } from '@/views/literature/composables/useLiteratureUpload'
+import LiteratureUploadManager from '@/views/literature/components/LiteratureUploadManager.vue'
 import type { LiteratureFileView } from '@/types/literature'
 import {
   formatHealthStatus,
@@ -28,6 +28,10 @@ const health = ref('加载中…')
 const collectionId = ref<string | null>(null)
 const files = ref<LiteratureFileView[]>([])
 const loadingFiles = ref(false)
+
+const literatureUploadRef = ref<InstanceType<typeof LiteratureUploadManager> | null>(
+  null
+)
 
 async function loadFiles() {
   if (!collectionId.value) {
@@ -47,17 +51,6 @@ async function loadFiles() {
   }
 }
 
-const {
-  chunkSize,
-  chunkOverlap,
-  uploading,
-  msg,
-  handleUpload,
-} = useLiteratureUpload({
-  collectionId,
-  loadFiles,
-})
-
 async function refreshHealth() {
   try {
     const { data } = await getLiteratureHealth(silentAxiosConfig)
@@ -71,11 +64,6 @@ watch(collectionId, () => {
   void loadFiles()
 })
 
-/**
- * 与 sessionStorage 同步：非空则记录到本标签页（供 pagehide + sendBeacon 释放）；
- * 从「有值」变为空时清除（显式删库 / 新建空库 / 路由守卫删库后）。
- * 初次进入页面且 ref 为空时，不覆盖 storage，以便保留「保留并离开」后的 ID 供恢复或关页释放。
- */
 watch(collectionId, (v, oldV) => {
   if (v) {
     setLiteratureTabCollectionId(v)
@@ -101,13 +89,15 @@ async function purgeCollection() {
   await deleteLiteratureCollection(collectionId.value, silentAxiosConfig)
   collectionId.value = null
   files.value = []
-  msg.value = '已清空临时库'
+  literatureUploadRef.value?.setUploadMessage('已清空临时库')
 }
 
 async function newCollection() {
   collectionId.value = null
   files.value = []
-  msg.value = '请上传首个文件，将自动新建临时文献库'
+  literatureUploadRef.value?.setUploadMessage(
+    '请上传首个文件，将自动新建临时文献库'
+  )
 }
 
 function formatDate(iso: string) {
@@ -118,7 +108,6 @@ function formatDate(iso: string) {
   }
 }
 
-/** 同库各行 expiresAt 对齐，取首条展示即可 */
 const collectionExpiresLabel = computed(() => {
   const row = files.value.find((f) => f.expiresAt)
   if (!row?.expiresAt) return ''
@@ -140,12 +129,8 @@ onMounted(async () => {
   await refreshHealth()
 })
 
-/**
- * 离开文献管理路由时：若存在活跃临时库，提示是否立即删除服务端向量与元数据（否则仍依赖 TTL）。
- * 上传进行中禁止跳转，避免半途中断导致状态不一致。
- */
 onBeforeRouteLeave(async (_to, _from, next) => {
-  if (uploading.value) {
+  if (literatureUploadRef.value?.isUploading()) {
     ElMessage.warning('正在上传文献，请等待完成后再切换页面')
     next(false)
     return
@@ -249,58 +234,12 @@ onBeforeRouteLeave(async (_to, _from, next) => {
       </p>
     </section>
 
-    <LiteratureProbeChat :collection-id="collectionId" />
-
-    <section class="ds-card">
-      <h3 class="ds-h3 ds-card__title">
-        上传文献
-      </h3>
-      <p class="ds-hint lit-upload-hint">
-        可多选文件依次解析；同一批上传会共享当前临时库 ID（首批会自动建库）。重叠为 0 时按 Token 分块；重叠
-        &gt;0 时按码点滑动窗口（参数含义与知识库页一致）。
-      </p>
-      <div class="ds-row ds-row--center lit-upload-row">
-        <label class="ds-field lit-field-inline">
-          分块约长（chunkSize）
-          <input
-            v-model.number="chunkSize"
-            class="ds-input ds-input--narrow"
-            type="number"
-            inputmode="numeric"
-            min="128"
-            max="2048"
-            step="64"
-          >
-        </label>
-        <label class="ds-field lit-field-inline">
-          重叠（chunkOverlap）
-          <input
-            v-model.number="chunkOverlap"
-            class="ds-input ds-input--narrow"
-            type="number"
-            inputmode="numeric"
-            min="0"
-            max="1024"
-            step="32"
-            title="0=Token 切分；>0=码点滑动窗口"
-          >
-        </label>
-        <label class="ds-file-label ds-file-label--solid lit-file-btn">
-          选择文件
-          <input
-            type="file"
-            multiple
-            :disabled="uploading"
-            @change="handleUpload"
-          >
-        </label>
-      </div>
-      <p
-        v-if="msg"
-        class="ds-msg--success"
-      >
-        {{ msg }}
-      </p>
+    <section class="ds-card lit-ingest-card">
+      <LiteratureUploadManager
+        ref="literatureUploadRef"
+        v-model:collection-id="collectionId"
+        :load-files="loadFiles"
+      />
       <LiteratureFileTable
         :files="files"
         :loading="loadingFiles"
@@ -308,6 +247,8 @@ onBeforeRouteLeave(async (_to, _from, next) => {
         @remove="removeFile"
       />
     </section>
+
+    <LiteratureProbeChat :collection-id="collectionId" />
   </div>
 </template>
 
@@ -341,20 +282,9 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 .lit-meta__code {
   font-size: 0.6875rem;
 }
-.lit-upload-row {
-  margin-top: 0.5rem;
-  gap: 1rem;
-}
-.lit-field-inline {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.65rem;
-}
-.lit-field-inline .ds-input--narrow {
-  width: 6.5rem;
-  min-width: 6.5rem;
-}
-.lit-file-btn {
-  flex-shrink: 0;
+.lit-ingest-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 </style>

@@ -66,13 +66,6 @@ public class KnowledgeFileService {
     }
 
     private static KnowledgeFileView toView(KnowledgeFile f) {
-        return new KnowledgeFileView(
-                f.getId(),
-                f.getOriginalFilename(),
-                f.getFileUuid(),
-                f.getSizeBytes(),
-                f.getContentType(),
-                f.getEmbedChunkCount(),
-                f.getCreatedAt());
+        return KnowledgeFileView.fromEntity(f);
     }
 }

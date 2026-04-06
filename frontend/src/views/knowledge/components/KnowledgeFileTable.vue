@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { KnowledgeFileView } from '@/types/knowledge'
+import type { KnowledgeFileView, KnowledgeIngestionStatus } from '@/types/knowledge'
 
 defineProps<{
   files: KnowledgeFileView[]
@@ -17,6 +17,23 @@ function formatDate(iso: string) {
     return new Date(iso).toLocaleString()
   } catch {
     return iso
+  }
+}
+
+const INGEST_STATUS_LABEL: Record<KnowledgeIngestionStatus, string> = {
+  PENDING: '排队',
+  PROCESSING: '处理中',
+  COMPLETED: '完成',
+  FAILED: '失败',
+}
+
+function statusClass(st: KnowledgeIngestionStatus) {
+  return {
+    'kb-status': true,
+    'kb-status--pending': st === 'PENDING',
+    'kb-status--processing': st === 'PROCESSING',
+    'kb-status--completed': st === 'COMPLETED',
+    'kb-status--failed': st === 'FAILED',
   }
 }
 </script>
@@ -57,6 +74,9 @@ function formatDate(iso: string) {
               向量块数
             </th>
             <th scope="col">
+              入库状态
+            </th>
+            <th scope="col">
               上传时间
             </th>
             <th scope="col">
@@ -77,6 +97,12 @@ function formatDate(iso: string) {
                 f.embedChunkCount != null ? f.embedChunkCount : '—'
               }}
             </td>
+            <td>
+              <span
+                :class="statusClass(f.status)"
+                :title="f.errorMessage ?? undefined"
+              >{{ INGEST_STATUS_LABEL[f.status] }}</span>
+            </td>
             <td class="kb-table__mono">
               {{ formatDate(f.createdAt) }}
             </td>
@@ -92,7 +118,7 @@ function formatDate(iso: string) {
           </tr>
           <tr v-if="files.length === 0">
             <td
-              colspan="6"
+              colspan="7"
               class="kb-table-empty"
             >
               <div
@@ -189,6 +215,30 @@ function formatDate(iso: string) {
   font-variant-numeric: tabular-nums;
   font-size: 0.8125rem;
   color: var(--color-muted);
+}
+.kb-status {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.kb-status--pending {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+.kb-status--processing {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+}
+.kb-status--completed {
+  background: color-mix(in srgb, var(--color-success, #16a34a) 14%, transparent);
+  color: var(--color-success, #15803d);
+}
+.kb-status--failed {
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  color: var(--color-danger);
 }
 .kb-table-empty {
   padding: 0;

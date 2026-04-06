@@ -4,58 +4,49 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
 import java.util.UUID;
 
-import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.tika.TikaDocumentReader;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.tcm.inquiry.modules.knowledge.ai.VectorStoreFilterDeletion;
-import com.tcm.inquiry.modules.knowledge.ai.chunking.IngestionDocumentChunker;
 import com.tcm.inquiry.modules.knowledge.config.KnowledgeProperties;
 import com.tcm.inquiry.modules.knowledge.dto.resp.KnowledgeFileView;
+import com.tcm.inquiry.modules.knowledge.entity.IngestionStatus;
 import com.tcm.inquiry.modules.knowledge.entity.KnowledgeBase;
 import com.tcm.inquiry.modules.knowledge.entity.KnowledgeFile;
 import com.tcm.inquiry.modules.knowledge.repository.KnowledgeBaseRepository;
 import com.tcm.inquiry.modules.knowledge.repository.KnowledgeFileRepository;
 import com.tcm.inquiry.modules.knowledge.util.KnowledgeFilenameUtil;
 
+/**
+ * 知识库上传入口：同步阶段完成校验、落盘与 {@link IngestionStatus#PENDING} 元数据持久化，
+ * 提交事务后再调度 {@link KnowledgeIngestionAsyncInvoker}，立即返回待处理视图。
+ */
 @Service
 public class KnowledgeIngestionService {
 
-    private static final Logger log = LoggerFactory.getLogger(KnowledgeIngestionService.class);
-
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final KnowledgeFileRepository knowledgeFileRepository;
-    private final VectorStore vectorStore;
     private final KnowledgeProperties knowledgeProperties;
-    private final VectorStoreFilterDeletion vectorStoreFilterDeletion;
-    private final IngestionDocumentChunker ingestionDocumentChunker;
+    private final KnowledgeIngestionAsyncInvoker asyncInvoker;
 
     public KnowledgeIngestionService(
             KnowledgeBaseRepository knowledgeBaseRepository,
             KnowledgeFileRepository knowledgeFileRepository,
-            VectorStore vectorStore,
             KnowledgeProperties knowledgeProperties,
-            VectorStoreFilterDeletion vectorStoreFilterDeletion,
-            IngestionDocumentChunker ingestionDocumentChunker) {
+            KnowledgeIngestionAsyncInvoker asyncInvoker) {
         this.knowledgeBaseRepository = knowledgeBaseRepository;
         this.knowledgeFileRepository = knowledgeFileRepository;
-        this.vectorStore = vectorStore;
         this.knowledgeProperties = knowledgeProperties;
-        this.vectorStoreFilterDeletion = vectorStoreFilterDeletion;
-        this.ingestionDocumentChunker = ingestionDocumentChunker;
+        this.asyncInvoker = asyncInvoker;
     }
 
+    /**
+     * 接收上传：写入本地文件 + 保存 PENDING 行，事务提交后异步执行向量化；响应不等待向量写入完成。
+     */
     @Transactional
     public KnowledgeFileView ingest(
             Long knowledgeBaseId,
@@ -82,80 +73,44 @@ public class KnowledgeIngestionService {
         Path target = kbDir.resolve(diskName);
         multipart.transferTo(target);
 
-        String kbIdStr = String.valueOf(knowledgeBaseId);
         String relativeStored =
-                storageRoot.resolve(knowledgeBaseId.toString()).resolve(diskName).toString().replace('\\', '/');
+                storageRoot
+                        .resolve(knowledgeBaseId.toString())
+                        .resolve(diskName)
+                        .toString()
+                        .replace('\\', '/');
 
-        try {
-            TikaDocumentReader reader = new TikaDocumentReader(new FileSystemResource(target));
-            List<Document> loaded = reader.get();
-            if (loaded.isEmpty()) {
-                throw new IllegalStateException("no text extracted from file");
-            }
+        KnowledgeFile row = new KnowledgeFile();
+        row.setKnowledgeBase(kb);
+        row.setOriginalFilename(
+                multipart.getOriginalFilename() != null ? multipart.getOriginalFilename() : safeName);
+        row.setFileUuid(fileUuid);
+        row.setStoredRelativePath(relativeStored);
+        row.setContentType(
+                multipart.getContentType() != null ? multipart.getContentType() : "application/octet-stream");
+        row.setSizeBytes(multipart.getSize());
+        row.setEmbedChunkCount(null);
+        row.setStatus(IngestionStatus.PENDING);
+        row.setErrorMessage(null);
+        KnowledgeFile saved = knowledgeFileRepository.save(row);
+        Long persistedId = saved.getId();
 
-            int overlapEff =
-                    chunkOverlapOverride != null
-                            ? chunkOverlapOverride
-                            : knowledgeProperties.getDefaultChunkOverlapChars();
-            int chunk =
-                    chunkSizeOverride != null && chunkSizeOverride > 32
-                            ? chunkSizeOverride
-                            : knowledgeProperties.getChunkSize();
+        scheduleAfterCommit(persistedId, chunkSizeOverride, chunkOverlapOverride);
 
-            List<Document> chunks = ingestionDocumentChunker.chunk(loaded, chunkSizeOverride, chunkOverlapOverride);
-            for (Document d : chunks) {
-                d.getMetadata().put("kb_id", kbIdStr);
-                d.getMetadata().put("file_id", fileUuid);
-                d.getMetadata().put("source", safeName);
-            }
-
-            // 先落 Redis 向量索引，再写 MySQL 元数据；失败时外层 catch 会删盘文件并 best-effort 删向量
-            vectorStore.add(chunks);
-
-            KnowledgeFile row = new KnowledgeFile();
-            row.setKnowledgeBase(kb);
-            row.setOriginalFilename(
-                    multipart.getOriginalFilename() != null
-                            ? multipart.getOriginalFilename()
-                            : safeName);
-            row.setFileUuid(fileUuid);
-            row.setStoredRelativePath(relativeStored);
-            row.setContentType(
-                    multipart.getContentType() != null ? multipart.getContentType() : "application/octet-stream");
-            row.setSizeBytes(multipart.getSize());
-            // 管理端「向量化状态」：记录实际写入向量库的切片条数
-            row.setEmbedChunkCount(chunks.size());
-            KnowledgeFile saved = knowledgeFileRepository.save(row);
-
-            log.info(
-                    "知识库入库完成 kbId={} file={} chunks={} chunkSizeParam={} overlapChars={}",
-                    knowledgeBaseId,
-                    safeName,
-                    chunks.size(),
-                    chunk,
-                    overlapEff);
-
-            return toView(saved);
-        } catch (RuntimeException e) {
-            Files.deleteIfExists(target);
-            try {
-                vectorStoreFilterDeletion.deleteByFilter(
-                        new FilterExpressionBuilder().eq("file_id", fileUuid).build());
-            } catch (Exception ignore) {
-                // best-effort rollback vectors
-            }
-            throw e;
-        }
+        return KnowledgeFileView.fromEntity(saved);
     }
 
-    private static KnowledgeFileView toView(KnowledgeFile f) {
-        return new KnowledgeFileView(
-                f.getId(),
-                f.getOriginalFilename(),
-                f.getFileUuid(),
-                f.getSizeBytes(),
-                f.getContentType(),
-                f.getEmbedChunkCount(),
-                f.getCreatedAt());
+    private void scheduleAfterCommit(Long knowledgeFileId, Integer chunkSizeOverride, Integer chunkOverlapOverride) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            asyncInvoker.submit(knowledgeFileId, chunkSizeOverride, chunkOverlapOverride);
+                        }
+                    });
+        } else {
+            asyncInvoker.submit(knowledgeFileId, chunkSizeOverride, chunkOverlapOverride);
+        }
     }
 }

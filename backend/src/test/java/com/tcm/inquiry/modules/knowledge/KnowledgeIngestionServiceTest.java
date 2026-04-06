@@ -2,7 +2,10 @@ package com.tcm.inquiry.modules.knowledge;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -16,12 +19,11 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.tcm.inquiry.modules.knowledge.ai.VectorStoreFilterDeletion;
-import com.tcm.inquiry.modules.knowledge.ai.chunking.IngestionDocumentChunker;
 import com.tcm.inquiry.modules.knowledge.config.KnowledgeProperties;
 import com.tcm.inquiry.modules.knowledge.entity.KnowledgeBase;
 import com.tcm.inquiry.modules.knowledge.repository.KnowledgeBaseRepository;
 import com.tcm.inquiry.modules.knowledge.repository.KnowledgeFileRepository;
+import com.tcm.inquiry.modules.knowledge.service.KnowledgeIngestionAsyncInvoker;
 import com.tcm.inquiry.modules.knowledge.service.KnowledgeIngestionService;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,10 +32,8 @@ class KnowledgeIngestionServiceTest {
 
     @Mock private KnowledgeBaseRepository knowledgeBaseRepository;
     @Mock private KnowledgeFileRepository knowledgeFileRepository;
-    @Mock private org.springframework.ai.vectorstore.VectorStore vectorStore;
     @Mock private KnowledgeProperties knowledgeProperties;
-    @Mock private VectorStoreFilterDeletion vectorStoreFilterDeletion;
-    @Mock private IngestionDocumentChunker ingestionDocumentChunker;
+    @Mock private KnowledgeIngestionAsyncInvoker asyncInvoker;
 
     private KnowledgeIngestionService ingestionService;
 
@@ -45,10 +45,8 @@ class KnowledgeIngestionServiceTest {
                 new KnowledgeIngestionService(
                         knowledgeBaseRepository,
                         knowledgeFileRepository,
-                        vectorStore,
                         knowledgeProperties,
-                        vectorStoreFilterDeletion,
-                        ingestionDocumentChunker);
+                        asyncInvoker);
     }
 
     @Test
@@ -59,6 +57,7 @@ class KnowledgeIngestionServiceTest {
         assertThatThrownBy(() -> ingestionService.ingest(1L, file, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("knowledge base not found");
+        verify(asyncInvoker, never()).submit(anyLong(), any(), any());
     }
 
     @Test
@@ -72,5 +71,6 @@ class KnowledgeIngestionServiceTest {
         assertThatThrownBy(() -> ingestionService.ingest(1L, file, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("empty file");
+        verify(asyncInvoker, never()).submit(anyLong(), any(), any());
     }
 }

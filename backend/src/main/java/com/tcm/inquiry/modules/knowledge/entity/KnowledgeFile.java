@@ -4,6 +4,8 @@ import java.time.Instant;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -46,6 +48,17 @@ public class KnowledgeFile {
      */
     @Column(name = "embed_chunk_count")
     private Integer embedChunkCount;
+
+    /**
+     * 入库状态；历史行在加列前可能为 null，对外应视为 {@link IngestionStatus#COMPLETED}。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ingestion_status", length = 32)
+    private IngestionStatus status;
+
+    /** 失败时的可读原因（成功或非失败状态时应为 null）。 */
+    @Column(name = "ingestion_error", length = 4000)
+    private String errorMessage;
 
     @Column(nullable = false)
     private Instant createdAt;
@@ -119,6 +132,22 @@ public class KnowledgeFile {
 
     public void setEmbedChunkCount(Integer embedChunkCount) {
         this.embedChunkCount = embedChunkCount;
+    }
+
+    public IngestionStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(IngestionStatus status) {
+        this.status = status;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
     }
 
     public Instant getCreatedAt() {

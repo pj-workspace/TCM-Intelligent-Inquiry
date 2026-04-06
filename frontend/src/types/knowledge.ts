@@ -7,15 +7,24 @@ export type KnowledgeBase = {
   createdAt: string
 }
 
+/** 与后端 IngestionStatus 对齐 */
+export type KnowledgeIngestionStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'COMPLETED'
+  | 'FAILED'
+
 export type KnowledgeFileView = {
   id: number
   originalFilename: string
   fileUuid: string
   sizeBytes: number
   contentType: string | null
-  /** 已向量化分块数；旧数据可能为 null */
+  /** 已向量化分块数；排队/处理中/旧数据可能为 null */
   embedChunkCount: number | null
   createdAt: string
+  status: KnowledgeIngestionStatus
+  errorMessage: string | null
 }
 
 export type KnowledgeQueryResponse = {

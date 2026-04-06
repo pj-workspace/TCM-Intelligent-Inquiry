@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Instant;
 import java.util.List;
 
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -23,6 +24,7 @@ import com.tcm.inquiry.modules.knowledge.ai.KnowledgeRagService;
 import com.tcm.inquiry.modules.knowledge.dto.resp.KnowledgeFileView;
 import com.tcm.inquiry.modules.knowledge.dto.resp.KnowledgeQueryResponse;
 import com.tcm.inquiry.modules.knowledge.entity.KnowledgeBase;
+import com.tcm.inquiry.modules.knowledge.entity.IngestionStatus;
 import com.tcm.inquiry.modules.knowledge.service.KnowledgeFileService;
 import com.tcm.inquiry.modules.knowledge.service.KnowledgeIngestionService;
 import com.tcm.inquiry.modules.knowledge.service.KnowledgeService;
@@ -81,7 +83,15 @@ class KnowledgeControllerWebMvcTest {
                         knowledgeIngestionService.ingest(eq(1L), any(), any(), any()))
                 .thenReturn(
                         new KnowledgeFileView(
-                                1L, "f.pdf", "uuid-1", 100, "application/pdf", 3, Instant.now()));
+                                1L,
+                                "f.pdf",
+                                "uuid-1",
+                                100,
+                                "application/pdf",
+                                null,
+                                Instant.now(),
+                                IngestionStatus.PENDING,
+                                null));
 
         mockMvc.perform(
                         org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart(
@@ -90,6 +100,7 @@ class KnowledgeControllerWebMvcTest {
                                         "file", "f.pdf", "application/pdf", "x".getBytes())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.fileUuid").value("uuid-1"))
-                .andExpect(jsonPath("$.data.embedChunkCount").value(3));
+                .andExpect(jsonPath("$.data.status").value("PENDING"))
+                .andExpect(jsonPath("$.data.embedChunkCount").value(Matchers.nullValue()));
     }
 }

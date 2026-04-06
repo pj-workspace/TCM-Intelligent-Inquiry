@@ -4,6 +4,9 @@ import { silentAxiosConfig } from '@/api/core/client'
 import { getErrorMessage } from '@/api/core/errors'
 import { uploadLiteratureFile } from '@/api/modules/literature'
 import { validateIngestChunkParams } from '@/utils/chunkUploadParams'
+import { mapLimit } from '@/utils/mapLimit'
+
+const UPLOAD_CONCURRENCY = 3
 
 export type UseLiteratureUploadOptions = {
   collectionId: Ref<string | null>
@@ -11,7 +14,7 @@ export type UseLiteratureUploadOptions = {
 }
 
 /**
- * 文献分片上传：校验 chunk 参数、多文件依次上传、回写临时库 ID 与结果文案。
+ * 文献分片上传：校验 chunk 参数、首批无库 ID 时先完成首文件再并发限流、回写临时库 ID。
  */
 export function useLiteratureUpload({
   collectionId,
@@ -23,7 +26,7 @@ export function useLiteratureUpload({
   /** 与知识库相同：>0 时滑动窗口（码点），chunkSize 为窗口长度 */
   const chunkOverlap = ref(0)
 
-  async function onFileChange(e: Event) {
+  async function handleUpload(e: Event) {
     const input = e.target as HTMLInputElement
     const list = input.files
     input.value = ''
@@ -35,46 +38,68 @@ export function useLiteratureUpload({
     }
     uploading.value = true
     msg.value = ''
-    const total = list.length
-    let currentColl = collectionId.value
+    const files = Array.from(list)
+    const total = files.length
     const errors: string[] = []
     let ok = 0
+    const lines: string[] = []
+    let done = 0
+
+    const refreshProgress = () => {
+      msg.value = `上传中（最多 ${UPLOAD_CONCURRENCY} 路并发）${done}/${total}\n${lines.join('\n')}`
+    }
+
+    const uploadOne = async (f: File) => {
+      const fd = new FormData()
+      fd.append('file', f)
+      const cid = collectionId.value
+      if (cid) {
+        fd.append('collectionId', cid)
+      }
+      if (chunkSize.value > 32) {
+        fd.append('chunkSize', String(chunkSize.value))
+      }
+      if (chunkOverlap.value > 0) {
+        fd.append('chunkOverlap', String(chunkOverlap.value))
+      }
+      const { data } = await uploadLiteratureFile(fd, silentAxiosConfig)
+      if (data.code !== 0) throw new Error(data.message)
+      const row = data.data
+      if (row?.tempCollectionId) {
+        collectionId.value = row.tempCollectionId
+      }
+    }
+
+    const processFile = async (f: File) => {
+      try {
+        await uploadOne(f)
+        ok++
+        lines.push(`✓ ${f.name}`)
+      } catch (err) {
+        const m = getErrorMessage(err)
+        errors.push(`${f.name}：${m}`)
+        lines.push(`✗ ${f.name}：${m}`)
+      } finally {
+        done++
+        refreshProgress()
+      }
+    }
+
     try {
-      for (let i = 0; i < total; i++) {
-        const f = list[i]!
-        if (total > 1) {
-          msg.value = `上传中 ${i + 1}/${total}：${f.name}…`
-        }
-        try {
-          const fd = new FormData()
-          fd.append('file', f)
-          if (currentColl) {
-            fd.append('collectionId', currentColl)
-          }
-          if (chunkSize.value > 32) {
-            fd.append('chunkSize', String(chunkSize.value))
-          }
-          if (chunkOverlap.value > 0) {
-            fd.append('chunkOverlap', String(chunkOverlap.value))
-          }
-          const { data } = await uploadLiteratureFile(fd, silentAxiosConfig)
-          if (data.code !== 0) throw new Error(data.message)
-          const row = data.data
-          if (row?.tempCollectionId) {
-            currentColl = row.tempCollectionId
-            collectionId.value = currentColl
-          }
-          ok++
-        } catch (err) {
-          errors.push(`${f.name}：${getErrorMessage(err)}`)
-        }
+      let rest = files
+      if (collectionId.value == null && files.length > 0) {
+        await processFile(files[0]!)
+        rest = files.slice(1)
+      }
+      if (rest.length > 0) {
+        await mapLimit(rest, UPLOAD_CONCURRENCY, (f) => processFile(f))
       }
       await loadFiles()
       if (errors.length === 0) {
         msg.value =
-          total === 1 && list[0]
-            ? `已解析入库：${list[0].name}`
-            : `已依次入库 ${ok} 个文件`
+          total === 1 && files[0]
+            ? `已解析入库：${files[0].name}`
+            : `已完成入库 ${ok} 个文件`
       } else {
         msg.value =
           ok > 0
@@ -91,7 +116,6 @@ export function useLiteratureUpload({
     chunkOverlap,
     uploading,
     msg,
-    /** 绑定至 `<input type="file" @change="…" />` */
-    handleUpload: onFileChange,
+    handleUpload,
   }
 }
