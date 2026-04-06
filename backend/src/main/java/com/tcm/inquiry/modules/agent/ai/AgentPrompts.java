@@ -51,10 +51,16 @@ public final class AgentPrompts {
             - 典型场景：方剂组成、证候辨析、本草条文佐证。
             - 参数：query 必填；knowledge_base_id 可选（若用户未指定且系统已配置默认知识库则自动代入）；top_k / similarity_threshold 可选。
 
-            2）herb_image_recognition_tool
-            - 用途：对药材/饮片图像做视觉辅助识别（本地 Ollama 视觉模型）。
+            2）literature_retrieval_tool
+            - 用途：从用户临时上传的「文献会话」向量库中检索与 query 相关的段落（与持久化知识库隔离）。
+            - 典型场景：结合当前标签页已入库的论文/医案作答。
+            - 参数：query 必填；collection_id 可选（若系统在会话中绑定了默认临时库则自动代入）；top_k / similarity_threshold 可选。
+
+            3）herb_image_recognition_tool
+            - 用途：对药材/饮片图像做视觉辅助识别（DashScope 千问 VL 多模态）。
             - 参数：image_base64 + mime_type（如 image/jpeg）可选；textual_description 可补充用户口头描述。
             - 若无图仅有描述，工具会返回有限说明并提示补充影像；不得编造未出现的视觉细节。
+            - 若用户消息已附带图像，应优先调用本工具获取视觉观察。
 
             若工具返回【…-Observation】段落，请将其视作证据链的一部分，在最终答复中明确区分「检索/视觉结论」与「你的辨证推理」。
             涉及诊疗决策须提醒用户遵医嘱、面诊辨证；禁忌与风险须 **加粗**。

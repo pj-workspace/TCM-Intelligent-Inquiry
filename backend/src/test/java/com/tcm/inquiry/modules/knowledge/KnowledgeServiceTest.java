@@ -29,7 +29,7 @@ class KnowledgeServiceTest {
 
     @BeforeEach
     void setUp() {
-        knowledgeService = new KnowledgeService(knowledgeBaseRepository, "bge-m3:latest");
+        knowledgeService = new KnowledgeService(knowledgeBaseRepository, "text-embedding-v4");
     }
 
     @Test
@@ -47,8 +47,8 @@ class KnowledgeServiceTest {
         ArgumentCaptor<KnowledgeBase> cap = ArgumentCaptor.forClass(KnowledgeBase.class);
         verify(knowledgeBaseRepository).save(cap.capture());
         assertThat(cap.getValue().getName()).isEqualTo("n");
-        assertThat(cap.getValue().getEmbeddingModelName()).isEqualTo("bge-m3:latest");
-        assertThat(cap.getValue().getVectorBackend()).isEqualTo(VectorBackend.OLLAMA);
+        assertThat(cap.getValue().getEmbeddingModelName()).isEqualTo("text-embedding-v4");
+        assertThat(cap.getValue().getVectorBackend()).isEqualTo(VectorBackend.DASHSCOPE);
     }
 
     @Test

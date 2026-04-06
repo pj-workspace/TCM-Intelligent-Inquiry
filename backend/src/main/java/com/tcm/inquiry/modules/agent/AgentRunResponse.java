@@ -7,10 +7,20 @@ import java.util.List;
  * {@code chat+kb} 等沿用旧版前缀；{@code knowledgeSources} 为知识库来源文件名集合（预注入或工具累积）。
  */
 public record AgentRunResponse(
-        String assistant, List<String> knowledgeSources, String mode, List<String> toolCallSummaries) {
+        String assistant,
+        List<String> knowledgeSources,
+        String mode,
+        List<String> toolCallSummaries,
+        /** 文献检索工具累计的来源文件名（持久化知识库来源见 knowledgeSources） */
+        List<String> literatureSources) {
 
     public AgentRunResponse(String assistant, List<String> knowledgeSources, String mode) {
-        this(assistant, knowledgeSources, mode, List.of());
+        this(assistant, knowledgeSources, mode, List.of(), List.of());
+    }
+
+    public AgentRunResponse(
+            String assistant, List<String> knowledgeSources, String mode, List<String> toolCallSummaries) {
+        this(assistant, knowledgeSources, mode, toolCallSummaries, List.of());
     }
 
     public static AgentRunResponse chatOnly(String text) {

@@ -14,11 +14,11 @@ public class ConsultationChatRequest {
     @NotBlank
     private String message;
 
-    /** 覆盖 Ollama 采样温度；null 时使用服务端默认（如 0.7）。 */
+    /** 覆盖采样温度；null 时使用服务端默认（如 0.7）。 */
     private Double temperature;
 
     /**
-     * 覆盖 Ollama nucleus 采样 top_p；null 时使用服务端默认（如 0.9）。 值越大则候选词集合越宽。
+     * 覆盖 nucleus 采样 top_p；null 时使用服务端默认（如 0.9）。值越大则候选词集合越宽。
      */
     private Double topP;
 
@@ -37,9 +37,7 @@ public class ConsultationChatRequest {
     /** 覆盖知识库相似度阈值；仅当 knowledgeBaseId 非空时有效。 */
     private Double ragSimilarityThreshold;
 
-    /**
-     * 可选：检索该临时文献库中与主诉相关的摘录并注入模型输入（与 {@link #knowledgeBaseId} 互斥）。
-     */
+    /** 可选：默认临时文献库 ID，供 Agent 按需调用 literature_retrieval_tool（可与知识库并存）。 */
     private String literatureCollectionId;
 
     /** 文献检索 topK；仅当 literatureCollectionId 非空时有效。 */
@@ -47,6 +45,15 @@ public class ConsultationChatRequest {
 
     /** 文献相似度阈值；仅当 literatureCollectionId 非空时有效。 */
     private Double literatureSimilarityThreshold;
+
+    /**
+     * 可选：单张药材 / 舌象等附图 Base64，写入 Agent ToolContext，由模型决定是否调用
+     * herb_image_recognition_tool。
+     */
+    private String herbImageBase64;
+
+    /** 可选：附图 MIME，如 image/png。 */
+    private String herbImageMimeType;
 
     public Long getSessionId() {
         return sessionId;
@@ -134,5 +141,21 @@ public class ConsultationChatRequest {
 
     public void setLiteratureSimilarityThreshold(Double literatureSimilarityThreshold) {
         this.literatureSimilarityThreshold = literatureSimilarityThreshold;
+    }
+
+    public String getHerbImageBase64() {
+        return herbImageBase64;
+    }
+
+    public void setHerbImageBase64(String herbImageBase64) {
+        this.herbImageBase64 = herbImageBase64;
+    }
+
+    public String getHerbImageMimeType() {
+        return herbImageMimeType;
+    }
+
+    public void setHerbImageMimeType(String herbImageMimeType) {
+        this.herbImageMimeType = herbImageMimeType;
     }
 }

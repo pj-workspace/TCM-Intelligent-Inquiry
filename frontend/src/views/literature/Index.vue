@@ -235,8 +235,14 @@ async function runLiteratureProbe() {
         onNamedEvent: (name, data) => {
           if (name === 'phase') {
             try {
-              const o = JSON.parse(data) as { label?: string }
-              if (typeof o.label === 'string') probePhaseLabel.value = o.label
+              const o = JSON.parse(data) as { label?: string; detail?: string }
+              if (typeof o.label === 'string') {
+                const d =
+                  typeof o.detail === 'string' && o.detail.trim() !== ''
+                    ? o.detail.trim()
+                    : ''
+                probePhaseLabel.value = d ? `${o.label} — ${d}` : o.label
+              }
             } catch {
               /* ignore */
             }

@@ -19,7 +19,7 @@
 
     <properties>
         <java.version>17</java.version>
-        <!-- Spring AI 1.0.x aligns with Spring Boot 3.3+; Ollama integration artifact is spring-ai-starter-model-ollama -->
+        <!-- Spring AI 1.0.x：对话与向量嵌入走 OpenAI 兼容协议（阿里云 DashScope 兼容模式） -->
         <spring-ai.version>1.0.5</spring-ai.version>
     </properties>
 
@@ -61,7 +61,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-ollama</artifactId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>

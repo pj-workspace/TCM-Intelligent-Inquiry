@@ -2,7 +2,7 @@
 
 ## 环境与构建
 
-- **后端**：JDK 17+，`cd backend && ./mvnw test`；真机 Ollama 集成测试需设置 `OLLAMA_LIVE=true` 与 `ci` profile（见 CI 工作流）。
+- **后端**：JDK 17+，`cd backend && ./mvnw test`；真机 DashScope 联网集成测试需设置 `DASHSCOPE_LIVE=true`、`DASHSCOPE_API_KEY` 与 `ci` profile。
 - **前端**：Node 22+（与 CI 一致），`cd frontend && npm ci && npm run build && npm run lint && npm test`。
 
 ## Pull request

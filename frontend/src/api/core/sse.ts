@@ -10,8 +10,8 @@ export interface SseStreamOptions {
 }
 
 /**
- * 使用 fetch 建立 SSE（text/event-stream）连接，逐行解析 data: 负载。
- * 适用于后端聊天等流式接口。
+ * 使用 fetch 建立 SSE（text/event-stream），按「空行分帧」解析：合并同一帧内多行 {@code data:}
+ * （对齐 SSE 规范与 claw-code 侧对多行 data 的处理），再分发给正文或 {@code onNamedEvent}。
  */
 export async function openSseStream(
   url: string,
@@ -39,37 +39,82 @@ export async function openSseStream(
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
+  let byteBuffer = ''
   let currentEvent = 'message'
+  const dataLines: string[] = []
+
+  const dispatchFrame = (): boolean => {
+    if (dataLines.length === 0) {
+      currentEvent = 'message'
+      return false
+    }
+    const joined = dataLines.join('\n')
+    dataLines.length = 0
+    const ev = currentEvent
+    currentEvent = 'message'
+
+    if (joined === '[DONE]') {
+      return true
+    }
+    if (ev === 'error') {
+      onNamedEvent?.('error', joined)
+      throw new Error(joined)
+    }
+    if (ev !== 'message') {
+      onNamedEvent?.(ev, joined)
+      return false
+    }
+    onChunk(joined)
+    return false
+  }
+
+  const consumeFullLines = (): boolean => {
+    const lines = byteBuffer.split('\n')
+    byteBuffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const trimmedEnd = line.trimEnd()
+      const raw = trimmedEnd.replace(/\r$/, '')
+      if (raw === '') {
+        if (dispatchFrame()) return true
+        continue
+      }
+      if (raw.startsWith('event:')) {
+        currentEvent = raw.slice(6).trim() || 'message'
+        continue
+      }
+      if (raw.startsWith('data:')) {
+        dataLines.push(raw.slice(5).trimStart())
+        continue
+      }
+    }
+    return false
+  }
 
   try {
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        const trimmed = line.trimEnd()
-        if (trimmed === '') continue
-        if (trimmed.startsWith('event:')) {
-          currentEvent = trimmed.slice(6).trim() || 'message'
-          continue
+      if (value) {
+        byteBuffer += decoder.decode(value, { stream: true })
+      }
+      if (consumeFullLines()) {
+        return
+      }
+      if (done) {
+        byteBuffer += decoder.decode()
+        if (consumeFullLines()) {
+          return
         }
-        if (!trimmed.startsWith('data:')) continue
-        const payload = trimmed.slice(5).trimStart()
-        if (payload === '[DONE]') return
-
-        if (currentEvent === 'error') {
-          onNamedEvent?.('error', payload)
-          throw new Error(payload)
+        if (byteBuffer.trim() !== '') {
+          const raw = byteBuffer.replace(/\r$/, '')
+          byteBuffer = ''
+          if (raw.startsWith('data:')) {
+            dataLines.push(raw.slice(5).trimStart())
+          }
         }
-        if (currentEvent !== 'message') {
-          onNamedEvent?.(currentEvent, payload)
-          currentEvent = 'message'
-          continue
+        if (dataLines.length > 0 && dispatchFrame()) {
+          return
         }
-        onChunk(payload)
+        return
       }
     }
   } finally {

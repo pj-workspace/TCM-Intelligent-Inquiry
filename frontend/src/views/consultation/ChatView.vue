@@ -17,8 +17,7 @@ import {
 } from '@/api/modules/knowledge'
 import { listLiteratureUploads } from '@/api/modules/literature'
 import type { KnowledgeBase } from '@/types/knowledge'
-import type { OmniSendPayload } from '@/types/omniChat'
-import type { ConsultationRagMeta } from '@/composables/useChat'
+import type { ConsultationRagMeta, SendOptions } from '@/composables/useChat'
 import ChatDocMessage from '@/components/business/ChatDocMessage.vue'
 import DsAlert from '@/components/common/DsAlert.vue'
 import DsSelect from '@/components/common/DsSelect.vue'
@@ -31,6 +30,8 @@ import {
   downloadConsultationMarkdownFile,
   downloadConsultationPdfFile,
 } from '@/utils/consultExport'
+import { encodeImageFileToHerbPayload } from '@/utils/herbImagePayload'
+import { LITERATURE_TAB_COLLECTION_SESSION_KEY } from '@/utils/literatureBeacon'
 import { CONSULT_CHAT_KEY } from '@/constants/injectionKeys'
 
 const chat = inject(CONSULT_CHAT_KEY)
@@ -47,16 +48,13 @@ const {
   streamingContent,
   ragMeta,
   streamPhase,
-  sendOmni,
+  send,
   stop,
 } = chat
 
 const {
-  mode,
   knowledgeBaseId,
   literatureCollectionId,
-  visionUseKnowledgeBase,
-  visionKnowledgeBaseId,
   pendingImages,
   addImagesFromInput,
   removeImageAt,
@@ -70,22 +68,21 @@ const orchestrationLabel = computed(() => {
   const server = streamPhase.value?.label?.trim()
   if (server) return server
   const stream = streamingContent.value.trim()
-  if (mode.value === 'vision') {
-    if (!stream) return '智能体编排中（ReAct / 工具 / 视觉）'
-    return '智能体回复流出中…'
-  }
-  if (mode.value === 'knowledge') {
-    if (!ragMeta.value) return '企业知识库向量检索中…'
-    if (!stream) return '检索完成，等待首包…'
-    return '模型流式输出中…'
-  }
-  if (mode.value === 'literature') {
-    if (!ragMeta.value) return '临时文献库检索中…'
-    if (!stream) return '检索完成，等待首包…'
-    return '模型流式输出中…'
-  }
   if (!stream) return '连接本地大模型…'
   return '模型流式输出中…'
+})
+
+/** 后端 phase.detail（附注）；与主标题分行展示，避免顶栏过长 */
+const orchestrationDetail = computed(() => {
+  if (!loading.value) return ''
+  const d = streamPhase.value?.detail?.trim()
+  return d ?? ''
+})
+
+const orchestrationStep = computed(() => {
+  const s = streamPhase.value?.step
+  if (typeof s !== 'number' || !Number.isFinite(s)) return null
+  return Math.max(1, Math.floor(s))
 })
 
 const health = ref<string>('')
@@ -173,9 +170,7 @@ async function onExportPdf() {
 }
 
 const knowledgeSelectOptions = computed<DsSelectOption[]>(() => {
-  const head: DsSelectOption[] = [
-    { value: null, label: '请选择', disabled: true },
-  ]
+  const head: DsSelectOption[] = [{ value: null, label: '不指定' }]
   return [
     ...head,
     ...knowledgeBases.value.map((b) => ({
@@ -186,7 +181,7 @@ const knowledgeSelectOptions = computed<DsSelectOption[]>(() => {
 })
 
 const literatureSelectOptions = computed<DsSelectOption[]>(() => {
-  const head: DsSelectOption[] = [{ value: '', label: '请选择' }]
+  const head: DsSelectOption[] = [{ value: '', label: '不指定' }]
   return [
     ...head,
     ...literatureCollections.value.map((c) => ({
@@ -196,30 +191,27 @@ const literatureSelectOptions = computed<DsSelectOption[]>(() => {
   ]
 })
 
-const visionKbSelectOptions = computed<DsSelectOption[]>(() => {
-  const head: DsSelectOption[] = [
-    { value: null, label: '请选择', disabled: true },
-  ]
-  return [
-    ...head,
-    ...knowledgeBases.value.map((b) => ({
-      value: b.id as number,
-      label: b.name,
-    })),
-  ]
-})
-
 function formatRagLog(meta: ConsultationRagMeta | null): string | null {
   if (!meta) return null
   const lines: string[] = []
-  if (meta.literatureCollectionId) {
-    lines.push(`文献库 ID：${meta.literatureCollectionId}`)
-  } else if (meta.knowledgeBaseId != null) {
-    lines.push(`知识库 ID：${meta.knowledgeBaseId}`)
+  if (meta.agentMode) {
+    lines.push(`编排：${meta.agentMode}`)
   }
-  lines.push(`检索命中：${meta.retrievedChunks} 条片段`)
+  if (meta.knowledgeBaseId != null) {
+    lines.push(`请求侧知识库：#${meta.knowledgeBaseId}`)
+  }
+  if (meta.literatureCollectionId) {
+    lines.push(`请求侧文献库：${meta.literatureCollectionId}`)
+  }
+  if (meta.knowledgeSources?.length) {
+    lines.push(`知识库工具来源：${meta.knowledgeSources.join('、')}`)
+  }
+  if (meta.literatureSources?.length) {
+    lines.push(`文献工具来源：${meta.literatureSources.join('、')}`)
+  }
+  lines.push(`工具命中条数（估）：${meta.retrievedChunks}`)
   if (meta.sources.length) {
-    lines.push(`来源：${meta.sources.join('、')}`)
+    lines.push(`合并来源：${meta.sources.join('、')}`)
   }
   return lines.join('\n')
 }
@@ -265,8 +257,8 @@ async function loadAgentDefaults() {
     const { data } = await getAgentConfig(silentAxiosConfig)
     if (data.code !== 0 || !data.data) return
     const kb = data.data.defaultKnowledgeBaseId
-    if (kb != null && visionKnowledgeBaseId.value == null) {
-      visionKnowledgeBaseId.value = kb
+    if (kb != null && knowledgeBaseId.value == null) {
+      knowledgeBaseId.value = kb
     }
   } catch {
     /* optional */
@@ -286,13 +278,6 @@ watch(
   { deep: true }
 )
 
-watch(
-  () => mode.value,
-  (m) => {
-    if (m === 'literature') void loadLiteratureCollections()
-  }
-)
-
 function closeSettingsOnOutside(ev: MouseEvent) {
   if (!settingsOpen.value) return
   const el = settingsWrapRef.value
@@ -307,6 +292,16 @@ function toggleSettings() {
 
 onMounted(async () => {
   document.addEventListener('click', closeSettingsOnOutside)
+  try {
+    if (!literatureCollectionId.value.trim()) {
+      const b = sessionStorage.getItem(LITERATURE_TAB_COLLECTION_SESSION_KEY)
+      if (b?.trim()) {
+        literatureCollectionId.value = b.trim()
+      }
+    }
+  } catch {
+    /* ignore */
+  }
   try {
     const { data } = await getConsultationHealth(silentAxiosConfig)
     const line = formatHealthStatus(data.code, data.message ?? '')
@@ -334,67 +329,81 @@ function onAttachChange(e: Event) {
   el.value = ''
 }
 
-function buildOmniPayload(skipAppendUser = false): OmniSendPayload {
-  const m = mode.value
+function buildSendOptions(skipAppendUser = false): SendOptions {
   const lit =
     literatureCollectionId.value.trim() === ''
       ? null
       : literatureCollectionId.value.trim()
-  return {
-    mode: m,
-    knowledgeBaseId: knowledgeBaseId.value,
-    literatureCollectionId: lit,
-    visionUseKb: visionUseKnowledgeBase.value,
-    visionKbId: visionKnowledgeBaseId.value,
-    literatureTopK: literatureTopK.value,
-    literatureThreshold: literatureThreshold.value,
-    visionImages: m === 'vision' ? [...pendingImages.value] : [],
+  const opts: SendOptions = {
     temperature: temperature.value,
     topP: topP.value,
     maxHistoryTurns: maxHistoryTurns.value,
-    ragTopK: ragTopK.value,
-    ragSimilarityThreshold: ragSimilarityThreshold.value,
     scrollRoot: threadEl.value,
     skipAppendUser,
   }
+  if (knowledgeBaseId.value != null) {
+    opts.knowledgeBaseId = knowledgeBaseId.value
+    opts.ragTopK = ragTopK.value
+    opts.ragSimilarityThreshold = ragSimilarityThreshold.value
+  }
+  if (lit) {
+    opts.literatureCollectionId = lit
+    opts.literatureRagTopK = literatureTopK.value
+    opts.literatureSimilarityThreshold = literatureThreshold.value
+  }
+  return opts
 }
 
 async function onSend() {
   const text = input.value.trim()
   if (!text || loading.value) return
 
-  if (mode.value === 'vision') {
-    input.value = ''
-    await sendOmni(text, buildOmniPayload(false))
-    if (!error.value) clearPendingImages()
-    return
+  input.value = ''
+
+  const files = [...pendingImages.value]
+  let herbPayload: { herbImageBase64?: string; herbImageMimeType?: string } =
+    {}
+  if (files.length > 0) {
+    herbPayload = await encodeImageFileToHerbPayload(files[0]!)
+  }
+  const names = files.map((f) => f.name).join('、')
+  const userBubbleText =
+    files.length > 0
+      ? `${text}\n\n（附图 ${files.length} 张：${names}；识图工具默认分析首张）`
+      : undefined
+
+  const opts = buildSendOptions(false)
+  if (herbPayload.herbImageBase64) {
+    opts.herbImageBase64 = herbPayload.herbImageBase64
+    opts.herbImageMimeType = herbPayload.herbImageMimeType
+  }
+  if (userBubbleText) {
+    opts.userBubbleText = userBubbleText
   }
 
-  input.value = ''
-  await sendOmni(text, buildOmniPayload(false))
+  await send(text, opts)
+  if (!error.value) clearPendingImages()
 }
 
 async function onRegenerateAssistant() {
-  if (loading.value || mode.value === 'vision') return
+  if (loading.value) return
   const arr = messages.value
   if (arr.length < 2) return
   const last = arr[arr.length - 1]
   const prev = arr[arr.length - 2]
   if (last.role !== 'assistant' || prev.role !== 'user') return
   messages.value = arr.slice(0, -1)
-  const text = prev.content.trim()
-  if (!text) return
-  await sendOmni(text, buildOmniPayload(true))
+  const bubble = prev.content.trim()
+  if (!bubble) return
+  /** 重新生成仅重复用户气泡原文，无法还原附图二进制，故不传 herb */
+  const textForModel = bubble.includes('\n\n（附图')
+    ? (bubble.split('\n\n（附图')[0] ?? bubble).trim()
+    : bubble
+  await send(textForModel, { ...buildSendOptions(true), userBubbleText: bubble })
 }
 
 function canSend() {
   if (!input.value.trim() || loading.value) return false
-  if (mode.value === 'knowledge' && knowledgeBaseId.value == null) {
-    return false
-  }
-  if (mode.value === 'literature' && literatureCollectionId.value.trim() === '') {
-    return false
-  }
   return true
 }
 </script>
@@ -454,7 +463,7 @@ function canSend() {
               class="ds-btn ds-btn--icon ds-btn--subtle consult-settings__trigger"
               :aria-expanded="settingsOpen"
               aria-controls="consult-settings-panel"
-              aria-label="问诊设置：模式、挂载项与模型参数"
+              aria-label="问诊设置：默认挂载与模型参数"
               title="问诊设置"
               @click.stop="toggleSettings"
             >
@@ -489,94 +498,43 @@ function canSend() {
               @click.stop
             >
               <div class="omni-bar omni-bar--panel">
-                <span class="omni-bar__label">会话模式</span>
-                <div
-                  class="omni-segmented"
-                  role="tablist"
-                  aria-label="会话模式"
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    class="omni-segment"
-                    :class="mode === 'standard' ? 'omni-segment--active' : ''"
-                    :aria-selected="mode === 'standard'"
-                    :disabled="loading"
-                    @click="mode = 'standard'"
-                  >
-                    标准问诊
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    class="omni-segment"
-                    :class="mode === 'knowledge' ? 'omni-segment--active' : ''"
-                    :aria-selected="mode === 'knowledge'"
-                    :disabled="loading"
-                    @click="mode = 'knowledge'"
-                  >
-                    知识库 RAG
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    class="omni-segment"
-                    :class="mode === 'literature' ? 'omni-segment--active' : ''"
-                    :aria-selected="mode === 'literature'"
-                    :disabled="loading"
-                    @click="mode = 'literature'"
-                  >
-                    文献库
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    class="omni-segment"
-                    :class="mode === 'vision' ? 'omni-segment--active' : ''"
-                    :aria-selected="mode === 'vision'"
-                    :disabled="loading"
-                    @click="mode = 'vision'"
-                  >
-                    视觉智能体
-                  </button>
-                </div>
+                <p class="omni-vision-note omni-vision-note--compact">
+                  本轮由后端 Agent 按需调用知识库、文献与识图工具；无需再选手动模式。可选填默认挂载（亦为模型 ToolContext 默认值）。
+                </p>
 
                 <div
-                  v-if="mode === 'knowledge' && knowledgeBases.length > 0"
+                  v-if="knowledgeBases.length > 0"
                   class="omni-bar__mount"
                 >
                   <label class="omni-mount-label">
-                    挂载知识库
+                    默认知识库（可选）
                     <DsSelect
                       v-model="knowledgeBaseId"
                       class="omni-select"
                       :options="knowledgeSelectOptions"
-                      placeholder="请选择"
+                      placeholder="不指定则仅智能体配置中的默认库"
                       :disabled="loading"
-                      aria-label="挂载知识库"
+                      aria-label="默认知识库"
                     />
                   </label>
                 </div>
                 <div
-                  v-else-if="mode === 'knowledge' && knowledgeBases.length === 0"
+                  v-else
                   class="omni-hint"
                 >
-                  暂无知识库，请先在「知识库」页创建。
+                  暂无知识库；可在「知识库」页创建后在此指定默认库。
                 </div>
 
-                <div
-                  v-if="mode === 'literature'"
-                  class="omni-bar__mount"
-                >
+                <div class="omni-bar__mount">
                   <label class="omni-mount-label">
-                    文献集合
+                    默认文献库（可选）
                     <DsSelect
                       v-model="literatureCollectionId"
                       class="omni-select"
                       :options="literatureSelectOptions"
-                      placeholder="请选择"
+                      placeholder="可选；文献页会自动写入 session"
                       :disabled="loading"
-                      aria-label="文献集合"
+                      aria-label="默认文献库"
                     />
                   </label>
                   <button
@@ -587,40 +545,6 @@ function canSend() {
                   >
                     刷新列表
                   </button>
-                </div>
-
-                <div
-                  v-if="mode === 'vision'"
-                  class="omni-bar__mount omni-bar__mount--wrap"
-                >
-                  <p class="omni-vision-note">
-                    非流式调用；附图将以 Base64 随 JSON 提交，走 ReAct 工具链并触发药材图识别工具（多图时仅首张进入工具）。System / 视觉模型名在「智能体」配置页修改。
-                  </p>
-                  <label
-                    v-if="knowledgeBases.length > 0"
-                    class="omni-check"
-                  >
-                    <input
-                      v-model="visionUseKnowledgeBase"
-                      type="checkbox"
-                      :disabled="loading"
-                    >
-                    同时挂载知识库
-                  </label>
-                  <label
-                    v-if="visionUseKnowledgeBase && knowledgeBases.length > 0"
-                    class="omni-mount-label"
-                  >
-                    知识库
-                    <DsSelect
-                      v-model="visionKnowledgeBaseId"
-                      class="omni-select"
-                      :options="visionKbSelectOptions"
-                      placeholder="请选择"
-                      :disabled="loading"
-                      aria-label="视觉模式知识库"
-                    />
-                  </label>
                 </div>
               </div>
 
@@ -684,60 +608,56 @@ function canSend() {
                     </div>
                   </div>
                   <div class="ds-row consult-controls consult-controls--wrap consult-controls--rag">
-                    <template v-if="mode === 'knowledge' || (mode === 'vision' && visionUseKnowledgeBase)">
-                      <label class="ds-field">
-                        RAG topK
-                        <input
-                          v-model.number="ragTopK"
-                          class="ds-input ds-input--narrow"
-                          type="number"
-                          min="1"
-                          max="20"
-                          step="1"
-                          :disabled="loading"
-                        >
-                      </label>
-                      <label class="ds-field">
-                        知识库相似度阈值
-                        <input
-                          v-model.number="ragSimilarityThreshold"
-                          class="ds-input ds-input--narrow"
-                          type="number"
-                          inputmode="decimal"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          :disabled="loading"
-                        >
-                      </label>
-                    </template>
-                    <template v-if="mode === 'literature'">
-                      <label class="ds-field">
-                        文献 topK
-                        <input
-                          v-model.number="literatureTopK"
-                          class="ds-input ds-input--narrow"
-                          type="number"
-                          min="1"
-                          max="20"
-                          step="1"
-                          :disabled="loading"
-                        >
-                      </label>
-                      <label class="ds-field">
-                        文献相似度（0=不过滤）
-                        <input
-                          v-model.number="literatureThreshold"
-                          class="ds-input ds-input--narrow"
-                          type="number"
-                          inputmode="decimal"
-                          min="0"
-                          max="1"
-                          step="0.05"
-                          :disabled="loading"
-                        >
-                      </label>
-                    </template>
+                    <label class="ds-field">
+                      知识库 RAG topK
+                      <input
+                        v-model.number="ragTopK"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        min="1"
+                        max="20"
+                        step="1"
+                        :disabled="loading"
+                      >
+                    </label>
+                    <label class="ds-field">
+                      知识库相似度
+                      <input
+                        v-model.number="ragSimilarityThreshold"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        inputmode="decimal"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        :disabled="loading"
+                      >
+                    </label>
+                    <label class="ds-field">
+                      文献 topK
+                      <input
+                        v-model.number="literatureTopK"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        min="1"
+                        max="20"
+                        step="1"
+                        :disabled="loading"
+                      >
+                    </label>
+                    <label class="ds-field">
+                      文献相似度（0=不过滤）
+                      <input
+                        v-model.number="literatureThreshold"
+                        class="ds-input ds-input--narrow"
+                        type="number"
+                        inputmode="decimal"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        :disabled="loading"
+                      >
+                    </label>
                   </div>
                 </div>
               </details>
@@ -767,24 +687,40 @@ function canSend() {
       role="status"
       aria-live="polite"
     >
+      <span class="consult-orchestration__main">
+        <span
+          class="consult-orchestration__spin"
+          aria-hidden="true"
+        >{{ spinChar }}</span>
+        <span
+          v-if="orchestrationStep != null"
+          class="consult-orchestration__step"
+        >{{ orchestrationStep }}</span>
+        <span class="consult-orchestration__title">{{ orchestrationLabel }}</span>
+      </span>
       <span
-        class="consult-orchestration__spin"
-        aria-hidden="true"
-      >{{ spinChar }}</span>
-      <span>{{ orchestrationLabel }}</span>
+        v-if="orchestrationDetail"
+        class="consult-orchestration__detail"
+      >{{ orchestrationDetail }}</span>
     </p>
     <p
       v-if="ragMeta && !(loading && streamingContent)"
       class="ds-hint consult-rag-meta"
     >
-      <template v-if="ragMeta.literatureCollectionId">
-        本回合已注入文献库（ID {{ ragMeta.literatureCollectionId }}），检索到
+      <template v-if="ragMeta.agentMode === 'react+tools'">
+        本回合 Agent 工具链已运行（{{ ragMeta.agentMode }}）。工具侧约
+        {{ ragMeta.retrievedChunks }} 条命中<span
+          v-if="ragMeta.sources.length"
+        >；合并来源：{{ ragMeta.sources.join('、') }}</span>。
+      </template>
+      <template v-else-if="ragMeta.literatureCollectionId">
+        本回合已关联文献库（ID {{ ragMeta.literatureCollectionId }}），检索到
         {{ ragMeta.retrievedChunks }} 条相关片段<span
           v-if="ragMeta.sources.length"
         >；来源：{{ ragMeta.sources.join('、') }}</span>。
       </template>
       <template v-else-if="ragMeta.knowledgeBaseId != null">
-        本回合已注入知识库 #{{ ragMeta.knowledgeBaseId }}，检索到
+        本回合已关联知识库 #{{ ragMeta.knowledgeBaseId }}，检索到
         {{ ragMeta.retrievedChunks }} 条相关片段<span
           v-if="ragMeta.sources.length"
         >；来源：{{ ragMeta.sources.join('、') }}</span>。
@@ -811,7 +747,7 @@ function canSend() {
             开始一次问诊
           </p>
           <p class="ds-thread-empty__hint">
-            点击右上角设置选择模式与挂载项；Enter 发送。「视觉智能体」模式下可上传图片，其它模式请用纯文本。
+            Enter 发送。输入区旁可附药材 / 舌象图（走识图工具）；右上角可设置可选默认知识库与文献库。
           </p>
         </div>
         <ChatDocMessage
@@ -822,8 +758,7 @@ function canSend() {
           :allow-regenerate="
             m.role === 'assistant' &&
               i === messages.length - 1 &&
-              !loading &&
-              mode !== 'vision'
+              !loading
           "
           @regenerate="onRegenerateAssistant"
         />
@@ -833,7 +768,7 @@ function canSend() {
           :content="streamingContent"
           :rag-log="streamingRagLog"
           :is-streaming="true"
-          :stream-vision="mode === 'vision'"
+          :stream-vision="false"
           :allow-regenerate="false"
         />
       </div>
@@ -844,7 +779,7 @@ function canSend() {
       @submit.prevent="onSend"
     >
       <div
-        v-if="mode === 'vision' && pendingImages.length > 0"
+        v-if="pendingImages.length > 0"
         class="consult-attachments"
       >
         <span
@@ -874,14 +809,14 @@ function canSend() {
           class="consult-composer__file"
           accept="image/*"
           multiple
-          :disabled="loading || mode !== 'vision'"
+          :disabled="loading"
           @change="onAttachChange"
         >
         <button
           type="button"
           class="ds-btn ds-btn--icon ds-btn--subtle consult-composer__attach"
-          :disabled="loading || mode !== 'vision'"
-          title="上传图片（仅视觉智能体模式）"
+          :disabled="loading"
+          title="上传图片（可选，走药材识图工具）"
           aria-label="上传附件或图片"
           @click="onAttachClick"
         >
@@ -950,8 +885,9 @@ function canSend() {
 
 .consult-orchestration {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.28rem;
   margin: 0 0 0.5rem;
   padding: 0.4rem 0.65rem;
   font-size: 0.8125rem;
@@ -962,8 +898,43 @@ function canSend() {
   border: 1px solid rgba(99, 102, 241, 0.15);
 }
 
+.consult-orchestration__main {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.consult-orchestration__title {
+  min-width: 0;
+}
+
+.consult-orchestration__step {
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  padding: 0.08rem 0.35rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.14);
+  border-radius: 0.3rem;
+}
+
+.consult-orchestration__detail {
+  margin: 0;
+  padding-left: calc(1rem + 0.45rem);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--color-muted);
+  opacity: 0.92;
+  word-break: break-word;
+}
+
 .consult-orchestration__spin {
   display: inline-block;
+  flex-shrink: 0;
   width: 1rem;
   text-align: center;
   font-family: ui-monospace, monospace;
@@ -1174,6 +1145,10 @@ function canSend() {
   font-size: 0.75rem;
   color: var(--color-muted);
   max-width: 40rem;
+}
+
+.omni-vision-note--compact {
+  margin-bottom: 0.5rem;
 }
 
 .omni-check {

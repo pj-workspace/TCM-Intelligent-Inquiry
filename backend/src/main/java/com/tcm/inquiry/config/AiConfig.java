@@ -1,16 +1,23 @@
 package com.tcm.inquiry.config;
 
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.ollama.OllamaChatModel;
-import org.springframework.ai.ollama.api.OllamaApi;
-import org.springframework.ai.ollama.api.OllamaOptions;
+import org.springframework.ai.model.tool.DefaultToolExecutionEligibilityPredicate;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.model.tool.ToolExecutionEligibilityPredicate;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.retry.support.RetryTemplate;
+
+import io.micrometer.observation.ObservationRegistry;
 
 /**
- * 主对话模型与嵌入模型由 Spring AI Ollama 自动配置（application.yml）。
- * 此处额外注册视觉对话模型（与默认 {@link ChatModel} 共用同一 {@link OllamaApi}）。
+ * 在 Spring AI OpenAI 协议自动配置的 {@link OpenAiApi} 之上，额外注册多模态视觉模型 Bean（千问 VL），
+ * 供药材识图工具与 multipart 视觉路径使用。
  */
 @Configuration
 public class AiConfig {
@@ -19,10 +26,22 @@ public class AiConfig {
 
     @Bean(name = VISION_CHAT_MODEL)
     public ChatModel visionChatModel(
-            OllamaApi ollamaApi, @Value("${tcm.ollama.vision-model:qwen3-vl:2b}") String visionModel) {
-        return OllamaChatModel.builder()
-                .ollamaApi(ollamaApi)
-                .defaultOptions(OllamaOptions.builder().model(visionModel).build())
+            OpenAiApi openAiApi,
+            ToolCallingManager toolCallingManager,
+            RetryTemplate retryTemplate,
+            ObjectProvider<ObservationRegistry> observationRegistry,
+            ObjectProvider<ToolExecutionEligibilityPredicate> toolExecutionEligibilityPredicate,
+            @Value("${tcm.dashscope.vision-model:qwen-vl-max}") String visionModel) {
+
+        return OpenAiChatModel.builder()
+                .openAiApi(openAiApi)
+                .defaultOptions(OpenAiChatOptions.builder().model(visionModel).build())
+                .toolCallingManager(toolCallingManager)
+                .toolExecutionEligibilityPredicate(
+                        toolExecutionEligibilityPredicate.getIfUnique(
+                                DefaultToolExecutionEligibilityPredicate::new))
+                .retryTemplate(retryTemplate)
+                .observationRegistry(observationRegistry.getIfUnique(() -> ObservationRegistry.NOOP))
                 .build();
     }
 }

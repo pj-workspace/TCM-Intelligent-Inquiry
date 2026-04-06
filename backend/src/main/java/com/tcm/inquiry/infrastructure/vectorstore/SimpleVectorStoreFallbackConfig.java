@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 /**
- * 单元测试与 Ollama 联调（ci）场景：不依赖 Redis Stack，使用内存向量库，避免流水线与本机单测因中间件未启动而失败。
+ * 单元测试与 ci 场景：不依赖 Redis Stack，使用内存向量库，避免流水线与本机单测因中间件未启动而失败。
  * <p>正式部署请勿激活 {@code test} / {@code ci} profile，应使用 {@link RedisStackVectorStoreConfig}。</p>
  */
 @Configuration

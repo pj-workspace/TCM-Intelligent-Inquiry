@@ -42,7 +42,7 @@ public class LiteratureRagService {
     public LiteratureRagService(
             LiteratureUploadRepository literatureUploadRepository,
             VectorStore vectorStore,
-            @Qualifier("ollamaChatModel") ChatModel chatModel,
+            @Qualifier("openAiChatModel") ChatModel chatModel,
             KnowledgeProperties knowledgeProperties,
             @Qualifier("sseAsyncExecutor") Executor sseAsyncExecutor,
             TcmApiProperties apiProperties) {
@@ -171,6 +171,21 @@ public class LiteratureRagService {
         emitter.onCompletion(() -> {});
 
         return emitter;
+    }
+
+    /**
+     * 供 {@code literature_retrieval_tool} 调用：仅向量检索并返回摘录包，不调用大模型。
+     */
+    public KnowledgeContextBundle retrieveContextForAgentTool(
+            String tempCollectionId,
+            String query,
+            Integer topK,
+            Double similarityThreshold) {
+        LiteratureQueryRequest req = new LiteratureQueryRequest();
+        req.setMessage(query != null ? query : "");
+        req.setTopK(topK);
+        req.setSimilarityThreshold(similarityThreshold);
+        return retrieveContext(tempCollectionId.trim(), req);
     }
 
     private KnowledgeContextBundle retrieveContext(

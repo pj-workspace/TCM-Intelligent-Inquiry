@@ -29,7 +29,7 @@ public class AgentAppConfig {
     @Column(columnDefinition = "TEXT")
     private String visionSystemPrompt;
 
-    /** Ollama 模型名，如 qwen3-vl:2b；为空则使用应用默认 {@code tcm.ollama.vision-model}。 */
+    /** 视觉模型名（DashScope VL，如 qwen-vl-max）；为空则使用 {@code tcm.dashscope.vision-model}。 */
     @Column(length = 200)
     private String visionModelName;
 

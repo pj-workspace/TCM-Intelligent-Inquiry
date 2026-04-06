@@ -19,4 +19,8 @@ public record AgentRunRequest(
          */
         String herbImageBase64,
         /** 可选：与 herbImageBase64 对应的 MIME（如 image/png），缺省按 image/jpeg。 */
-        String herbImageMimeType) {}
+        String herbImageMimeType,
+        /** 可选：默认临时文献库 ID，供 literature_retrieval_tool 未显式传 collection_id 时使用。 */
+        String literatureCollectionId,
+        Integer literatureRagTopK,
+        Double literatureSimilarityThreshold) {}

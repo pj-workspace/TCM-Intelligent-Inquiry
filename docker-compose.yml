@@ -1,5 +1,4 @@
-# 可选编排：不依赖 Docker 也可在本机自行安装 MySQL + Redis Stack + Ollama 后直接 ./mvnw spring-boot:run
-# 企业级本地/演示：MySQL + Redis Stack + 后端（Ollama 需单独在本机或他机运行）
+# 可选编排：MySQL + Redis Stack + 后端；大模型走阿里云 DashScope（OpenAI 兼容模式），需在环境变量中提供 DASHSCOPE_API_KEY
 services:
   mysql:
     image: mysql:8.4
@@ -46,8 +45,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root}
       REDIS_HOST: redis-stack
       REDIS_PORT: "6379"
-      # Ollama 在容器内不可用时，请改为可解析地址，例如 host.docker.internal
-      SPRING_AI_OLLAMA_BASE_URL: ${SPRING_AI_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
     depends_on:
       mysql:
         condition: service_healthy

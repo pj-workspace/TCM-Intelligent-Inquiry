@@ -20,10 +20,12 @@ import com.tcm.inquiry.modules.agent.entity.AgentAppConfig;
 import com.tcm.inquiry.modules.agent.service.AgentAppConfigService;
 import com.tcm.inquiry.modules.knowledge.ai.KnowledgeContextBundle;
 import com.tcm.inquiry.modules.knowledge.ai.KnowledgeRagService;
+import com.tcm.inquiry.modules.literature.ai.LiteratureRagService;
 
 class AgentReActToolsFactoryTest {
 
     private KnowledgeRagService rag;
+    private LiteratureRagService litRag;
     private ChatModel vision;
     private AgentAppConfigService cfgSvc;
     private AgentReActToolsFactory factory;
@@ -31,13 +33,14 @@ class AgentReActToolsFactoryTest {
     @BeforeEach
     void setUp() {
         rag = mock(KnowledgeRagService.class);
+        litRag = mock(LiteratureRagService.class);
         vision = mock(ChatModel.class);
         cfgSvc = mock(AgentAppConfigService.class);
         AgentAppConfig cfg = new AgentAppConfig();
         cfg.setVisionModelName("mock-vl");
         cfg.setVisionSystemPrompt(null);
         when(cfgSvc.getOrCreateEntity()).thenReturn(cfg);
-        factory = new AgentReActToolsFactory(rag, vision, cfgSvc, "fallback-vl");
+        factory = new AgentReActToolsFactory(rag, litRag, vision, cfgSvc, "fallback-vl");
     }
 
     private static ToolCallback find(List<ToolCallback> callbacks, String name) {
@@ -86,5 +89,28 @@ class AgentReActToolsFactoryTest {
         ToolCallback cb = find(factory.buildToolCallbacks(), "herb_image_recognition_tool");
         String out = cb.call("{}", new ToolContext(Map.of()));
         assertThat(out).contains("未提供");
+    }
+
+    @Test
+    void literatureRetrievalToolUsesDefaultCollectionFromContextAndFillsCollector() throws Exception {
+        when(litRag.retrieveContextForAgentTool(eq("cid-1"), eq("金匮"), isNull(), isNull()))
+                .thenReturn(new KnowledgeContextBundle("lit-ctx", List.of("b.pdf"), 1));
+
+        ToolCallback cb = find(factory.buildToolCallbacks(), "literature_retrieval_tool");
+
+        List<String> coll = new ArrayList<>();
+        ToolContext tcx =
+                new ToolContext(
+                        Map.of(
+                                AgentReActToolsFactory.CTX_LITERATURE_SOURCES_COLLECTOR,
+                                coll,
+                                AgentReActToolsFactory.CTX_DEFAULT_LITERATURE_COLLECTION_ID,
+                                "cid-1"));
+
+        String out = cb.call("{\"query\":\"金匮\"}", tcx);
+
+        assertThat(out).contains("lit-ctx");
+        assertThat(out).contains("b.pdf");
+        assertThat(coll).containsExactly("b.pdf");
     }
 }

@@ -10,6 +10,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.ai.vectorstore.redis.autoconfigure.RedisVectorStoreAutoConfiguration;
 
+import com.tcm.inquiry.bootstrap.DotEnvLoader;
+
 /**
  * 中医智能问诊后端入口。
  * <p>排除 {@link RedisVectorStoreAutoConfiguration}：向量库由 {@code RedisStackVectorStoreConfig} 显式装配 metadata 字段，
@@ -20,6 +22,7 @@ import org.springframework.ai.vectorstore.redis.autoconfigure.RedisVectorStoreAu
 public class TcmInquiryApplication {
 
     public static void main(String[] args) {
+        DotEnvLoader.loadOptionalProjectDotEnv();
         ensureLocalStorageDirectories();
         SpringApplication.run(TcmInquiryApplication.class, args);
     }

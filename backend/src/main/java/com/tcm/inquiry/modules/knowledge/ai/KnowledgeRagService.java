@@ -42,7 +42,7 @@ public class KnowledgeRagService {
     public KnowledgeRagService(
             KnowledgeBaseRepository knowledgeBaseRepository,
             VectorStore vectorStore,
-            @Qualifier("ollamaChatModel") ChatModel chatModel,
+            @Qualifier("openAiChatModel") ChatModel chatModel,
             KnowledgeProperties knowledgeProperties,
             @Qualifier("sseAsyncExecutor") Executor sseAsyncExecutor,
             TcmApiProperties apiProperties) {

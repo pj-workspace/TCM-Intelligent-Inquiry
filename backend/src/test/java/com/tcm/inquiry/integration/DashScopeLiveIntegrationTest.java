@@ -15,15 +15,16 @@ import org.springframework.test.context.ActiveProfiles;
 import com.tcm.inquiry.config.AiConfig;
 
 /**
- * 需本机或 CI 已启动 Ollama，并已 {@code pull} 与 {@code application-ci.yml} 一致的模型。
- * 未设置 {@code OLLAMA_LIVE=true} 时整类跳过（本地 {@code mvn test} 不拉依赖网络）。
+ * 需有效 {@code DASHSCOPE_API_KEY} 与网络。未设置 {@code DASHSCOPE_LIVE=true} 时整类跳过。
  */
 @SpringBootTest
 @ActiveProfiles("ci")
-@EnabledIfEnvironmentVariable(named = "OLLAMA_LIVE", matches = "true")
-class OllamaLiveIntegrationTest {
+@EnabledIfEnvironmentVariable(named = "DASHSCOPE_LIVE", matches = "true")
+class DashScopeLiveIntegrationTest {
 
-    @Autowired private ChatModel ollamaChatModel;
+    @Autowired
+    @Qualifier("openAiChatModel")
+    private ChatModel textChatModel;
 
     @Autowired private EmbeddingModel embeddingModel;
 
@@ -34,7 +35,7 @@ class OllamaLiveIntegrationTest {
     @Test
     void chatModelReturnsNonEmptyAnswer() {
         String reply =
-                ChatClient.builder(ollamaChatModel)
+                ChatClient.builder(textChatModel)
                         .build()
                         .prompt()
                         .user("用不超过五个字回复：你好")

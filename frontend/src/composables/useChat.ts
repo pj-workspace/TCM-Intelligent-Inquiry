@@ -11,7 +11,6 @@ import {
 } from '@/api/modules/consultation'
 import { postAgentRunJson } from '@/api/modules/agent'
 import type { ChatSessionInfo } from '@/types/consultation'
-import type { OmniSendPayload } from '@/types/omniChat'
 import { encodeImageFileToHerbPayload } from '@/utils/herbImagePayload'
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string }
@@ -32,26 +31,44 @@ export type SendOptions = {
   knowledgeBaseId?: number | null
   ragTopK?: number | null
   ragSimilarityThreshold?: number | null
-  /** 临时文献库 ID；与 knowledgeBaseId 互斥，走问诊同一 SSE。 */
+  /** 临时文献库 ID；走问诊同一 SSE，与知识库可同时作为 Agent 默认上下文。 */
   literatureCollectionId?: string | null
   literatureRagTopK?: number | null
   literatureSimilarityThreshold?: number | null
+  /** 附图为药材 / 舌象等时随 JSON 写入后端，供 herb_image_recognition_tool。 */
+  herbImageBase64?: string | null
+  herbImageMimeType?: string | null
+  /**
+   * 气泡中展示的用户正文；不传则与发给模型的 {@code message}（首参）相同。
+   * 用于「主诉在模型侧保持简洁、气泡可带附图说明」。
+   */
+  userBubbleText?: string | null
   /** 不向消息列表追加用户条目（重新生成上一答时，列表末尾已是用户） */
   skipAppendUser?: boolean
 }
 
-/** 问诊流式接口首包 {@code event: meta}（知识库或文献 RAG）。 */
+/** 问诊流式接口首包 {@code event: meta}（ReAct 工具命中摘要或旧版预检索）。 */
 export type ConsultationRagMeta = {
   sources: string[]
   retrievedChunks: number
   knowledgeBaseId?: number
   literatureCollectionId?: string
+  /** 来自知识库工具的来源文件名 */
+  knowledgeSources?: string[]
+  /** 来自文献工具的来源文件名 */
+  literatureSources?: string[]
+  /** 后端 Agent 模式，如 react+tools */
+  agentMode?: string
 }
 
 /** 后端 {@code event: phase} 负载（与 claw-code 编排进度语义对齐，供顶栏状态条展示）。 */
 export type StreamPhasePayload = {
   phase: string
   label: string
+  /** 附注：上下文摘要、工具说明等 */
+  detail?: string
+  /** 步骤序号（从 1 起） */
+  step?: number
 }
 
 /**
@@ -168,11 +185,16 @@ export function useChat() {
     await ensureSession()
     if (sessionId.value == null) throw new Error('无会话')
 
+    const bubble =
+      opts?.userBubbleText != null && opts.userBubbleText.trim() !== ''
+        ? opts.userBubbleText.trim()
+        : text
+
     error.value = null
     ragMeta.value = null
     streamPhase.value = null
     if (!opts?.skipAppendUser) {
-      messages.value = [...messages.value, { role: 'user', content: text }]
+      messages.value = [...messages.value, { role: 'user', content: bubble }]
     }
     streamingContent.value = ''
     loading.value = true
@@ -204,6 +226,18 @@ export function useChat() {
         body.literatureSimilarityThreshold = opts.literatureSimilarityThreshold
       }
     }
+    if (
+      opts?.herbImageBase64 != null &&
+      String(opts.herbImageBase64).trim() !== ''
+    ) {
+      body.herbImageBase64 = String(opts.herbImageBase64).trim()
+      if (
+        opts.herbImageMimeType != null &&
+        String(opts.herbImageMimeType).trim() !== ''
+      ) {
+        body.herbImageMimeType = String(opts.herbImageMimeType).trim()
+      }
+    }
 
     let assistant = ''
     const kbIdForMeta = opts?.knowledgeBaseId ?? null
@@ -212,7 +246,6 @@ export function useChat() {
       await openSseStream(
         CONSULTATION_CHAT_STREAM_URL,
         (chunk) => {
-          if (chunk === '[DONE]') return
           assistant += chunk
           streamingContent.value = assistant
           scrollToBottom(opts?.scrollRoot ?? null)
@@ -228,11 +261,23 @@ export function useChat() {
                 const o = JSON.parse(data) as {
                   phase?: string
                   label?: string
+                  detail?: string
+                  step?: number
                 }
                 if (typeof o.label === 'string') {
+                  const detail =
+                    typeof o.detail === 'string' && o.detail.trim() !== ''
+                      ? o.detail.trim()
+                      : undefined
+                  const step =
+                    typeof o.step === 'number' && Number.isFinite(o.step)
+                      ? o.step
+                      : undefined
                   streamPhase.value = {
                     phase: typeof o.phase === 'string' ? o.phase : '',
                     label: o.label,
+                    ...(detail !== undefined ? { detail } : {}),
+                    ...(step !== undefined ? { step } : {}),
                   }
                 }
               } catch {
@@ -258,11 +303,22 @@ export function useChat() {
                   : litIdForMeta && litIdForMeta !== ''
                     ? litIdForMeta
                     : undefined
+              const knowledgeSources = Array.isArray(o.knowledgeSources)
+                ? (o.knowledgeSources as string[])
+                : undefined
+              const literatureSources = Array.isArray(o.literatureSources)
+                ? (o.literatureSources as string[])
+                : undefined
+              const agentMode =
+                typeof o.mode === 'string' ? (o.mode as string) : undefined
               ragMeta.value = {
                 sources,
                 retrievedChunks,
                 knowledgeBaseId,
                 literatureCollectionId,
+                knowledgeSources,
+                literatureSources,
+                agentMode,
               }
             } catch {
               /* ignore */
@@ -323,6 +379,9 @@ export function useChat() {
       | 'knowledgeBaseId'
       | 'ragTopK'
       | 'ragSimilarityThreshold'
+      | 'literatureCollectionId'
+      | 'literatureRagTopK'
+      | 'literatureSimilarityThreshold'
       | 'skipAppendUser'
     >
   ) {
@@ -365,17 +424,33 @@ export function useChat() {
           body.ragSimilarityThreshold = opts.ragSimilarityThreshold
         }
       }
+      const lit = opts?.literatureCollectionId?.trim()
+      if (lit) {
+        body.literatureCollectionId = lit
+        if (opts?.literatureRagTopK != null) {
+          body.literatureRagTopK = opts.literatureRagTopK
+        }
+        if (opts?.literatureSimilarityThreshold != null) {
+          body.literatureSimilarityThreshold = opts.literatureSimilarityThreshold
+        }
+      }
       const res = await postAgentRunJson(body, silentAxiosConfig)
       const data = res.data
       if (data.code !== 0) throw new Error(data.message || '智能体调用失败')
       const answer = data.data?.assistant ?? ''
-      const sources = data.data?.knowledgeSources ?? []
-      const kbMeta = opts?.knowledgeBaseId
-      if (kbMeta != null && sources.length > 0) {
+      const kbSources = data.data?.knowledgeSources ?? []
+      const litSources = data.data?.literatureSources ?? []
+      const mode = data.data?.mode
+      const merged = [...kbSources, ...litSources]
+      if (merged.length > 0 || mode === 'react+tools') {
         ragMeta.value = {
-          sources,
-          retrievedChunks: sources.length,
-          knowledgeBaseId: kbMeta,
+          sources: merged,
+          retrievedChunks: merged.length,
+          knowledgeBaseId: kb ?? undefined,
+          literatureCollectionId: lit && lit !== '' ? lit : undefined,
+          knowledgeSources: kbSources,
+          literatureSources: litSources,
+          agentMode: mode,
         }
       }
       messages.value = [
@@ -395,62 +470,6 @@ export function useChat() {
     }
   }
 
-  async function sendOmni(userText: string, p: OmniSendPayload) {
-    const skip = p.skipAppendUser === true
-    if (p.mode === 'vision') {
-      const kb =
-        p.visionUseKb && p.visionKbId != null ? p.visionKbId : null
-      return sendVisionAgent(userText, p.visionImages ?? [], {
-        scrollRoot: p.scrollRoot,
-        knowledgeBaseId: kb,
-        ragTopK: p.ragTopK,
-        ragSimilarityThreshold: p.ragSimilarityThreshold,
-        skipAppendUser: skip,
-      })
-    }
-    if (p.mode === 'literature') {
-      const cid = p.literatureCollectionId?.trim()
-      if (!cid) {
-        error.value = '请选择文献库'
-        return
-      }
-      return send(userText, {
-        temperature: p.temperature,
-        topP: p.topP,
-        maxHistoryTurns: p.maxHistoryTurns,
-        scrollRoot: p.scrollRoot,
-        literatureCollectionId: cid,
-        literatureRagTopK: p.literatureTopK,
-        literatureSimilarityThreshold: p.literatureThreshold,
-        skipAppendUser: skip,
-      })
-    }
-    if (p.mode === 'knowledge') {
-      const kb = p.knowledgeBaseId
-      if (kb == null) {
-        error.value = '请选择知识库'
-        return
-      }
-      return send(userText, {
-        temperature: p.temperature,
-        topP: p.topP,
-        maxHistoryTurns: p.maxHistoryTurns,
-        scrollRoot: p.scrollRoot,
-        knowledgeBaseId: kb,
-        ragTopK: p.ragTopK,
-        ragSimilarityThreshold: p.ragSimilarityThreshold,
-        skipAppendUser: skip,
-      })
-    }
-    return send(userText, {
-      temperature: p.temperature,
-      topP: p.topP,
-      maxHistoryTurns: p.maxHistoryTurns,
-      scrollRoot: p.scrollRoot,
-      skipAppendUser: skip,
-    })
-  }
-
   return {
     sessions,
     sessionId,
@@ -468,7 +487,6 @@ export function useChat() {
     deleteSession,
     send,
     sendVisionAgent,
-    sendOmni,
     stop,
   }
 }

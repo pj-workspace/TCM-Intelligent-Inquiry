@@ -1,9 +1,10 @@
-# Ollama 真机集成测试（@ActiveProfiles("ci")）：H2 文件库 + 内存向量；不依赖 MySQL/Redis
+# 集成测试 profile（@ActiveProfiles("ci")）：H2 文件库 + 内存向量；不依赖 MySQL/Redis
+# 真机联网验证请设置环境变量 DASHSCOPE_LIVE=true 与有效 DASHSCOPE_API_KEY
 spring:
   main:
     banner-mode: "off"
   datasource:
-    url: jdbc:h2:file:./target/tcm-ci-ollama-it;MODE=MySQL;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=FALSE
+    url: jdbc:h2:file:./target/tcm-ci-dashscope-it;MODE=MySQL;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=FALSE
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -12,18 +13,18 @@ spring:
     hibernate:
       ddl-auto: create-drop
   ai:
-    ollama:
-      base-url: http://127.0.0.1:11434
+    openai:
+      api-key: ${DASHSCOPE_API_KEY:ci-dummy-key-not-for-real-calls}
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
       chat:
         options:
-          model: tinyllama
+          model: qwen-turbo
       embedding:
         options:
-          model: nomic-embed-text
+          model: text-embedding-v4
 
 tcm:
-  ollama:
-    vision-model: tinyllama
+  dashscope:
+    vision-model: qwen-vl-plus
   literature:
-    # 集成测试 profile 下关闭定时清理，避免侧效；TTL 字段仍可由业务写入
     cleanup-enabled: false

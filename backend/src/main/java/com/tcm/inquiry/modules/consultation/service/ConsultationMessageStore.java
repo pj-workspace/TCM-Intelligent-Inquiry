@@ -61,7 +61,7 @@ public class ConsultationMessageStore {
         row.setAssistantMessage(assistantText);
         row.setModelName(modelName);
         row.setTemperature(temperature);
-        // 将本轮实际使用的 Top-P 写入扩展 JSON，与 temperature 列并存，便于对照 Ollama 请求参数。
+        // 将本轮实际使用的 Top-P 写入扩展 JSON，与 temperature 列并存，便于对照推理请求参数。
         if (topP != null) {
             try {
                 ObjectNode node = OBJECT_MAPPER.createObjectNode();

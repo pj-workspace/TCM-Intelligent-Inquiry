@@ -1,23 +1,26 @@
 import { ref, watch } from 'vue'
 
-import type { OmniChatMode } from '@/types/omniChat'
-
 const STORAGE_KEY = 'tcm-omni-chat-prefs'
 
 type Persisted = {
-  mode: OmniChatMode
   knowledgeBaseId: number | null
   /** 空字符串表示未选 */
   literatureCollectionId: string
-  visionUseKb: boolean
-  visionKbId: number | null
 }
 
 function loadPersisted(): Persisted | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    return JSON.parse(raw) as Persisted
+    const o = JSON.parse(raw) as Partial<Persisted>
+    return {
+      knowledgeBaseId:
+        typeof o.knowledgeBaseId === 'number' ? o.knowledgeBaseId : null,
+      literatureCollectionId:
+        typeof o.literatureCollectionId === 'string'
+          ? o.literatureCollectionId
+          : '',
+    }
   } catch {
     return null
   }
@@ -32,44 +35,28 @@ function savePersisted(p: Persisted) {
 }
 
 /**
- * Omni-Chat：模式与挂载项（与 ChatView 输入区绑定；轻量持久化便于用同一组合继续问）。
+ * 问诊侧偏好：可选默认知识库 / 文献库 ID、待发送附图（由 Agent 自行决定是否走识图工具）。
  */
 export function useOmniChatContext() {
   const saved = loadPersisted()
 
-  const mode = ref<OmniChatMode>(saved?.mode ?? 'standard')
   const knowledgeBaseId = ref<number | null>(saved?.knowledgeBaseId ?? null)
   const literatureCollectionId = ref<string>(
     saved?.literatureCollectionId ?? ''
   )
-  const visionUseKnowledgeBase = ref(saved?.visionUseKb ?? false)
-  const visionKnowledgeBaseId = ref<number | null>(saved?.visionKbId ?? null)
   const pendingImages = ref<File[]>([])
 
   function persistNow() {
     savePersisted({
-      mode: mode.value,
       knowledgeBaseId: knowledgeBaseId.value,
       literatureCollectionId:
         literatureCollectionId.value.trim() === ''
           ? ''
           : literatureCollectionId.value.trim(),
-      visionUseKb: visionUseKnowledgeBase.value,
-      visionKbId: visionKnowledgeBaseId.value,
     })
   }
 
-  watch(
-    [
-      mode,
-      knowledgeBaseId,
-      literatureCollectionId,
-      visionUseKnowledgeBase,
-      visionKnowledgeBaseId,
-    ],
-    persistNow,
-    { deep: true }
-  )
+  watch([knowledgeBaseId, literatureCollectionId], persistNow, { deep: true })
 
   function addImagesFromInput(fileList: FileList | null) {
     if (!fileList?.length) return
@@ -90,11 +77,8 @@ export function useOmniChatContext() {
   }
 
   return {
-    mode,
     knowledgeBaseId,
     literatureCollectionId,
-    visionUseKnowledgeBase,
-    visionKnowledgeBaseId,
     pendingImages,
     addImagesFromInput,
     removeImageAt,

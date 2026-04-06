@@ -207,7 +207,7 @@ onMounted(async () => {
             >
           </label>
           <label class="ds-field agent-field-text">
-            默认视觉模型（Ollama）
+            默认视觉模型（DashScope 千问 VL）
             <input
               v-model="visionModelName"
               class="ds-input"

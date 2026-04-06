@@ -19,7 +19,7 @@ public class KnowledgeService {
 
     public KnowledgeService(
             KnowledgeBaseRepository knowledgeBaseRepository,
-            @Value("${spring.ai.ollama.embedding.options.model:bge-m3:latest}")
+            @Value("${spring.ai.openai.embedding.options.model:text-embedding-v4}")
                     String defaultEmbeddingModelName) {
         this.knowledgeBaseRepository = knowledgeBaseRepository;
         this.defaultEmbeddingModelName = defaultEmbeddingModelName;
@@ -38,7 +38,7 @@ public class KnowledgeService {
                         : embeddingModelName.trim();
         KnowledgeBase kb = new KnowledgeBase();
         kb.setName(name);
-        kb.setVectorBackend(VectorBackend.OLLAMA);
+        kb.setVectorBackend(VectorBackend.DASHSCOPE);
         kb.setEmbeddingModelName(model);
         kb.setCreatedAt(Instant.now());
         return knowledgeBaseRepository.save(kb);
