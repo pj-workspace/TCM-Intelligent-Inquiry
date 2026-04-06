@@ -48,6 +48,7 @@ const {
   streamingContent,
   ragMeta,
   streamPhase,
+  streamActivityLog,
   send,
   stop,
 } = chat
@@ -703,6 +704,32 @@ function canSend() {
         class="consult-orchestration__detail"
       >{{ orchestrationDetail }}</span>
     </p>
+    <details
+      v-if="streamActivityLog.length > 0"
+      class="consult-activity-trace"
+    >
+      <summary class="consult-activity-trace__summary">
+        编排追踪（claw-code 式阶段事件）
+      </summary>
+      <ol class="consult-activity-trace__list">
+        <li
+          v-for="(e, i) in streamActivityLog"
+          :key="`${e.ts}-${i}`"
+          class="consult-activity-trace__item"
+        >
+          <span
+            v-if="e.step != null"
+            class="consult-activity-trace__step"
+          >{{ e.step }}</span>
+          <code class="consult-activity-trace__phase">{{ e.phase || '—' }}</code>
+          <span class="consult-activity-trace__label">{{ e.label }}</span>
+          <span
+            v-if="e.detail"
+            class="consult-activity-trace__detail"
+          >{{ e.detail }}</span>
+        </li>
+      </ol>
+    </details>
     <p
       v-if="ragMeta && !(loading && streamingContent)"
       class="ds-hint consult-rag-meta"
@@ -939,6 +966,72 @@ function canSend() {
   text-align: center;
   font-family: ui-monospace, monospace;
   color: var(--color-primary-hover);
+}
+
+.consult-activity-trace {
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  background: rgba(15, 23, 42, 0.04);
+  border-radius: 0.4rem;
+  border: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.consult-activity-trace__summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text);
+  list-style: none;
+}
+
+.consult-activity-trace__summary::-webkit-details-marker {
+  display: none;
+}
+
+.consult-activity-trace__list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.consult-activity-trace__item {
+  margin-bottom: 0.28rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.consult-activity-trace__step {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0 0.28rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.12);
+  border-radius: 0.25rem;
+  vertical-align: middle;
+}
+
+.consult-activity-trace__phase {
+  margin-right: 0.35rem;
+  padding: 0.06rem 0.28rem;
+  font-size: 0.68rem;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 0.25rem;
+}
+
+.consult-activity-trace__label {
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.consult-activity-trace__detail {
+  display: block;
+  margin-top: 0.12rem;
+  margin-left: 0;
+  padding-left: 0.15rem;
+  opacity: 0.88;
+  font-weight: 400;
 }
 
 .consult-header {

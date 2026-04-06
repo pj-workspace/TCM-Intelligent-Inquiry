@@ -30,6 +30,7 @@ public final class SsePhaseEvents {
             SseEmitter emitter, String phase, String label, String detail, Integer step)
             throws IOException {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("type", "phase");
         payload.put("phase", phase);
         payload.put("label", label);
         if (detail != null && !detail.isBlank()) {

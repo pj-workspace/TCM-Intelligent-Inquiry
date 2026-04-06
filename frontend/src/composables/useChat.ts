@@ -69,7 +69,20 @@ export type StreamPhasePayload = {
   detail?: string
   /** 步骤序号（从 1 起） */
   step?: number
+  /** JSON 顶层 {@code type}，如 {@code phase}（claw-code 判别式 wire） */
+  wireType?: string
 }
+
+/** 单轮 SSE 内阶段时间线项（claw-code Hook/Lane 式可观测性简化版）。 */
+export type StreamActivityEntry = {
+  ts: number
+  phase: string
+  label: string
+  detail?: string
+  step?: number
+}
+
+const STREAM_ACTIVITY_MAX = 24
 
 /**
  * 中医问诊：会话列表、历史加载、SSE 流式发送、打字机状态与错误处理。
@@ -86,7 +99,18 @@ export function useChat() {
   const ragMeta = ref<ConsultationRagMeta | null>(null)
   /** 本轮 SSE 编排阶段（由后端 {@code event: phase} 推送，优先于前端猜阶段文案） */
   const streamPhase = ref<StreamPhasePayload | null>(null)
+  /** 本轮已收阶段事件时间线（供界面「编排追踪」展开） */
+  const streamActivityLog = ref<StreamActivityEntry[]>([])
   let abort: AbortController | null = null
+
+  function appendStreamActivity(entry: Omit<StreamActivityEntry, 'ts'>) {
+    const row: StreamActivityEntry = { ts: Date.now(), ...entry }
+    const next = [...streamActivityLog.value, row]
+    streamActivityLog.value =
+      next.length > STREAM_ACTIVITY_MAX
+        ? next.slice(-STREAM_ACTIVITY_MAX)
+        : next
+  }
 
   function persistLastSession(id: number | null) {
     if (id == null) localStorage.removeItem(CONSULTATION_LAST_SESSION_KEY)
@@ -134,6 +158,7 @@ export function useChat() {
     streamingContent.value = ''
     ragMeta.value = null
     streamPhase.value = null
+    streamActivityLog.value = []
     sessionId.value = id
     try {
       await loadHistory()
@@ -151,6 +176,7 @@ export function useChat() {
     streamingContent.value = ''
     ragMeta.value = null
     streamPhase.value = null
+    streamActivityLog.value = []
     error.value = null
     await ensureSession()
     if (sessionId.value != null) persistLastSession(sessionId.value)
@@ -193,6 +219,7 @@ export function useChat() {
     error.value = null
     ragMeta.value = null
     streamPhase.value = null
+    streamActivityLog.value = []
     if (!opts?.skipAppendUser) {
       messages.value = [...messages.value, { role: 'user', content: bubble }]
     }
@@ -256,9 +283,27 @@ export function useChat() {
           body: JSON.stringify(body),
           signal: abort.signal,
           onNamedEvent: (name, data) => {
+            if (name === 'assistant') {
+              try {
+                const o = JSON.parse(data) as { type?: string; text?: string }
+                if (
+                  o.type === 'text_delta' &&
+                  typeof o.text === 'string' &&
+                  o.text !== ''
+                ) {
+                  assistant += o.text
+                  streamingContent.value = assistant
+                  scrollToBottom(opts?.scrollRoot ?? null)
+                }
+              } catch {
+                /* ignore */
+              }
+              return
+            }
             if (name === 'phase') {
               try {
                 const o = JSON.parse(data) as {
+                  type?: string
                   phase?: string
                   label?: string
                   detail?: string
@@ -273,12 +318,21 @@ export function useChat() {
                     typeof o.step === 'number' && Number.isFinite(o.step)
                       ? o.step
                       : undefined
+                  const wireType =
+                    typeof o.type === 'string' ? o.type : undefined
                   streamPhase.value = {
                     phase: typeof o.phase === 'string' ? o.phase : '',
                     label: o.label,
                     ...(detail !== undefined ? { detail } : {}),
                     ...(step !== undefined ? { step } : {}),
+                    ...(wireType !== undefined ? { wireType } : {}),
                   }
+                  appendStreamActivity({
+                    phase: typeof o.phase === 'string' ? o.phase : '',
+                    label: o.label,
+                    ...(detail !== undefined ? { detail } : {}),
+                    ...(step !== undefined ? { step } : {}),
+                  })
                 }
               } catch {
                 /* ignore */
@@ -394,6 +448,7 @@ export function useChat() {
     error.value = null
     ragMeta.value = null
     streamPhase.value = null
+    streamActivityLog.value = []
     const names = images.map((f) => f.name).join('、')
     const userLabel =
       images.length > 0 ? `${text}\n\n（附图${images.length}张：${names}）` : text
@@ -479,6 +534,7 @@ export function useChat() {
     streamingContent,
     ragMeta,
     streamPhase,
+    streamActivityLog,
     fetchSessions,
     ensureSession,
     loadHistory,

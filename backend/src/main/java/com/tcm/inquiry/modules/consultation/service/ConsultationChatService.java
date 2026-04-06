@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import com.tcm.inquiry.common.sse.SseAssistantEvents;
 import com.tcm.inquiry.common.sse.SsePhaseEvents;
 import com.tcm.inquiry.config.TcmApiProperties;
 import com.tcm.inquiry.modules.agent.AgentRunResponse;
@@ -210,7 +211,7 @@ public class ConsultationChatService {
                     },
                     token -> {
                         try {
-                            emitter.send(SseEmitter.event().data(token));
+                            SseAssistantEvents.sendTextDelta(emitter, token);
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
@@ -285,6 +286,7 @@ public class ConsultationChatService {
         List<String> sources = new ArrayList<>(merged);
 
         Map<String, Object> metaPayload = new LinkedHashMap<>();
+        metaPayload.put("type", "meta");
         metaPayload.put("sources", sources);
         metaPayload.put("knowledgeSources", kb);
         metaPayload.put("literatureSources", lit);
@@ -384,7 +386,7 @@ public class ConsultationChatService {
                             }
                             assistantAcc.append(token);
                             try {
-                                emitter.send(SseEmitter.event().data(token));
+                                SseAssistantEvents.sendTextDelta(emitter, token);
                             } catch (IOException e) {
                                 errorRef.compareAndSet(null, e);
                                 emitter.completeWithError(e);
