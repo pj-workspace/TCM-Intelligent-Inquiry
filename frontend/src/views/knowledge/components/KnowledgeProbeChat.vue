@@ -6,7 +6,7 @@ import { openSseStream } from '@/api/core/sse'
 import { knowledgeQueryStreamUrl } from '@/api/modules/knowledge'
 import MarkdownContent from '@/components/business/MarkdownContent.vue'
 import DsAlert from '@/components/common/DsAlert.vue'
-import type { KnowledgeQueryResponse } from '@/types/knowledge'
+import type { KnowledgeQueryResponse, KnowledgeRetrievedPassage } from '@/types/knowledge'
 
 const props = defineProps<{
   knowledgeBaseId: number | null
@@ -57,6 +57,7 @@ async function startProbeQuery() {
   probePhaseLabel.value = null
   let retrievedChunks = 0
   let sources: string[] = []
+  let passages: KnowledgeRetrievedPassage[] | undefined
   try {
     await openSseStream(
       knowledgeQueryStreamUrl(kbId),
@@ -93,10 +94,14 @@ async function startProbeQuery() {
               const o = JSON.parse(data) as {
                 sources?: string[]
                 retrievedChunks?: number
+                passages?: KnowledgeRetrievedPassage[]
               }
               if (Array.isArray(o.sources)) sources = o.sources
               if (typeof o.retrievedChunks === 'number') {
                 retrievedChunks = o.retrievedChunks
+              }
+              if (Array.isArray(o.passages) && o.passages.length > 0) {
+                passages = o.passages
               }
             } catch {
               /* ignore */
@@ -109,6 +114,7 @@ async function startProbeQuery() {
       answer: probeStreamText.value,
       sources,
       retrievedChunks,
+      passages,
     }
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') {
@@ -214,11 +220,26 @@ async function startProbeQuery() {
       class="kb-probe-result"
     >
       <p class="kb-probe-meta">
-        召回片段：{{ probeAnswer.retrievedChunks }} 条
+        召回片段：{{ probeAnswer.retrievedChunks }} 条（混合：向量语义 + 全文专名；见 match 列）
         <template v-if="probeAnswer.sources?.length">
           ；来源：{{ probeAnswer.sources.join('、') }}
         </template>
       </p>
+      <ul
+        v-if="probeAnswer.passages?.length"
+        class="kb-probe-passages"
+      >
+        <li
+          v-for="p in probeAnswer.passages"
+          :key="`${p.index}-${p.documentId}`"
+        >
+          #{{ p.index }} {{ p.matchType }} score≈{{ p.score.toFixed(2) }}
+          <span
+            v-if="p.source"
+            class="kb-probe-passages__src"
+          >{{ p.source }}</span>
+        </li>
+      </ul>
       <div class="kb-probe-answer">
         <MarkdownContent :source="probeAnswer.answer" />
       </div>
@@ -294,6 +315,17 @@ async function startProbeQuery() {
   border-radius: 0.65rem;
   border: 1px solid var(--color-border);
   background: var(--color-surface-elevated);
+}
+.kb-probe-passages {
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+  line-height: 1.5;
+}
+.kb-probe-passages__src {
+  margin-left: 0.35rem;
+  color: var(--color-text-secondary);
 }
 .kb-probe-meta {
   margin: 0 0 0.65rem;

@@ -15,6 +15,12 @@ public class KnowledgeProperties {
     private int defaultTopK = 4;
     private double defaultSimilarityThreshold = 0.0;
     private String storageDir = "data/kb-files";
+    /** 是否启用「向量 + Redis 全文」混合召回（测试 profile 无 Redis 搜索 Bean 时自动退化为纯向量） */
+    private boolean hybridRetrievalEnabled = true;
+    /** 关键字路最大返回条数（FT.SEARCH limit） */
+    private int hybridKeywordTopK = 8;
+    /** 从问句抽取的检索词上限（控制 FT 查询长度） */
+    private int hybridMaxExtractedTerms = 8;
 
     public int getChunkSize() {
         return chunkSize;
@@ -86,5 +92,29 @@ public class KnowledgeProperties {
 
     public void setStorageDir(String storageDir) {
         this.storageDir = storageDir;
+    }
+
+    public boolean isHybridRetrievalEnabled() {
+        return hybridRetrievalEnabled;
+    }
+
+    public void setHybridRetrievalEnabled(boolean hybridRetrievalEnabled) {
+        this.hybridRetrievalEnabled = hybridRetrievalEnabled;
+    }
+
+    public int getHybridKeywordTopK() {
+        return hybridKeywordTopK;
+    }
+
+    public void setHybridKeywordTopK(int hybridKeywordTopK) {
+        this.hybridKeywordTopK = hybridKeywordTopK;
+    }
+
+    public int getHybridMaxExtractedTerms() {
+        return hybridMaxExtractedTerms;
+    }
+
+    public void setHybridMaxExtractedTerms(int hybridMaxExtractedTerms) {
+        this.hybridMaxExtractedTerms = hybridMaxExtractedTerms;
     }
 }

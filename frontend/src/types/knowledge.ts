@@ -37,8 +37,21 @@ export function knowledgeFilesNeedPoll(files: readonly KnowledgeFileView[]): boo
   return files.some((f) => KNOWLEDGE_INGEST_IN_FLIGHT_STATUSES.includes(f.status))
 }
 
+/** 与后端 KnowledgeRetrievalMatchType 序列化值对齐 */
+export type KnowledgeRetrievalMatchTypeWire = 'semantic' | 'keyword' | 'hybrid'
+
+export type KnowledgeRetrievedPassage = {
+  index: number
+  documentId: string
+  source: string
+  matchType: KnowledgeRetrievalMatchTypeWire
+  score: number
+}
+
 export type KnowledgeQueryResponse = {
   answer: string
   sources: string[]
   retrievedChunks: number
+  /** 混合检索返回的逐条元数据（旧后端可能为空数组） */
+  passages?: KnowledgeRetrievedPassage[]
 }

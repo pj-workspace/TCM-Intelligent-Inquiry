@@ -70,6 +70,10 @@ tcm:
     default-top-k: 4
     default-similarity-threshold: 0.0
     storage-dir: data/kb-files
+    # 向量相似度 + RediSearch 全文混合召回（药材/方剂等专名）
+    hybrid-retrieval-enabled: true
+    hybrid-keyword-top-k: 8
+    hybrid-max-extracted-terms: 8
   literature:
     storage-dir: data/literature-files
     # 临时文献向量 + 文件：无新上传时最长保留（小时）；同一 collection 每上传一次整库顺延

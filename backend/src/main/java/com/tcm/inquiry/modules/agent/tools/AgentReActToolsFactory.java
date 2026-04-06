@@ -263,13 +263,30 @@ public class AgentReActToolsFactory {
                 bundle.sources().isEmpty()
                         ? "（无显式来源元数据）"
                         : String.join("、", bundle.sources());
+        String metaLines = "";
+        if (bundle.passages() != null && !bundle.passages().isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (var p : bundle.passages()) {
+                sb.append(String.format(
+                        "#%d %s | match=%s score≈%.2f%n",
+                        p.index(),
+                        p.source() != null && !p.source().isBlank() ? p.source() : "(无文件名)",
+                        p.matchType().getWire(),
+                        p.score()));
+            }
+            metaLines = "【逐条摘录元数据】\n" + sb;
+        }
         return """
-                【知识库检索-Observation】命中片段数：%d；来源：%s。
+                【知识库检索-Observation】命中片段数：%d；来源：%s。%s
 
-                ——摘录正文（可直接引用，勿编造未出现事实）——
+                ——摘录正文（可直接引用，勿编造未出现事实；match=semantic 为向量召回，keyword 为全文词匹配，hybrid 为两路均命中）——
                 %s
                 """
-                .formatted(bundle.retrievedChunks(), src, bundle.contextText());
+                .formatted(
+                        bundle.retrievedChunks(),
+                        src,
+                        metaLines.isEmpty() ? "" : "\n" + metaLines,
+                        bundle.contextText());
     }
 
     private static Long resolveKnowledgeBaseId(KnowledgeRetrievalToolArgs args, ToolContext ctx) {
