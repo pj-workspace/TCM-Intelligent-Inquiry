@@ -122,6 +122,7 @@ onMounted(() => {
     class="chat-settings-drawer"
     title="问诊设置"
     direction="rtl"
+    size="380px"
     append-to-body
   >
     <div class="chat-settings-drawer__body">
@@ -487,7 +488,7 @@ onMounted(() => {
 <style>
 /* 抽屉挂到 body，需非 scoped：响应式宽度 + 内部滚动 */
 .chat-settings-drawer.el-drawer {
-  width: min(90vw, 400px) !important;
+  width: min(90vw, 380px) !important;
 }
 
 .chat-settings-drawer .el-drawer__body {

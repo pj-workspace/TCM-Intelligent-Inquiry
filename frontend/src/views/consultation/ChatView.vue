@@ -48,6 +48,7 @@ const {
   stop,
 } = chat
 
+/** 默认知识库 / 文献库：与 ChatSettingsDrawer 共享单例，供 buildSendOptions 注入请求 */
 const { knowledgeBaseId, literatureCollectionId } = useOmniChatContext()
 
 /** 仿 claw-code CLI 分阶段进度：优先展示后端 {@code event: phase}，缺省时再用前端启发式文案 */
