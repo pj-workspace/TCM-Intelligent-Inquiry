@@ -1,30 +1,52 @@
-"""MCP 客户端连接管理（骨架）。
+"""MCP 客户端：可达性探测 + 占位工具发现。
 
-MCP（Model Context Protocol）是 Anthropic 提出的工具协议标准，
-允许 Agent 通过统一接口调用外部工具服务。
-
-骨架阶段：模拟工具发现，不建立真实连接。
-接入真实 MCP 时可使用 `mcp` Python SDK（pip install mcp）。
+完整 MCP 协议（stdio / streamable HTTP）需接入 `mcp` SDK；此处先保证 URL 可访问并记录状态。
 """
+
+import httpx
 
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+async def probe_server_reachable(server_url: str) -> bool:
+    """HEAD/GET 根路径，判断服务是否在线。"""
+    base = server_url.rstrip("/")
+    timeout = httpx.Timeout(5.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        for method, path in (("HEAD", ""), ("GET", "/"), ("GET", "/health")):
+            try:
+                url = f"{base}{path}" if path else base
+                if method == "HEAD":
+                    r = await client.head(url)
+                else:
+                    r = await client.get(url)
+                if r.status_code < 500:
+                    return True
+            except httpx.HTTPError as exc:
+                logger.debug("MCP probe %s %s: %s", method, url, exc)
+    return False
+
+
 async def discover_tools(server_url: str) -> list[str]:
     """连接 MCP 服务，发现其暴露的工具列表。
 
-    骨架实现：返回空列表，后续替换为真实 MCP 握手。
+    若服务 HTTP 可达但无标准工具清单接口，返回占位项便于前端展示。
     """
-    logger.info("MCP discover_tools url=%s (骨架，未实际连接)", server_url)
-    return []
+    ok = await probe_server_reachable(server_url)
+    if not ok:
+        logger.warning("MCP 服务不可达: %s", server_url)
+        return []
+    logger.info("MCP 服务可达（尚未解析工具清单）: %s", server_url)
+    # 后续可在此接入 MCP Python SDK 的 list_tools
+    return ["_server_reachable"]
 
 
 async def call_tool(server_url: str, tool_name: str, arguments: dict) -> str:
-    """调用 MCP 服务上的指定工具。
-
-    骨架实现：返回提示字符串。
-    """
-    logger.info("MCP call_tool url=%s tool=%s (骨架)", server_url, tool_name)
-    return f"（骨架）MCP 工具 '{tool_name}' 尚未接入真实服务。"
+    """调用 MCP 服务上的指定工具（占位）。"""
+    logger.info("MCP call_tool url=%s tool=%s args=%s", server_url, tool_name, arguments)
+    return (
+        f"（占位）MCP 工具调用尚未接入协议层；服务器: {server_url}，工具: {tool_name}。"
+        "请安装 `mcp` 包并实现 streamable HTTP / stdio 客户端。"
+    )

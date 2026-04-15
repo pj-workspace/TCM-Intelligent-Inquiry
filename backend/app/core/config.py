@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
+    def database_url_sync(self) -> str:
+        """供 Alembic / 同步脚本使用（psycopg2）。"""
+        u = self.database_url
+        if "postgresql+asyncpg://" in u:
+            return u.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        return u
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,5 +1,7 @@
 """知识库管理 API 的请求/响应模型。"""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -31,6 +33,18 @@ class IngestResponse(BaseModel):
     filename: str
     chunk_count: int
     message: str
+
+
+class IngestJobCreateResponse(BaseModel):
+    job_id: str
+    status: str = "pending"
+
+
+class IngestJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    result: dict[str, Any] | None = None
+    error: str | None = None
 
 
 class SearchRequest(BaseModel):
