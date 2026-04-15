@@ -87,6 +87,8 @@ openapi: "{BASE}/openapi.json"
 
 **UI 建议（非强制）**：用 `runId` 配对 `tool-call` 与 `tool-result`（若两者均含且一致）。
 
+**通义千问深度思考**：`llm_provider=qwen` 时，可在后端环境变量设置 `QWEN_ENABLE_THINKING=true`，并将 `QWEN_CHAT_MODEL` 设为支持思考的模型（如 `qwen-flash`）。后端会通过兼容接口的 `extra_body` 传入 `enable_thinking: true`（与 DashScope OpenAI 兼容调用一致）。流式响应里思考内容在 `choices[0].delta.reasoning_content`；标准 `langchain_openai.ChatOpenAI` 不会把该字段写入消息 chunk，本仓库在 `app/llm/providers/qwen.py` 的 `DashScopeChatOpenAI` 与 `app/chat/service.py` 中做了补齐与转发，前端即可收到 `thinking-delta`。不支持该参数的模型请保持 `false`。
+
 ### D.4 匿名会话状态机
 
 1. 首次请求：不传 `conversation_id` → 从 `meta` 取 `conversationId`，若存在 `anonSessionSecret` 则客户端持久化。

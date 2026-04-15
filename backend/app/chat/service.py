@@ -2,6 +2,7 @@
 
 import json
 import secrets
+import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,7 @@ from app.chat.schemas import ChatMessage
 from app.core.chat_context import chat_user_id
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.core.config import active_chat_model_label
 from app.core.safety import STREAM_SAFETY_NOTICE
 
 if TYPE_CHECKING:
@@ -97,8 +99,30 @@ def _extract_text(chunk) -> str:
     return ""
 
 
+def _iter_reasoning_delta_from_chunk(chunk: Any) -> Iterator[str]:
+    """DashScope 等 OpenAI 兼容流：思考在 delta.reasoning_content，LangChain 多放在 additional_kwargs。"""
+    kwargs = getattr(chunk, "additional_kwargs", None)
+    if isinstance(kwargs, dict):
+        for key in ("reasoning_content", "reasoning", "thinking"):
+            v = kwargs.get(key)
+            if v:
+                yield _truncate(str(v), _THINKING_MAX)
+                return
+    rm = getattr(chunk, "response_metadata", None)
+    if isinstance(rm, dict):
+        for key in ("reasoning_content", "reasoning"):
+            v = rm.get(key)
+            if v:
+                yield _truncate(str(v), _THINKING_MAX)
+                return
+
+
 def _iter_model_stream_parts(chunk) -> Iterator[tuple[str, str]]:
     """从 chat_model_stream chunk 拆出 (kind, delta)，kind 为 text 或 thinking。"""
+    # 必须先处理 reasoning：若 content 为 str 时旧逻辑会提前 return，会漏掉 Qwen/DashScope 的思考流
+    for r in _iter_reasoning_delta_from_chunk(chunk):
+        yield "thinking", r
+
     content = getattr(chunk, "content", None)
     if isinstance(content, str):
         if content:
@@ -151,8 +175,9 @@ async def _messages_to_lc(session: AsyncSession, conversation_id: str) -> list[H
     for m in rows:
         if m.role == "user":
             out.append(HumanMessage(content=m.content))
-        else:
+        elif m.role == "assistant":
             out.append(AIMessage(content=m.content))
+        # thinking 不进入模型上下文
     return out
 
 
@@ -180,6 +205,7 @@ async def stream_chat(
     try:
         yield _sse({"type": "notice", "safetyNotice": STREAM_SAFETY_NOTICE})
 
+        anon_sec: str | None = None
         if conv_id:
             async with async_session_factory() as session:
                 conv_row = await session.get(ConversationRecord, conv_id)
@@ -222,22 +248,45 @@ async def stream_chat(
                 )
                 await session.commit()
 
-            meta: dict = {
-                "type": "meta",
-                "conversationId": conv_id,
-                "agentId": agent_id,
-                "safetyNotice": STREAM_SAFETY_NOTICE,
-            }
-            if anon_sec:
-                meta["anonSessionSecret"] = anon_sec
-            yield _sse(meta)
-
             prior = _history_to_lc(history)
             lc_messages = prior + [HumanMessage(content=msg_in)]
+
+        meta_out: dict[str, Any] = {
+            "type": "meta",
+            "conversationId": conv_id,
+            "agentId": agent_id,
+            "chatModel": active_chat_model_label(),
+            "safetyNotice": STREAM_SAFETY_NOTICE,
+        }
+        if anon_sec:
+            meta_out["anonSessionSecret"] = anon_sec
+        yield _sse(meta_out)
 
         graph = await build_agent_graph(effective_agent_id)
 
         assistant_parts: list[str] = []
+        thinking_buf: list[str] = []
+        thinking_t0: float | None = None
+
+        async def flush_thinking_segment() -> None:
+            nonlocal thinking_buf, thinking_t0
+            if not thinking_buf or thinking_t0 is None:
+                return
+            dur = round(time.monotonic() - thinking_t0, 2)
+            text = "".join(thinking_buf)
+            thinking_buf = []
+            thinking_t0 = None
+            async with async_session_factory() as session:
+                session.add(
+                    MessageRecord(
+                        id=str(uuid.uuid4()),
+                        conversation_id=conv_id,
+                        role="thinking",
+                        content=text,
+                        duration_sec=dur,
+                    )
+                )
+                await session.commit()
 
         async for event in graph.astream_events({"messages": lc_messages}, version="v2"):
             etype = event.get("event")
@@ -253,17 +302,23 @@ async def stream_chat(
                             continue
                         streamed = True
                         if kind == "text":
+                            await flush_thinking_segment()
                             assistant_parts.append(delta)
                             yield _sse({"type": "text-delta", "textDelta": delta})
                         else:
+                            if thinking_t0 is None:
+                                thinking_t0 = time.monotonic()
+                            thinking_buf.append(delta)
                             yield _sse({"type": "thinking-delta", "textDelta": delta})
                     if not streamed:
                         delta = _extract_text(chunk)
                         if delta:
+                            await flush_thinking_segment()
                             assistant_parts.append(delta)
                             yield _sse({"type": "text-delta", "textDelta": delta})
 
             elif etype == "on_tool_start":
+                await flush_thinking_segment()
                 name = event.get("name") or ""
                 raw_in = data.get("input")
                 if raw_in is None:
@@ -292,7 +347,9 @@ async def stream_chat(
                     tr["outputPreview"] = preview
                 yield _sse(tr)
 
+        await flush_thinking_segment()
         assistant_text = "".join(assistant_parts)
+        _model_label = active_chat_model_label()
         async with async_session_factory() as session:
             session.add(
                 MessageRecord(
@@ -300,6 +357,7 @@ async def stream_chat(
                     conversation_id=conv_id,
                     role="assistant",
                     content=assistant_text,
+                    model_name=_model_label,
                 )
             )
             await session.commit()
@@ -317,6 +375,7 @@ async def stream_chat(
                             conversation_id=conv_id,
                             role="assistant",
                             content="（回复生成中断，请稍后重试。）",
+                            model_name=active_chat_model_label(),
                         )
                     )
                     await session.commit()

@@ -3,7 +3,11 @@
 对话模型使用 OpenAI 兼容接口，向量模型使用 DashScope 原生 SDK。
 """
 
+from typing import Any
+
 from langchain_community.embeddings import DashScopeEmbeddings
+from langchain_core.messages import AIMessageChunk
+from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
 from app.core.config import get_settings
@@ -13,17 +17,68 @@ _emb_fp: str | None = None
 _emb_singleton: DashScopeEmbeddings | None = None
 
 
+def _delta_as_dict(delta: Any) -> dict[str, Any] | None:
+    if delta is None:
+        return None
+    if isinstance(delta, dict):
+        return delta
+    if hasattr(delta, "model_dump"):
+        return delta.model_dump()
+    return None
+
+
+class DashScopeChatOpenAI(ChatOpenAI):
+    """在标准 ChatOpenAI 上补齐 DashScope 流式 reasoning_content。
+
+    langchain-openai 的 `_convert_delta_to_message_chunk` 不读取 `delta.reasoning_content`，
+    导致 enable_thinking 时思考内容被丢弃；此处从原始 chunk 写回 `additional_kwargs`。
+    """
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict[str, Any],
+        default_chunk_class: type,
+        base_generation_info: dict | None,
+    ) -> ChatGenerationChunk | None:
+        gen = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info
+        )
+        if gen is None:
+            return gen
+        msg = gen.message
+        if not isinstance(msg, AIMessageChunk):
+            return gen
+        choices = chunk.get("choices") or []
+        if not choices:
+            return gen
+        delta = _delta_as_dict(choices[0].get("delta"))
+        if not delta:
+            return gen
+        rc = (
+            delta.get("reasoning_content")
+            or delta.get("reasoning")
+            or delta.get("thinking")
+        )
+        if rc is not None and str(rc) != "":
+            msg.additional_kwargs["reasoning_content"] = str(rc)
+        return gen
+
+
 def build_qwen_chat() -> ChatOpenAI:
     s = get_settings()
     key = (s.dashscope_api_key or "").strip()
     if not key:
         raise ValueError("llm_provider=qwen 时请配置 DASHSCOPE_API_KEY")
-    return ChatOpenAI(
-        model=s.qwen_chat_model,
-        api_key=key,
-        base_url=s.dashscope_base_url,
-        temperature=0.2,
-    )
+    # DashScope 兼容 OpenAI 接口：深度思考需 extra_body（与官方 SDK chat.completions.create 一致）
+    kwargs: dict = {
+        "model": s.qwen_chat_model,
+        "api_key": key,
+        "base_url": s.dashscope_base_url,
+        "temperature": 0.2,
+    }
+    if s.qwen_enable_thinking:
+        kwargs["extra_body"] = {"enable_thinking": True}
+    return DashScopeChatOpenAI(**kwargs)
 
 
 def get_embeddings() -> DashScopeEmbeddings:

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -34,8 +34,12 @@ class MessageRecord(Base):
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant | thinking
     content: Mapped[str] = mapped_column(Text)
+    #: 仅 role=thinking 时使用：该段思考耗时（秒）
+    duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: 仅 role=assistant 时使用：生成该条回复时使用的对话模型名
+    model_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

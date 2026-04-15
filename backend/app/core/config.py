@@ -41,6 +41,13 @@ class Settings(BaseSettings):
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         description="兼容模式 Base URL",
     )
+    qwen_enable_thinking: bool = Field(
+        default=False,
+        description=(
+            "llm_provider=qwen 时是否在请求体中附带 enable_thinking（DashScope 兼容接口 extra_body）；"
+            "仅部分模型支持（如 qwen-flash），开启后流式响应可出现 thinking，后端映射为 SSE thinking-delta"
+        ),
+    )
     # 检索重排序（DashScope gte-rerank，与向量同一 API Key）
     rerank_enabled: bool = Field(default=True, description="是否在向量召回后做重排序")
     dashscope_rerank_model: str = Field(
@@ -193,3 +200,20 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """每次调用重新读取环境变量与 `backend/.env`（支持热切换，无需重启 API 进程）。"""
     return Settings()
+
+
+def active_chat_model_label() -> str:
+    """当前 LLM_PROVIDER 下实际用于对话的模型名（供前端展示）。"""
+    s = get_settings()
+    p = (s.llm_provider or "qwen").strip().lower()
+    if p == "qwen":
+        return s.qwen_chat_model
+    if p == "openai":
+        return s.openai_chat_model
+    if p == "anthropic":
+        return s.anthropic_chat_model
+    if p == "glm":
+        return s.glm_chat_model
+    if p == "deepseek":
+        return s.deepseek_chat_model
+    return s.qwen_chat_model

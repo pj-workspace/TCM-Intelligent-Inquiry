@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user, get_current_user_optional
 from app.auth.models import UserRecord
 from app.chat.access import assert_can_use_conversation
-from app.chat.history_service import list_messages_for_conversation, list_my_conversations
+from app.chat.history_service import list_messages_for_conversation, list_my_conversations, delete_conversation
 from app.chat.schemas import ChatRequest, ConversationItem, MessageItem
 from app.chat.service import stream_chat
 from app.core.database import async_session_factory, get_session
@@ -71,3 +71,17 @@ async def conversation_messages(
     return await list_messages_for_conversation(
         session, conversation_id, user, x_anon_session
     )
+
+
+@router.delete(
+    "/conversations/{conversation_id}",
+    summary="删除会话",
+)
+async def delete_conversation_route(
+    conversation_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord | None, Depends(get_current_user_optional)],
+    x_anon_session: Annotated[str | None, Header(alias="X-Anonymous-Session")] = None,
+):
+    await delete_conversation(session, conversation_id, user, x_anon_session)
+    return {"success": True}

@@ -39,3 +39,5 @@ class MessageItem(BaseModel):
     role: str
     content: str
     created_at: datetime
+    duration_sec: float | None = None
+    model_name: str | None = None

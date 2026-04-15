@@ -49,6 +49,21 @@ async def list_messages_for_conversation(
             role=m.role,
             content=m.content,
             created_at=m.created_at,
+            duration_sec=m.duration_sec,
+            model_name=m.model_name,
         )
         for m in rows
     ]
+
+
+async def delete_conversation(
+    session: AsyncSession,
+    conversation_id: str,
+    user: UserRecord | None,
+    anon_session_secret: str | None = None,
+) -> None:
+    conv = await assert_can_use_conversation(
+        session, conversation_id, user, anon_session_secret
+    )
+    await session.delete(conv)
+    await session.commit()

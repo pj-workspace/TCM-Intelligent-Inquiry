@@ -1,26 +1,77 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-serif: var(--font-noto-serif-sc), ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+  --color-border: var(--border-color);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #fdfdfc;
+    --fg: #1a1a1a;
+    --muted: #f4f4f5;
+    --muted-fg: #71717a;
+    --border-color: #e4e4e7;
+  }
+
+  .dark {
+    --bg: #09090b;
+    --fg: #fafafa;
+    --muted: #27272a;
+    --muted-fg: #a1a1aa;
+    --border-color: #27272a;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    @apply font-sans;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Custom styles for AI output */
+.ai-content {
+  @apply font-serif text-[1.05rem] leading-relaxed tracking-wide;
+}
+
+.ai-content p {
+  @apply mb-4;
+}
+
+.ai-content strong {
+  @apply font-semibold;
+}
+
+.ai-content em {
+  @apply italic text-muted-foreground;
+}
+
+.ai-content blockquote {
+  @apply border-l-4 border-muted pl-4 italic text-muted-foreground my-4;
+}
+
+.ai-content ul {
+  @apply list-disc list-inside mb-4;
+}
+
+.ai-content ol {
+  @apply list-decimal list-inside mb-4;
+}
+
+.ai-content code {
+  @apply font-mono text-sm bg-muted px-1.5 py-0.5 rounded-md;
+}
+
+.ai-content pre {
+  @apply bg-[#1e1e1e] text-white p-4 rounded-lg overflow-x-auto my-4 font-mono text-sm;
+}
+
+.ai-content pre code {
+  @apply bg-transparent p-0 text-white;
 }
