@@ -12,6 +12,7 @@
 | **认证** | 注册 / 登录 / JWT，`/api/auth/me` |
 | **知识库** | 知识库 CRUD；文档入库（**PDF / DOCX / 文本**）；Qdrant 向量存储；语义检索 |
 | **RAG** | DashScope 嵌入 + Qdrant 召回；可选 **DashScope gte-rerank** 重排序；Agent 工具 `search_tcm_knowledge` 与 HTTP 检索 API 共用同一套检索逻辑 |
+| **方剂库** | PostgreSQL 结构化存储（与向量知识库分离）；Agent 工具 **`formula_lookup`**（方名）、**`recommend_formulas`**（症状/证型线索）；内置 `backend/data/formulas_seed.json` 教材级种子，可扩展 |
 | **MCP** | 注册 MCP 服务（Streamable HTTP / SSE）；工具自动包装为 LangChain 工具（`mcp_*` 前缀）挂入 Agent |
 | **异步入库** | 可选 **Celery** 执行大文件入库；或 `CELERY_INGEST_ENABLED=false` 使用 FastAPI `BackgroundTasks` |
 | **多模型** | 通过 `LLM_PROVIDER` 切换：`qwen` / `openai` / `anthropic` / `glm` / `deepseek`（OpenAI 兼容接口用统一 `ChatOpenAI`） |
@@ -42,12 +43,15 @@ tcm-intelligent-inquiry/
 │   ├── celery_app.py           # Celery 应用（异步入库）
 │   ├── app/
 │   │   ├── agent/              # ReAct Agent、工具注册
+│   │   │   └── tools/
+│   │   │       └── formula/    # 方剂：ORM、检索、种子（与 formula_lookup 同域）
 │   │   ├── auth/               # 用户与 JWT
 │   │   ├── chat/               # 流式对话、会话
 │   │   ├── knowledge/          # 知识库、向量、检索、重排、文档解析
 │   │   ├── mcp/                # MCP 服务管理与 LangChain 桥接
 │   │   ├── llm/                # 多厂商 chat_factory、嵌入
 │   │   └── core/               # 配置、安全文案、数据库等
+│   ├── data/                   # 方剂等内置种子数据（JSON）
 │   ├── tests/                  # pytest
 │   ├── .env.example
 │   └── requirements.txt

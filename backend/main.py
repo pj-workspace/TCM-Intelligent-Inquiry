@@ -29,6 +29,9 @@ async def lifespan(_: FastAPI):
     from app.mcp.service import restore_mcp_tool_registrations
 
     async with async_session_factory() as session:
+        from app.agent.tools.formula.seed import seed_formulas_if_empty
+
+        await seed_formulas_if_empty(session)
         await restore_mcp_tool_registrations(session)
         await session.commit()
     s = get_settings()

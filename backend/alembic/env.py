@@ -22,6 +22,7 @@ from app.auth import models as auth_models  # noqa: F401, E402
 from app.chat import models as chat_models  # noqa: F401, E402
 from app.knowledge import models as knowledge_models  # noqa: F401, E402
 from app.mcp import models as mcp_models  # noqa: F401, E402
+from app.agent.tools.formula import models as formula_models  # noqa: F401, E402
 
 config = context.config
 if config.config_file_name is not None:
