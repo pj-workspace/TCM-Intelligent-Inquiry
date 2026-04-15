@@ -4,12 +4,13 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.jwt_codec import decode_token
 from app.auth.models import UserRecord
 from app.core.database import get_session
-from app.auth.jwt_codec import decode_token
+from app.core.dependencies import verify_api_key
 
 _security = HTTPBearer(auto_error=False)
 
@@ -33,4 +34,12 @@ async def get_current_user(
 ) -> UserRecord:
     if user is None:
         raise HTTPException(status_code=401, detail="未登录或 Token 无效")
+    return user
+
+
+async def require_api_user(
+    user: Annotated[UserRecord, Depends(get_current_user)],
+    _: Annotated[None, Depends(verify_api_key)],
+) -> UserRecord:
+    """已登录用户；若配置了 API_KEY，还须请求头 X-API-Key（与知识库等管理接口一致）。"""
     return user

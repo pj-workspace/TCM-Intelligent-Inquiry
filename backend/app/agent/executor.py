@@ -5,6 +5,7 @@
 """
 
 import hashlib
+from collections import OrderedDict
 
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import create_react_agent
@@ -21,6 +22,9 @@ logger = get_logger(__name__)
 
 _MAX_DEFAULT_GRAPHS = 8
 _default_graph_by_fp: dict[str, CompiledStateGraph] = {}
+
+_MAX_NAMED_AGENT_GRAPHS = 16
+_named_agent_graphs: OrderedDict[str, CompiledStateGraph] = OrderedDict()
 
 _RAW_DEFAULT_SYSTEM_PROMPT = """\
 你是面向中医领域的智能助手，回答需严谨、可引用知识库检索结果。
@@ -85,12 +89,26 @@ def get_default_graph() -> CompiledStateGraph:
 def invalidate_default_graph_cache() -> None:
     """MCP 工具增删等场景清空默认图缓存（下一请求按新指纹重建）。"""
     _default_graph_by_fp.clear()
+    _named_agent_graphs.clear()
+
+
+def invalidate_agent_graph_cache(agent_id: str | None = None) -> None:
+    """Agent 配置变更或删除时丢弃对应编译图。"""
+    if agent_id:
+        _named_agent_graphs.pop(agent_id, None)
+    else:
+        _named_agent_graphs.clear()
 
 
 async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
     """构建 LangGraph Agent；无 agent_id 时返回缓存的默认图。"""
     if not agent_id:
         return get_default_graph()
+
+    cached = _named_agent_graphs.get(agent_id)
+    if cached is not None:
+        _named_agent_graphs.move_to_end(agent_id)
+        return cached
 
     from app.agent.models import AgentRecord
 
@@ -123,4 +141,9 @@ async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
             row.name,
             [t.name for t in tools],
         )
-        return create_react_agent(llm, tools, prompt=prompt)
+        graph = create_react_agent(llm, tools, prompt=prompt)
+        _named_agent_graphs[agent_id] = graph
+        _named_agent_graphs.move_to_end(agent_id)
+        while len(_named_agent_graphs) > _MAX_NAMED_AGENT_GRAPHS:
+            _named_agent_graphs.popitem(last=False)
+        return graph

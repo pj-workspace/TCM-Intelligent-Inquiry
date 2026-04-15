@@ -62,6 +62,10 @@ class Settings(BaseSettings):
         description="OpenAI 兼容 Base URL",
     )
     openai_chat_model: str = Field(default="gpt-4o-mini", description="对话模型名")
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="OpenAI 向量模型名（llm_provider=openai 时知识库嵌入使用）",
+    )
 
     # ── Anthropic Claude ───────────────────────────────────────────────────────
     anthropic_api_key: str = Field(default="", description="ANTHROPIC_API_KEY")
@@ -122,6 +126,23 @@ class Settings(BaseSettings):
         description="HS256 密钥，生产环境务必修改",
     )
     jwt_expire_minutes: int = Field(default=10080, description="Token 有效期（分钟），默认 7 天")
+
+    # ── 数据库初始化：生产环境建议 false，仅使用 Alembic 迁移 ─────────────────
+    database_auto_create_tables: bool = Field(
+        default=True,
+        description="启动时是否执行 metadata.create_all；生产建议 false",
+    )
+
+    # ── 知识库上传 ────────────────────────────────────────────────────────────
+    max_upload_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        ge=1024,
+        description="单次上传文件最大字节数（同步/异步入库）",
+    )
+    ingest_temp_dir: str = Field(
+        default="",
+        description="异步入库临时文件目录，空则使用 backend/data/ingest_tmp；Celery 任务优先写磁盘而非 Redis",
+    )
 
     # ── 服务 ──────────────────────────────────────────────────────────────────
     cors_origins: str = Field(

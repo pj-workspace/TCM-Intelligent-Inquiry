@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import UserRecord
@@ -10,7 +10,14 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.exceptions import NotFoundError
 from app.knowledge.deps import require_kb_user
-from app.knowledge.job_store import job_create, job_get, job_update, run_ingest_background, stash_ingest_blob
+from app.knowledge.job_store import (
+    job_create,
+    job_get,
+    job_update,
+    run_ingest_background,
+    stash_ingest_blob,
+    stash_ingest_to_disk,
+)
 from app.knowledge.schemas import (
     IngestJobCreateResponse,
     IngestJobStatusResponse,
@@ -28,6 +35,17 @@ router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
 def _svc(session: AsyncSession = Depends(get_session)) -> KnowledgeService:
     return KnowledgeService(session)
+
+
+async def _read_upload_limited(file: UploadFile) -> bytes:
+    content = await file.read()
+    m = get_settings().max_upload_bytes
+    if len(content) > m:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件超过大小限制（最大 {m} 字节）",
+        )
+    return content
 
 
 @router.get(
@@ -92,7 +110,7 @@ async def ingest(
     _: Annotated[UserRecord, Depends(require_kb_user)],
     svc: KnowledgeService = Depends(_svc),
 ):
-    content = await file.read()
+    content = await _read_upload_limited(file)
     return await svc.ingest_file(kb_id, file.filename or "unknown", content)
 
 
@@ -108,14 +126,13 @@ async def ingest_async(
     _: Annotated[UserRecord, Depends(require_kb_user)],
     svc: KnowledgeService = Depends(_svc),
 ):
-    # 先校验知识库存在（与同步入库一致）
     await svc.get_kb(kb_id)
-    content = await file.read()
+    content = await _read_upload_limited(file)
     job_id = await job_create()
     filename = file.filename or "unknown"
     settings = get_settings()
     if settings.celery_ingest_enabled:
-        await stash_ingest_blob(job_id, content)
+        await stash_ingest_to_disk(job_id, content, filename)
         from app.workers.tasks import ingest_document_task
 
         async_result = ingest_document_task.delay(job_id, kb_id, filename)

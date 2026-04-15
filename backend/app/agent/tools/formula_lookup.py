@@ -23,7 +23,6 @@ async def formula_lookup(formula_name: str) -> str:
 
     async with async_session_factory() as session:
         out = await lookup_formula_by_name(session, q)
-        await session.commit()
     return out
 
 
@@ -50,5 +49,4 @@ async def recommend_formulas(
 
     async with async_session_factory() as session:
         out = await recommend_formulas_for_clinical(session, clinical_query, pattern_type, k)
-        await session.commit()
     return out

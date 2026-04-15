@@ -20,6 +20,8 @@ class ConversationRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    #: 未登录用户会话的持有凭证；仅当 user_id 为空时使用
+    anon_session_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class MessageRecord(Base):

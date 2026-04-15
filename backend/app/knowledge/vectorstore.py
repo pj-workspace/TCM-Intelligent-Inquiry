@@ -17,11 +17,14 @@ from app.llm.registry import get_embeddings
 logger = get_logger(__name__)
 
 
-@lru_cache
-def _qdrant_client() -> QdrantClient:
-    s = get_settings()
+@lru_cache(maxsize=8)
+def _qdrant_client_for_url(qdrant_url: str) -> QdrantClient:
     # 与 docker 内 Qdrant 主版本可能不一致时仅告警，不阻断
-    return QdrantClient(url=s.qdrant_url, check_compatibility=False)
+    return QdrantClient(url=qdrant_url, check_compatibility=False)
+
+
+def _qdrant_client() -> QdrantClient:
+    return _qdrant_client_for_url(get_settings().qdrant_url)
 
 
 def _collection_name(kb_id: str) -> str:

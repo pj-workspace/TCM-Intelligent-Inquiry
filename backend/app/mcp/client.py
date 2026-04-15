@@ -14,15 +14,16 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
 
 from app.core.logging import get_logger
+from app.mcp.url_policy import assert_mcp_url_allowed
 
 logger = get_logger(__name__)
 
 
 async def probe_server_reachable(server_url: str) -> bool:
     """HEAD/GET 根路径，判断服务是否在线（辅助诊断，非 MCP 协议）。"""
-    base = server_url.rstrip("/")
+    base = assert_mcp_url_allowed(server_url).rstrip("/")
     timeout = httpx.Timeout(5.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         for method, path in (("HEAD", ""), ("GET", "/"), ("GET", "/health")):
             try:
                 url = f"{base}{path}" if path else base
@@ -42,7 +43,7 @@ async def _open_mcp_session(
     server_url: str,
 ) -> AsyncGenerator[ClientSession, None]:
     """依次尝试 Streamable HTTP、SSE，建立已 initialize 的 ClientSession。"""
-    url = server_url.rstrip("/")
+    url = assert_mcp_url_allowed(server_url).rstrip("/")
     last_exc: Exception | None = None
     for factory in (streamable_http_client, sse_client):
         try:
@@ -96,6 +97,7 @@ def _format_call_tool_result(result: types.CallToolResult) -> str:
 
 async def discover_tools(server_url: str) -> list[str]:
     """连接 MCP 服务并返回 tools/list 中的工具名。"""
+    assert_mcp_url_allowed(server_url)
     try:
         async with _open_mcp_session(server_url) as session:
             return await _list_tool_names(session)
@@ -109,6 +111,7 @@ async def discover_tools(server_url: str) -> list[str]:
 
 async def call_tool(server_url: str, tool_name: str, arguments: dict[str, Any]) -> str:
     """调用 tools/call 并返回文本化结果。"""
+    assert_mcp_url_allowed(server_url)
     logger.info("MCP call_tool url=%s tool=%s", server_url, tool_name)
     try:
         async with _open_mcp_session(server_url) as session:

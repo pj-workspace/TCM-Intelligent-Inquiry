@@ -21,6 +21,10 @@ class ChatRequest(BaseModel):
     agent_id: str | None = Field(
         default=None, description="指定使用的 Agent ID（None 时用默认 Agent）"
     )
+    anon_session_secret: str | None = Field(
+        default=None,
+        description="匿名会话凭证，与首包 meta.anonSessionSecret 一致；续聊与登录用户会话无关",
+    )
 
 
 class ConversationItem(BaseModel):

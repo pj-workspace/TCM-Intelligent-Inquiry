@@ -10,7 +10,7 @@ import re
 import uuid
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.tools.formula.models import FormulaRecord
@@ -124,6 +124,35 @@ def _score_row(row: FormulaRecord, mega_query: str, pattern_hint: str | None) ->
     return score
 
 
+_FORMULA_BLOB = """COALESCE(indications, '') || ' ' || COALESCE(efficacy, '') || ' ' || COALESCE(composition, '')
+      || ' ' || COALESCE(name, '') || ' ' || COALESCE(pattern_tags::text, '') || ' '
+      || COALESCE(symptom_keywords::text, '')"""
+
+
+async def _prescreen_formula_ids(session: AsyncSession, needle: str) -> list[str]:
+    """用 pg_trgm 的 % 运算符预筛候选 id，减少后续内存中的行数。"""
+    if len(needle) < 2:
+        return []
+    sql = text(
+        "SELECT id FROM formulas WHERE ( "
+        + _FORMULA_BLOB
+        + " ) % :needle LIMIT 150"
+    )
+    try:
+        r = await session.execute(sql, {"needle": needle[:4000]})
+        return [str(row[0]) for row in r.all()]
+    except Exception as exc:
+        logger.debug("方剂预筛不可用，将用 LIMIT 回退: %s", exc)
+        return []
+
+
+async def _fallback_formula_ids(session: AsyncSession, limit: int = 200) -> list[str]:
+    r = await session.execute(
+        select(FormulaRecord.id).order_by(FormulaRecord.name).limit(limit)
+    )
+    return [str(x[0]) for x in r.all()]
+
+
 def _build_tsquery_str(expanded: str) -> str | None:
     """构造 simple 配置下 OR 检索串；过滤易破坏 to_tsquery 的字符。"""
     tokens: list[str] = []
@@ -143,12 +172,15 @@ def _build_tsquery_str(expanded: str) -> str | None:
     return " | ".join(tokens)
 
 
-async def _fetch_trgm_scores(session: AsyncSession, needle: str) -> dict[str, float]:
-    """pg_trgm similarity：用户扩展句与方剂拼接文本的整体相似度（适合中文连续串）。"""
+async def _fetch_trgm_scores(
+    session: AsyncSession,
+    needle: str,
+    ids: list[str] | None = None,
+) -> dict[str, float]:
+    """pg_trgm similarity；若给定 ids 则仅计算这些行。"""
     if len(needle) < 2:
         return {}
-    sql = text(
-        """
+    base = """
         SELECT id,
           similarity(
             COALESCE(indications, '') || ' ' || COALESCE(efficacy, '') || ' ' || COALESCE(composition, '')
@@ -158,9 +190,16 @@ async def _fetch_trgm_scores(session: AsyncSession, needle: str) -> dict[str, fl
           )::double precision AS trgm
         FROM formulas
         """
-    )
     try:
-        r = await session.execute(sql, {"needle": needle[:4000]})
+        if ids:
+            stmt = text(base + " WHERE id IN :ids").bindparams(
+                bindparam("ids", expanding=True)
+            )
+            r = await session.execute(
+                stmt, {"needle": needle[:4000], "ids": ids}
+            )
+        else:
+            r = await session.execute(text(base), {"needle": needle[:4000]})
         return {str(row[0]): float(row[1] or 0.0) for row in r.all()}
     except Exception as exc:
         logger.warning("pg_trgm 相似度查询失败，将仅用关键词分与全文分: %s", exc)
@@ -214,7 +253,12 @@ async def recommend_formulas_for_clinical(
     expanded = expand_clinical_text(q0, pattern_type)
     mega_q = expanded if expanded else q0
 
-    r = await session.execute(select(FormulaRecord))
+    prescreen_ids = await _prescreen_formula_ids(session, mega_q)
+    if not prescreen_ids:
+        prescreen_ids = await _fallback_formula_ids(session, 200)
+    r = await session.execute(
+        select(FormulaRecord).where(FormulaRecord.id.in_(prescreen_ids))
+    )
     rows = list(r.scalars().all())
     if not rows:
         return (
@@ -223,7 +267,7 @@ async def recommend_formulas_for_clinical(
 
     k = max(1, min(int(top_k), 15))
 
-    trgm_map = await _fetch_trgm_scores(session, mega_q)
+    trgm_map = await _fetch_trgm_scores(session, mega_q, [r.id for r in rows])
     tsq = _build_tsquery_str(mega_q)
     fts_map: dict[str, float] = {}
     if tsq:

@@ -3,7 +3,9 @@
 import base64
 import json
 import uuid
+from pathlib import Path
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.redis_client import get_redis
 
@@ -13,6 +15,15 @@ _PREFIX = "tcm:ingest_job:"
 _BLOB_PREFIX = "tcm:ingest_blob:"
 _TTL_SEC = 60 * 60 * 24 * 7  # 7 天
 _BLOB_TTL_SEC = 60 * 60  # 1 小时
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _ingest_temp_root() -> Path:
+    s = get_settings()
+    if s.ingest_temp_dir.strip():
+        return Path(s.ingest_temp_dir).expanduser().resolve()
+    return _BACKEND_ROOT / "data" / "ingest_tmp"
 
 
 def _key(job_id: str) -> str:
@@ -53,6 +64,16 @@ async def stash_ingest_blob(job_id: str, content: bytes) -> None:
     await r.set(_blob_key(job_id), b64, ex=_BLOB_TTL_SEC)
 
 
+async def stash_ingest_to_disk(job_id: str, content: bytes, filename: str) -> None:
+    """Celery 路径：写入本地临时文件，避免大文件占用 Redis 内存。"""
+    root = _ingest_temp_root()
+    root.mkdir(parents=True, exist_ok=True)
+    safe = "".join(c for c in (filename or "upload.bin") if c.isalnum() or c in "._-")[:180] or "upload.bin"
+    path = root / f"{job_id}_{safe}"
+    path.write_bytes(content)
+    await job_update(job_id, stash_kind="disk", stash_path=str(path))
+
+
 async def pop_ingest_blob(job_id: str) -> bytes | None:
     """取出并删除暂存内容；若无则返回 None。"""
     r = get_redis()
@@ -62,6 +83,24 @@ async def pop_ingest_blob(job_id: str) -> bytes | None:
         return None
     await r.delete(key)
     return base64.b64decode(raw)
+
+
+async def _load_ingest_bytes(job_id: str) -> bytes | None:
+    """优先从磁盘 stash 读取并删除；否则从 Redis blob。"""
+    meta = await job_get(job_id)
+    if meta and meta.get("stash_kind") == "disk" and meta.get("stash_path"):
+        path = Path(meta["stash_path"])
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            logger.warning("读取异步入库临时文件失败 job=%s path=%s: %s", job_id, path, exc)
+            return None
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return data
+    return await pop_ingest_blob(job_id)
 
 
 async def run_ingest_pipeline(
@@ -101,8 +140,8 @@ async def run_ingest_background(
 
 
 async def run_ingest_from_stash(job_id: str, kb_id: str, filename: str) -> None:
-    """Celery worker：从 Redis 取出上传内容后执行入库。"""
-    content = await pop_ingest_blob(job_id)
+    """Celery worker：从磁盘临时文件或 Redis 取出上传内容后执行入库。"""
+    content = await _load_ingest_bytes(job_id)
     if content is None:
         await job_update(
             job_id,

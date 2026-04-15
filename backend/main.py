@@ -35,6 +35,10 @@ async def lifespan(_: FastAPI):
         await restore_mcp_tool_registrations(session)
         await session.commit()
     s = get_settings()
+    if len(s.jwt_secret) < 32 or s.jwt_secret == "dev-only-change-me-use-long-random-string":
+        logger.warning(
+            "JWT_SECRET 过短或为开发默认值，生产环境请替换为至少 32 字节的高强度随机串",
+        )
     logger.info(
         "TCM Intelligent Inquiry API 启动 | 对话模型: %s | 向量模型: %s | PG/Redis/Qdrant 见 /health/deps",
         s.qwen_chat_model,
@@ -112,17 +116,20 @@ async def health_deps():
             await conn.execute(text("SELECT 1"))
         out["postgres"] = "ok"
     except Exception as exc:
-        out["postgres"] = f"error: {exc!s}"
+        logger.warning("health/deps postgres: %s", exc)
+        out["postgres"] = "error"
 
     try:
         out["redis"] = "ok" if await ping_redis() else "fail"
     except Exception as exc:
-        out["redis"] = f"error: {exc!s}"
+        logger.warning("health/deps redis: %s", exc)
+        out["redis"] = "error"
 
     try:
         QdrantClient(url=s.qdrant_url, check_compatibility=False).get_collections()
         out["qdrant"] = "ok"
     except Exception as exc:
-        out["qdrant"] = f"error: {exc!s}"
+        logger.warning("health/deps qdrant: %s", exc)
+        out["qdrant"] = "error"
 
     return out

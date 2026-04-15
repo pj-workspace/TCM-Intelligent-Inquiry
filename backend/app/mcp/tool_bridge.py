@@ -54,7 +54,7 @@ def _build_structured_tool(
 ) -> StructuredTool:
     desc = (
         f"[MCP] 服务「{server_display_name}」提供的工具，远端名 `{remote_tool_name}`。"
-        f" 端点: {server_url}"
+        "（服务端点已在系统中登记，不在此展示完整 URL。）"
     )
 
     async def _acall(arguments: dict[str, Any] | None = None) -> str:

@@ -14,6 +14,7 @@ from app.agent.schemas import (
 )
 from app.agent.tools.loader import ensure_tools_loaded
 from app.agent.tools.registry import tool_registry
+from app.agent.executor import invalidate_agent_graph_cache
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 
@@ -96,6 +97,7 @@ class AgentService:
         if "system_prompt" in patch:
             row.system_prompt = patch["system_prompt"] or ""
         await self._session.flush()
+        invalidate_agent_graph_cache(agent_id)
         logger.info("更新 Agent id=%s fields=%s", agent_id, list(patch.keys()))
         return _to_response(row)
 
@@ -104,6 +106,7 @@ class AgentService:
         if row is None:
             raise NotFoundError(f"Agent '{agent_id}' 不存在")
         self._session.delete(row)
+        invalidate_agent_graph_cache(agent_id)
         logger.info("删除 Agent id=%s", agent_id)
 
     async def list_available_tools(self) -> list[str]:

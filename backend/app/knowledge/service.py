@@ -35,6 +35,7 @@ def _row_to_response(row: KnowledgeBaseRecord) -> KnowledgeBaseResponse:
         name=row.name,
         description=row.description or "",
         document_count=row.document_count,
+        metadata={},
     )
 
 

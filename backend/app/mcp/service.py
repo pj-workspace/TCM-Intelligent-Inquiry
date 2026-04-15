@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.mcp.client import discover_tools
+from app.mcp.url_policy import assert_mcp_url_allowed
 from app.mcp.models import McpServerRecord
 from app.mcp.schemas import (
     McpServerCreateRequest,
@@ -50,12 +51,13 @@ class McpService:
 
     async def register_server(self, req: McpServerCreateRequest) -> McpServerResponse:
         """注册 MCP 服务并自动发现其工具列表；启用时挂入 LangChain 工具注册表。"""
-        tool_names = await discover_tools(req.url)
+        safe_url = assert_mcp_url_allowed(req.url)
+        tool_names = await discover_tools(safe_url)
         server_id = str(uuid.uuid4())
         row = McpServerRecord(
             id=server_id,
             name=req.name,
-            url=req.url.rstrip("/"),
+            url=safe_url,
             description=req.description or "",
             enabled=req.enabled,
             tool_names=tool_names,
@@ -91,13 +93,15 @@ class McpService:
         row = await self._session.get(McpServerRecord, server_id)
         if row is None:
             raise NotFoundError(f"MCP 服务 '{server_id}' 不存在")
-        tool_names = await discover_tools(row.url)
+        safe_url = assert_mcp_url_allowed(row.url)
+        row.url = safe_url
+        tool_names = await discover_tools(safe_url)
         row.tool_names = tool_names
         await self._session.flush()
         register_mcp_tools_for_server(
             server_id,
             row.name,
-            row.url,
+            safe_url,
             tool_names if row.enabled else [],
         )
         logger.info("刷新 MCP 工具 id=%s tools=%s", server_id, tool_names)
@@ -114,7 +118,9 @@ async def restore_mcp_tool_registrations(session: AsyncSession) -> None:
         tool_names = row.tool_names if isinstance(row.tool_names, list) else []
         if not tool_names:
             try:
-                tool_names = await discover_tools(row.url)
+                safe_url = assert_mcp_url_allowed(row.url)
+                row.url = safe_url
+                tool_names = await discover_tools(safe_url)
                 row.tool_names = tool_names
             except Exception as exc:
                 logger.warning(

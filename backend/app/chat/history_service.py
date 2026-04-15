@@ -32,8 +32,11 @@ async def list_messages_for_conversation(
     session: AsyncSession,
     conversation_id: str,
     user: UserRecord | None,
+    anon_session_secret: str | None = None,
 ) -> list[MessageItem]:
-    await assert_can_use_conversation(session, conversation_id, user)
+    await assert_can_use_conversation(
+        session, conversation_id, user, anon_session_secret
+    )
     r = await session.execute(
         select(MessageRecord)
         .where(MessageRecord.conversation_id == conversation_id)

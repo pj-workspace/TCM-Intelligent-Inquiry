@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,12 @@ async def chat(
 ):
     if req.conversation_id:
         async with async_session_factory() as session:
-            await assert_can_use_conversation(session, req.conversation_id, user)
+            await assert_can_use_conversation(
+                session,
+                req.conversation_id,
+                user,
+                req.anon_session_secret,
+            )
             await session.commit()
 
     return StreamingResponse(
@@ -34,6 +39,7 @@ async def chat(
             req.agent_id,
             req.conversation_id,
             user,
+            req.anon_session_secret,
         ),
         media_type="text/event-stream",
     )
@@ -60,5 +66,8 @@ async def conversation_messages(
     conversation_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[UserRecord | None, Depends(get_current_user_optional)],
+    x_anon_session: Annotated[str | None, Header(alias="X-Anonymous-Session")] = None,
 ):
-    return await list_messages_for_conversation(session, conversation_id, user)
+    return await list_messages_for_conversation(
+        session, conversation_id, user, x_anon_session
+    )

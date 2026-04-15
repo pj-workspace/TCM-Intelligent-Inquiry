@@ -1,6 +1,7 @@
 """对话服务：LangGraph 流式输出 + 会话/消息持久化。"""
 
 import json
+import secrets
 import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
@@ -72,6 +73,7 @@ async def stream_chat(
     agent_id: str | None,
     conversation_id: str | None,
     user: "UserRecord | None",
+    anon_session_secret: str | None = None,
 ) -> AsyncIterator[str]:
     from app.agent.executor import build_agent_graph
 
@@ -109,6 +111,7 @@ async def stream_chat(
         else:
             conv_id = str(uuid.uuid4())
             title = msg_in[:200] if len(msg_in) > 200 else msg_in
+            anon_sec = secrets.token_hex(32) if user_id is None else None
             async with async_session_factory() as session:
                 session.add(
                     ConversationRecord(
@@ -116,6 +119,7 @@ async def stream_chat(
                         user_id=user_id,
                         title=title,
                         agent_id=agent_id,
+                        anon_session_secret=anon_sec,
                     )
                 )
                 session.add(
@@ -128,14 +132,15 @@ async def stream_chat(
                 )
                 await session.commit()
 
-            yield _sse(
-                {
-                    "type": "meta",
-                    "conversationId": conv_id,
-                    "agentId": agent_id,
-                    "safetyNotice": STREAM_SAFETY_NOTICE,
-                }
-            )
+            meta: dict = {
+                "type": "meta",
+                "conversationId": conv_id,
+                "agentId": agent_id,
+                "safetyNotice": STREAM_SAFETY_NOTICE,
+            }
+            if anon_sec:
+                meta["anonSessionSecret"] = anon_sec
+            yield _sse(meta)
 
             prior = _history_to_lc(history)
             lc_messages = prior + [HumanMessage(content=msg_in)]
@@ -177,5 +182,19 @@ async def stream_chat(
 
     except Exception as exc:
         logger.exception("stream_chat error")
+        if conv_id:
+            try:
+                async with async_session_factory() as session:
+                    session.add(
+                        MessageRecord(
+                            id=str(uuid.uuid4()),
+                            conversation_id=conv_id,
+                            role="assistant",
+                            content="（回复生成中断，请稍后重试。）",
+                        )
+                    )
+                    await session.commit()
+            except Exception:
+                logger.exception("写入中断占位消息失败")
         yield _sse({"type": "error", "message": str(exc)})
         yield "data: [DONE]\n\n"

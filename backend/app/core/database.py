@@ -44,7 +44,11 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """创建缺失的表。"""
+    """创建缺失的表（仅当配置 database_auto_create_tables 为 True）。"""
+    from app.core.config import get_settings
+
+    if not get_settings().database_auto_create_tables:
+        return
     # 确保模型已注册到 metadata
     from app.agent import models as _agent_models  # noqa: F401
     from app.auth import models as _auth_models  # noqa: F401

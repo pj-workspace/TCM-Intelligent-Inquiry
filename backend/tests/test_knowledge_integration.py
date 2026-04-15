@@ -35,6 +35,26 @@ def test_knowledge_requires_auth(client):
 
 
 @pytest.mark.integration
+def test_ingest_rejects_oversized_file(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("MAX_UPLOAD_BYTES", "1024")
+    name = f"kb_big_{uuid.uuid4().hex[:8]}"
+    kb = client.post(
+        "/api/knowledge",
+        json={"name": name, "description": "t"},
+        headers=auth_headers,
+    )
+    assert kb.status_code == 200
+    kb_id = kb.json()["id"]
+    files = {"file": ("big.txt", b"x" * 2048, "text/plain")}
+    r = client.post(
+        f"/api/knowledge/{kb_id}/ingest",
+        files=files,
+        headers=auth_headers,
+    )
+    assert r.status_code == 413
+
+
+@pytest.mark.integration
 def test_knowledge_requires_api_key_when_configured(client, auth_headers, monkeypatch):
     monkeypatch.setenv("API_KEY", "integration-test-key")
     r = client.get("/api/knowledge", headers=auth_headers)

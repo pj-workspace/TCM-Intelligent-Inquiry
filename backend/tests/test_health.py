@@ -18,6 +18,10 @@ def test_health_deps_structure():
     assert "postgres" in data
     assert "redis" in data
     assert "qdrant" in data
+    for key in ("postgres", "redis", "qdrant"):
+        val = data[key]
+        assert isinstance(val, str)
+        assert val in ("ok", "fail", "error")
 
 
 def test_database_url_sync():

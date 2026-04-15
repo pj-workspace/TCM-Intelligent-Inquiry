@@ -4,13 +4,16 @@ from functools import lru_cache
 
 import redis.asyncio as redis
 
-from app.core.config import get_settings
+
+@lru_cache(maxsize=16)
+def get_redis_for_url(redis_url: str) -> redis.Redis:
+    return redis.from_url(redis_url, decode_responses=True)
 
 
-@lru_cache
 def get_redis() -> redis.Redis:
-    s = get_settings()
-    return redis.from_url(s.redis_url, decode_responses=True)
+    from app.core.config import get_settings
+
+    return get_redis_for_url(get_settings().redis_url)
 
 
 async def ping_redis() -> bool:
