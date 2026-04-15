@@ -1,0 +1,53 @@
+# 本地开发：PostgreSQL + Redis + Qdrant
+# 用法：在项目根目录执行  docker compose up -d
+# 后端连接：见 backend/.env.example
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tcm-postgres
+    environment:
+      POSTGRES_USER: tcm
+      POSTGRES_PASSWORD: tcm_secret
+      POSTGRES_DB: tcm
+    # 使用 5433 避免与本机已安装的 PostgreSQL（常见占用 5432）冲突
+    ports:
+      - "5433:5432"
+    volumes:
+      - tcm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tcm -d tcm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tcm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - tcm_redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    # 与 pip 的 qdrant-client 主版本尽量接近，减少兼容性告警
+    image: qdrant/qdrant:v1.13.5
+    container_name: tcm-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - tcm_qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+
+volumes:
+  tcm_pg_data:
+  tcm_redis_data:
+  tcm_qdrant_data:
