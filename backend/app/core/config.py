@@ -1,4 +1,3 @@
-from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field
@@ -134,6 +133,6 @@ class Settings(BaseSettings):
         return u
 
 
-@lru_cache
 def get_settings() -> Settings:
+    """每次调用重新读取环境变量与 `backend/.env`（支持热切换，无需重启 API 进程）。"""
     return Settings()

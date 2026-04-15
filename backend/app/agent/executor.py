@@ -1,22 +1,26 @@
 """Agent 运行时：基于 LangGraph create_react_agent 构建 ReAct 图。
 
-- agent_id 为空：使用默认工具集与默认系统提示（进程内缓存）。
-- agent_id 非空：从数据库加载 AgentRecord，按配置组装工具与提示。
+- agent_id 为空：默认图按「LLM 配置指纹 + 工具名列表」缓存，配置或 MCP 工具变更后自动换新图。
+- agent_id 非空：从数据库加载 AgentRecord，按配置组装工具与提示（每请求构建）。
 """
 
-from functools import lru_cache
+import hashlib
 
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import create_react_agent
 
 from app.agent.tools.loader import ensure_tools_loaded
 from app.agent.tools.registry import tool_registry
+from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.safety import append_tcm_safety_to_system_prompt
 from app.llm.registry import get_chat_model
 
 logger = get_logger(__name__)
+
+_MAX_DEFAULT_GRAPHS = 8
+_default_graph_by_fp: dict[str, CompiledStateGraph] = {}
 
 _RAW_DEFAULT_SYSTEM_PROMPT = """\
 你是面向中医领域的智能助手，回答需严谨、可引用知识库检索结果。
@@ -34,17 +38,52 @@ def _load_all_tools():
     return tool_registry.all()
 
 
-@lru_cache(maxsize=1)
+def _default_graph_fingerprint() -> str:
+    """LLM 相关配置 + 工具集变化时指纹变，用于热切换后换新图。"""
+    ensure_tools_loaded()
+    tool_names = tuple(sorted(tool_registry.names()))
+    s = get_settings()
+    blob = repr(
+        (
+            s.llm_provider,
+            s.qwen_chat_model,
+            s.dashscope_api_key,
+            s.dashscope_base_url,
+            s.openai_api_key,
+            s.openai_base_url,
+            s.openai_chat_model,
+            s.anthropic_api_key,
+            s.anthropic_chat_model,
+            s.zhipu_api_key,
+            s.glm_base_url,
+            s.glm_chat_model,
+            s.deepseek_api_key,
+            s.deepseek_base_url,
+            s.deepseek_chat_model,
+            tool_names,
+        )
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def get_default_graph() -> CompiledStateGraph:
+    fp = _default_graph_fingerprint()
+    cached = _default_graph_by_fp.get(fp)
+    if cached is not None:
+        return cached
     llm = get_chat_model()
     tools = _load_all_tools()
     logger.info("创建默认 ReAct Agent，工具: %s", [t.name for t in tools])
-    return create_react_agent(llm, tools, prompt=_DEFAULT_SYSTEM_PROMPT)
+    graph = create_react_agent(llm, tools, prompt=_DEFAULT_SYSTEM_PROMPT)
+    _default_graph_by_fp[fp] = graph
+    while len(_default_graph_by_fp) > _MAX_DEFAULT_GRAPHS:
+        _default_graph_by_fp.pop(next(iter(_default_graph_by_fp)))
+    return graph
 
 
 def invalidate_default_graph_cache() -> None:
-    """MCP 工具增删后调用，使默认 Agent 重新绑定工具列表。"""
-    get_default_graph.cache_clear()
+    """MCP 工具增删等场景清空默认图缓存（下一请求按新指纹重建）。"""
+    _default_graph_by_fp.clear()
 
 
 async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:

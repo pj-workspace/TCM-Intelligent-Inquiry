@@ -4,14 +4,12 @@
 并在 `Settings` / `.env` 中增加对应 API Key 与模型名。
 """
 
-from functools import lru_cache
-
 from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 
 
-@lru_cache
 def get_chat_model() -> BaseChatModel:
+    """按当前配置构造对话模型（无进程级缓存，改 .env 后下一轮请求生效）。"""
     from app.llm.chat_factory import build_chat_model
 
     return build_chat_model()
