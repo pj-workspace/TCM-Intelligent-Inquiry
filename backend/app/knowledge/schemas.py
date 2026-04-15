@@ -59,7 +59,10 @@ class SearchRequest(BaseModel):
 class SearchResult(BaseModel):
     content: str
     source: str
-    score: float
+    score: float = Field(
+        ...,
+        description="相关度分数：开启重排时为模型相关分（通常越大越好）；仅向量时为距离/相似度（依 Qdrant 度量）",
+    )
 
 
 class SearchResponse(BaseModel):

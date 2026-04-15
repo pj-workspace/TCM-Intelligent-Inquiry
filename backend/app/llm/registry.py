@@ -1,21 +1,20 @@
 """LLM 注册表：统一入口，屏蔽底层 provider 差异。
 
-新增 provider 只需：
-  1. 在 app/llm/providers/ 下添加对应文件
-  2. 在 Settings 里加 llm_provider 字段
-  3. 在此处 match 分支中注册
-
-其他业务域只需 from app.llm.registry import get_chat_model, get_embeddings。
+新增厂商：在 `app/llm/chat_factory.py` 的 `build_chat_model` 中增加分支，
+并在 `Settings` / `.env` 中增加对应 API Key 与模型名。
 """
 
+from functools import lru_cache
+
 from langchain_community.embeddings import DashScopeEmbeddings
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 
 
-def get_chat_model() -> ChatOpenAI:
-    from app.llm.providers.qwen import get_chat_model as _qwen_chat
+@lru_cache
+def get_chat_model() -> BaseChatModel:
+    from app.llm.chat_factory import build_chat_model
 
-    return _qwen_chat()
+    return build_chat_model()
 
 
 def get_embeddings() -> DashScopeEmbeddings:

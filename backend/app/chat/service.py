@@ -13,6 +13,7 @@ from app.chat.models import ConversationRecord, MessageRecord
 from app.chat.schemas import ChatMessage
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.core.safety import STREAM_SAFETY_NOTICE
 
 if TYPE_CHECKING:
     from app.auth.models import UserRecord
@@ -85,6 +86,8 @@ async def stream_chat(
     effective_agent_id = agent_id
 
     try:
+        yield _sse({"type": "notice", "safetyNotice": STREAM_SAFETY_NOTICE})
+
         if conv_id:
             async with async_session_factory() as session:
                 conv_row = await session.get(ConversationRecord, conv_id)
@@ -130,6 +133,7 @@ async def stream_chat(
                     "type": "meta",
                     "conversationId": conv_id,
                     "agentId": agent_id,
+                    "safetyNotice": STREAM_SAFETY_NOTICE,
                 }
             )
 

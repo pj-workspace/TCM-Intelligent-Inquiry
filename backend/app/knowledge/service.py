@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.knowledge.chunker import chunk_documents
+from app.knowledge.document_text import extract_plain_text
 from app.knowledge.models import KnowledgeBaseRecord
 from app.knowledge.schemas import (
     IngestResponse,
@@ -18,9 +19,9 @@ from app.knowledge.schemas import (
     SearchResponse,
     SearchResult,
 )
+from app.knowledge.retrieval import retrieve_kb_chunks
 from app.knowledge.vectorstore import (
     delete_kb_vectors,
-    similarity_search as vector_similarity_search,
     upsert_documents,
 )
 from langchain_core.documents import Document
@@ -84,7 +85,7 @@ class KnowledgeService:
         if row is None:
             raise NotFoundError(f"知识库 '{kb_id}' 不存在")
 
-        text = content.decode("utf-8", errors="ignore")
+        text = extract_plain_text(filename, content)
         raw_docs = [Document(page_content=text, metadata={"source": filename})]
         chunks = chunk_documents(raw_docs)
 
@@ -103,7 +104,7 @@ class KnowledgeService:
         if row is None:
             raise NotFoundError(f"知识库 '{kb_id}' 不存在")
 
-        raw = await vector_similarity_search(kb_id, req.query, req.top_k)
+        raw = await retrieve_kb_chunks(kb_id, req.query, req.top_k)
         results = [
             SearchResult(
                 content=doc.page_content,

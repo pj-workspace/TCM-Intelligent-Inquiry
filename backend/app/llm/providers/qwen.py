@@ -11,12 +11,14 @@ from langchain_openai import ChatOpenAI
 from app.core.config import get_settings
 
 
-@lru_cache
-def get_chat_model() -> ChatOpenAI:
+def build_qwen_chat() -> ChatOpenAI:
     s = get_settings()
+    key = (s.dashscope_api_key or "").strip()
+    if not key:
+        raise ValueError("llm_provider=qwen 时请配置 DASHSCOPE_API_KEY")
     return ChatOpenAI(
         model=s.qwen_chat_model,
-        api_key=s.dashscope_api_key,
+        api_key=key,
         base_url=s.dashscope_base_url,
         temperature=0.2,
     )
@@ -25,7 +27,10 @@ def get_chat_model() -> ChatOpenAI:
 @lru_cache
 def get_embeddings() -> DashScopeEmbeddings:
     s = get_settings()
+    key = (s.dashscope_api_key or "").strip()
+    if not key:
+        raise ValueError("知识库向量嵌入需要 DASHSCOPE_API_KEY（DashScope 嵌入模型）")
     return DashScopeEmbeddings(
         model=s.qwen_embedding_model,
-        dashscope_api_key=s.dashscope_api_key,
+        dashscope_api_key=key,
     )

@@ -16,8 +16,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── DashScope ─────────────────────────────────────────────────────────────
-    dashscope_api_key: str = Field(..., description="阿里云 DashScope API Key")
+    # ── 对话模型厂商（llm_provider）────────────────────────────────────────────
+    llm_provider: str = Field(
+        default="qwen",
+        description="qwen | openai | anthropic | glm | deepseek",
+    )
+
+    # ── 阿里云 DashScope（通义千问对话 + 默认向量嵌入）──────────────────────────
+    dashscope_api_key: str = Field(
+        default="",
+        description="DashScope API Key；llm_provider=qwen 或知识库嵌入必填",
+    )
     qwen_chat_model: str = Field(
         default="qwen-plus", description="对话模型名（兼容 OpenAI 接口）"
     )
@@ -28,6 +37,55 @@ class Settings(BaseSettings):
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         description="兼容模式 Base URL",
     )
+    # 检索重排序（DashScope gte-rerank，与向量同一 API Key）
+    rerank_enabled: bool = Field(default=True, description="是否在向量召回后做重排序")
+    dashscope_rerank_model: str = Field(
+        default="gte-rerank",
+        description="DashScope 重排序模型名",
+    )
+    rerank_candidate_multiplier: int = Field(
+        default=4,
+        ge=2,
+        le=10,
+        description="相对 top_k 的召回倍数（先多召回再重排）",
+    )
+    rerank_max_candidates: int = Field(
+        default=40,
+        ge=10,
+        le=100,
+        description="单次检索送入重排序的最大候选条数上限",
+    )
+
+    # ── OpenAI 官方 API ────────────────────────────────────────────────────────
+    openai_api_key: str = Field(default="", description="OPENAI_API_KEY")
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        description="OpenAI 兼容 Base URL",
+    )
+    openai_chat_model: str = Field(default="gpt-4o-mini", description="对话模型名")
+
+    # ── Anthropic Claude ───────────────────────────────────────────────────────
+    anthropic_api_key: str = Field(default="", description="ANTHROPIC_API_KEY")
+    anthropic_chat_model: str = Field(
+        default="claude-3-5-sonnet-20241022",
+        description="Claude 模型名",
+    )
+
+    # ── 智谱 GLM（OpenAI 兼容接口）──────────────────────────────────────────────
+    zhipu_api_key: str = Field(default="", description="智谱 AI API Key")
+    glm_base_url: str = Field(
+        default="https://open.bigmodel.cn/api/paas/v4",
+        description="智谱 OpenAI 兼容 Base URL",
+    )
+    glm_chat_model: str = Field(default="glm-4", description="GLM 对话模型名")
+
+    # ── DeepSeek（OpenAI 兼容接口）────────────────────────────────────────────
+    deepseek_api_key: str = Field(default="", description="DeepSeek API Key")
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com/v1",
+        description="DeepSeek Base URL",
+    )
+    deepseek_chat_model: str = Field(default="deepseek-chat", description="对话模型名")
 
     # ── 基础设施（docker-compose 默认值见 .env.example）──────────────────────
     database_url: str = Field(

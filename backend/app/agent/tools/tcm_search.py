@@ -7,7 +7,7 @@ from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.knowledge.models import KnowledgeBaseRecord
-from app.knowledge.vectorstore import similarity_search
+from app.knowledge.retrieval import retrieve_kb_chunks
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -55,7 +55,7 @@ async def search_tcm_knowledge(
         k = max(1, min(int(top_k), 20))
     except (TypeError, ValueError):
         k = 5
-    pairs = await similarity_search(resolved, q, k)
+    pairs = await retrieve_kb_chunks(resolved, q, k)
     if not pairs:
         return (
             f"在知识库 `{resolved}` 中未检索到与「{q}」相关的片段；"
@@ -65,5 +65,5 @@ async def search_tcm_knowledge(
     lines: list[str] = []
     for i, (doc, score) in enumerate(pairs, start=1):
         src = doc.metadata.get("source", "")
-        lines.append(f"[{i}]（相似度分数 {score:.4f}，来源: {src}）\n{doc.page_content.strip()}")
+        lines.append(f"[{i}]（相关分数 {score:.4f}，来源: {src}）\n{doc.page_content.strip()}")
     return "\n\n".join(lines)

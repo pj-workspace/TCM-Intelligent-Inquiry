@@ -13,16 +13,20 @@ from app.agent.tools.loader import ensure_tools_loaded
 from app.agent.tools.registry import tool_registry
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
+from app.core.safety import append_tcm_safety_to_system_prompt
 from app.llm.registry import get_chat_model
 
 logger = get_logger(__name__)
 
-_DEFAULT_SYSTEM_PROMPT = """\
+_RAW_DEFAULT_SYSTEM_PROMPT = """\
 你是面向中医领域的智能助手，回答需严谨、可引用知识库检索结果。
 - 若需要文献支撑，请先调用 search_tcm_knowledge 工具检索知识库。
 - 若需要查询具体方剂，请调用 formula_lookup 工具。
+- 名称以 mcp_ 开头的工具来自已注册的 MCP 服务，按需调用；参数使用 arguments 字典传入。
 - 在工具结果的基础上综合推理，再给出最终答案。\
 """
+
+_DEFAULT_SYSTEM_PROMPT = append_tcm_safety_to_system_prompt(_RAW_DEFAULT_SYSTEM_PROMPT)
 
 
 def _load_all_tools():
@@ -36,6 +40,11 @@ def get_default_graph() -> CompiledStateGraph:
     tools = _load_all_tools()
     logger.info("创建默认 ReAct Agent，工具: %s", [t.name for t in tools])
     return create_react_agent(llm, tools, prompt=_DEFAULT_SYSTEM_PROMPT)
+
+
+def invalidate_default_graph_cache() -> None:
+    """MCP 工具增删后调用，使默认 Agent 重新绑定工具列表。"""
+    get_default_graph.cache_clear()
 
 
 async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
@@ -66,7 +75,8 @@ async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
             tools = tool_registry.all()
 
         llm = get_chat_model()
-        prompt = (row.system_prompt or "").strip() or _DEFAULT_SYSTEM_PROMPT
+        base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
+        prompt = append_tcm_safety_to_system_prompt(base)
         logger.info(
             "创建 Agent id=%s name=%s tools=%s",
             row.id,

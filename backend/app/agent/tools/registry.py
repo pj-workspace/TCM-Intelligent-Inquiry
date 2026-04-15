@@ -17,6 +17,9 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         return tool
 
+    def unregister(self, name: str) -> None:
+        self._tools.pop(name, None)
+
     def get(self, names: list[str]) -> list[BaseTool]:
         return [self._tools[n] for n in names if n in self._tools]
 
