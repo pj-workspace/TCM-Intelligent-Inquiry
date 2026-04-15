@@ -40,6 +40,7 @@ async def chat(
             req.conversation_id,
             user,
             req.anon_session_secret,
+            req.regenerate_last_reply,
         ),
         media_type="text/event-stream",
     )

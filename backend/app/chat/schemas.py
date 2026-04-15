@@ -25,6 +25,11 @@ class ChatRequest(BaseModel):
         default=None,
         description="匿名会话凭证，与首包 meta.anonSessionSecret 一致；续聊与登录用户会话无关",
     )
+    regenerate_last_reply: bool = Field(
+        default=False,
+        description="为 True 时需带 conversation_id：删除该会话最后一条用户消息之后的 thinking/assistant，"
+        "不重复写入用户消息，用于「重新生成」上一轮助手回复。",
+    )
 
 
 class ConversationItem(BaseModel):

@@ -242,7 +242,11 @@ export default function Home() {
     }
   };
 
-  const runChatStream = async (userText: string, appendUserMessage: boolean) => {
+  const runChatStream = async (
+    userText: string,
+    appendUserMessage: boolean,
+    opts?: { regenerateLastReply?: boolean }
+  ) => {
     if (!token) return;
 
     pendingChatModelRef.current = undefined;
@@ -268,6 +272,7 @@ export default function Home() {
         body: JSON.stringify({
           message: userText,
           conversation_id: conversationId,
+          regenerate_last_reply: opts?.regenerateLastReply ?? false,
         }),
       });
 
@@ -462,17 +467,28 @@ export default function Home() {
     if (genState !== "idle" || !token) return;
     const idx = messages.findIndex((m) => m.id === assistantMsgId);
     if (idx <= 0) return;
+    let userIdx = -1;
     let userText: string | null = null;
     for (let i = idx - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.type === "message" && m.role === "user" && m.content) {
         userText = m.content;
+        userIdx = i;
         break;
       }
     }
-    if (!userText) return;
-    setMessages((prev) => prev.slice(0, idx));
-    void runChatStream(userText, false);
+    if (!userText || userIdx < 0) return;
+    setMessages((prev) => {
+      const removed = prev.slice(userIdx + 1);
+      for (const m of removed) {
+        if (m.type === "thinking" && m.id) {
+          delete thinkingBlockStartedAt.current[m.id];
+        }
+      }
+      return prev.slice(0, userIdx + 1);
+    });
+    setStreamingThinkingId(null);
+    void runChatStream(userText, false, { regenerateLastReply: true });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

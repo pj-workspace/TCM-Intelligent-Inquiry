@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import ConversationRecord, MessageRecord
@@ -188,6 +188,7 @@ async def stream_chat(
     conversation_id: str | None,
     user: "UserRecord | None",
     anon_session_secret: str | None = None,
+    regenerate_last_reply: bool = False,
 ) -> AsyncIterator[str]:
     from app.agent.executor import build_agent_graph
 
@@ -195,6 +196,10 @@ async def stream_chat(
     msg_in = message.strip()
     if not msg_in:
         yield _sse({"type": "error", "message": "消息不能为空"})
+        yield "data: [DONE]\n\n"
+        return
+    if regenerate_last_reply and not conversation_id:
+        yield _sse({"type": "error", "message": "重新生成需要已有会话（conversation_id）。"})
         yield "data: [DONE]\n\n"
         return
 
@@ -212,14 +217,50 @@ async def stream_chat(
                 if effective_agent_id is None and conv_row is not None:
                     effective_agent_id = conv_row.agent_id
 
-                session.add(
-                    MessageRecord(
-                        id=str(uuid.uuid4()),
-                        conversation_id=conv_id,
-                        role="user",
-                        content=msg_in,
+                if regenerate_last_reply:
+                    r = await session.execute(
+                        select(MessageRecord)
+                        .where(MessageRecord.conversation_id == conv_id)
+                        .order_by(MessageRecord.created_at)
                     )
-                )
+                    rows = r.scalars().all()
+                    last_user_i = -1
+                    for i, m in enumerate(rows):
+                        if m.role == "user":
+                            last_user_i = i
+                    if last_user_i < 0:
+                        yield _sse(
+                            {
+                                "type": "error",
+                                "message": "无法重新生成：会话中没有用户消息。",
+                            }
+                        )
+                        yield "data: [DONE]\n\n"
+                        return
+                    last_user_text = rows[last_user_i].content.strip()
+                    if last_user_text != msg_in:
+                        yield _sse(
+                            {
+                                "type": "error",
+                                "message": "重新生成失败：内容与最后一条用户消息不一致。",
+                            }
+                        )
+                        yield "data: [DONE]\n\n"
+                        return
+                    tail_ids = [m.id for m in rows[last_user_i + 1 :]]
+                    if tail_ids:
+                        await session.execute(
+                            delete(MessageRecord).where(MessageRecord.id.in_(tail_ids))
+                        )
+                else:
+                    session.add(
+                        MessageRecord(
+                            id=str(uuid.uuid4()),
+                            conversation_id=conv_id,
+                            role="user",
+                            content=msg_in,
+                        )
+                    )
                 await session.commit()
 
             async with async_session_factory() as session:
