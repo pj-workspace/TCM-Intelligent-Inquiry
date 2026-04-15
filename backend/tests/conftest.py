@@ -18,3 +18,21 @@ def client():
 @pytest.fixture
 def unique_username() -> str:
     return f"u_{uuid.uuid4().hex[:12]}"
+
+
+@pytest.fixture
+def auth_headers(client, unique_username) -> dict[str, str]:
+    """已登录用户的 Authorization 头（用于需 JWT 的接口）。"""
+    pw = "secret123456"
+    r = client.post(
+        "/api/auth/register",
+        json={"username": unique_username, "password": pw},
+    )
+    assert r.status_code == 200
+    r2 = client.post(
+        "/api/auth/login",
+        json={"username": unique_username, "password": pw},
+    )
+    assert r2.status_code == 200
+    token = r2.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}

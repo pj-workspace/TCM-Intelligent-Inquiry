@@ -6,10 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import AgentRecord
-from app.agent.schemas import AgentCreateRequest, AgentListResponse, AgentResponse
+from app.agent.schemas import (
+    AgentCreateRequest,
+    AgentListResponse,
+    AgentResponse,
+    AgentUpdateRequest,
+)
 from app.agent.tools.loader import ensure_tools_loaded
 from app.agent.tools.registry import tool_registry
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -64,6 +69,34 @@ class AgentService:
         self._session.add(row)
         await self._session.flush()
         logger.info("创建 Agent id=%s name=%s tools=%s", agent_id, req.name, tool_list)
+        return _to_response(row)
+
+    async def update_agent(self, agent_id: str, req: AgentUpdateRequest) -> AgentResponse:
+        row = await self._session.get(AgentRecord, agent_id)
+        if row is None:
+            raise NotFoundError(f"Agent '{agent_id}' 不存在")
+        patch = req.model_dump(exclude_unset=True)
+        if not patch:
+            raise ValidationError("至少提供一个要更新的字段")
+        if "tool_names" in patch:
+            ensure_tools_loaded()
+            available = set(tool_registry.names())
+            names = patch["tool_names"] or []
+            if names:
+                unknown = [n for n in names if n not in available]
+                if unknown:
+                    raise ValidationError(
+                        f"未知工具: {unknown}，可用工具: {sorted(available)}"
+                    )
+            row.tool_names = names if names else sorted(available)
+        if "name" in patch and patch["name"] is not None:
+            row.name = patch["name"]
+        if "description" in patch:
+            row.description = patch["description"] or ""
+        if "system_prompt" in patch:
+            row.system_prompt = patch["system_prompt"] or ""
+        await self._session.flush()
+        logger.info("更新 Agent id=%s fields=%s", agent_id, list(patch.keys()))
         return _to_response(row)
 
     async def delete_agent(self, agent_id: str) -> None:

@@ -6,7 +6,12 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.schemas import AgentCreateRequest, AgentListResponse, AgentResponse
+from app.agent.schemas import (
+    AgentCreateRequest,
+    AgentListResponse,
+    AgentResponse,
+    AgentUpdateRequest,
+)
 from app.agent.service import AgentService
 from app.core.database import get_session
 
@@ -35,6 +40,15 @@ async def list_tools(svc: AgentService = Depends(_svc)):
 @router.get("/{agent_id}", response_model=AgentResponse, summary="获取 Agent 详情")
 async def get_agent(agent_id: str, svc: AgentService = Depends(_svc)):
     return await svc.get_agent(agent_id)
+
+
+@router.patch("/{agent_id}", response_model=AgentResponse, summary="更新 Agent 配置")
+async def update_agent(
+    agent_id: str,
+    req: AgentUpdateRequest,
+    svc: AgentService = Depends(_svc),
+):
+    return await svc.update_agent(agent_id, req)
 
 
 @router.delete("/{agent_id}", status_code=204, summary="删除 Agent")

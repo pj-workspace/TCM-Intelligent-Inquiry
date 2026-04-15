@@ -50,6 +50,7 @@ async def init_db() -> None:
     from app.auth import models as _auth_models  # noqa: F401
     from app.chat import models as _chat_models  # noqa: F401
     from app.knowledge import models as _knowledge_models  # noqa: F401
+    from app.mcp import models as _mcp_models  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

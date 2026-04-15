@@ -1,7 +1,9 @@
 """MCP 服务管理路由。"""
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_session
 from app.mcp.schemas import (
     McpServerCreateRequest,
     McpServerListResponse,
@@ -12,13 +14,13 @@ from app.mcp.service import McpService
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
 
-def _svc() -> McpService:
-    return McpService()
+def _svc(session: AsyncSession = Depends(get_session)) -> McpService:
+    return McpService(session)
 
 
 @router.get("", response_model=McpServerListResponse, summary="列出已注册 MCP 服务")
-def list_servers(svc: McpService = Depends(_svc)):
-    return svc.list_servers()
+async def list_servers(svc: McpService = Depends(_svc)):
+    return await svc.list_servers()
 
 
 @router.post("", response_model=McpServerResponse, summary="注册 MCP 服务")
@@ -29,8 +31,8 @@ async def register_server(
 
 
 @router.get("/{server_id}", response_model=McpServerResponse, summary="获取 MCP 服务详情")
-def get_server(server_id: str, svc: McpService = Depends(_svc)):
-    return svc.get_server(server_id)
+async def get_server(server_id: str, svc: McpService = Depends(_svc)):
+    return await svc.get_server(server_id)
 
 
 @router.post(
@@ -43,5 +45,5 @@ async def refresh_tools(server_id: str, svc: McpService = Depends(_svc)):
 
 
 @router.delete("/{server_id}", status_code=204, summary="删除 MCP 服务")
-def delete_server(server_id: str, svc: McpService = Depends(_svc)):
-    svc.delete_server(server_id)
+async def delete_server(server_id: str, svc: McpService = Depends(_svc)):
+    await svc.delete_server(server_id)

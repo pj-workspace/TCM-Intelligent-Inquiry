@@ -1,11 +1,15 @@
 """知识库管理路由。"""
 
+from typing import Annotated
+
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.models import UserRecord
 from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.exceptions import NotFoundError
+from app.knowledge.deps import require_kb_user
 from app.knowledge.job_store import job_create, job_get, job_update, run_ingest_background, stash_ingest_blob
 from app.knowledge.schemas import (
     IngestJobCreateResponse,
@@ -31,7 +35,10 @@ def _svc(session: AsyncSession = Depends(get_session)) -> KnowledgeService:
     response_model=IngestJobStatusResponse,
     summary="查询异步入库任务状态",
 )
-async def get_ingest_job(job_id: str):
+async def get_ingest_job(
+    job_id: str,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
+):
     data = await job_get(job_id)
     if data is None:
         raise NotFoundError(f"任务 '{job_id}' 不存在或已过期")
@@ -44,22 +51,37 @@ async def get_ingest_job(job_id: str):
 
 
 @router.get("", response_model=KnowledgeBaseListResponse, summary="列出所有知识库")
-async def list_kbs(svc: KnowledgeService = Depends(_svc)):
+async def list_kbs(
+    _: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
     return await svc.list_kbs()
 
 
 @router.post("", response_model=KnowledgeBaseResponse, summary="创建知识库")
-async def create_kb(req: KnowledgeBaseCreateRequest, svc: KnowledgeService = Depends(_svc)):
+async def create_kb(
+    req: KnowledgeBaseCreateRequest,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
     return await svc.create_kb(req)
 
 
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse, summary="获取知识库详情")
-async def get_kb(kb_id: str, svc: KnowledgeService = Depends(_svc)):
+async def get_kb(
+    kb_id: str,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
     return await svc.get_kb(kb_id)
 
 
 @router.delete("/{kb_id}", status_code=204, summary="删除知识库")
-async def remove_kb(kb_id: str, svc: KnowledgeService = Depends(_svc)):
+async def remove_kb(
+    kb_id: str,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
     await svc.delete_kb(kb_id)
 
 
@@ -67,6 +89,7 @@ async def remove_kb(kb_id: str, svc: KnowledgeService = Depends(_svc)):
 async def ingest(
     kb_id: str,
     file: UploadFile,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
     svc: KnowledgeService = Depends(_svc),
 ):
     content = await file.read()
@@ -82,6 +105,7 @@ async def ingest_async(
     kb_id: str,
     file: UploadFile,
     background_tasks: BackgroundTasks,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
     svc: KnowledgeService = Depends(_svc),
 ):
     # 先校验知识库存在（与同步入库一致）
@@ -113,6 +137,7 @@ async def ingest_async(
 async def search(
     kb_id: str,
     req: SearchRequest,
+    _: Annotated[UserRecord, Depends(require_kb_user)],
     svc: KnowledgeService = Depends(_svc),
 ):
     return await svc.search(kb_id, req)

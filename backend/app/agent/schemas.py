@@ -10,6 +10,15 @@ class AgentCreateRequest(BaseModel):
     tool_names: list[str] = Field(default_factory=list, description="启用的工具名列表")
 
 
+class AgentUpdateRequest(BaseModel):
+    """部分更新：至少提供一项；未出现的字段保持不变。"""
+
+    name: str | None = Field(default=None, min_length=1, description="Agent 名称")
+    description: str | None = None
+    system_prompt: str | None = None
+    tool_names: list[str] | None = None
+
+
 class AgentResponse(BaseModel):
     id: str
     name: str

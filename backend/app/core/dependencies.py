@@ -9,13 +9,11 @@ from fastapi import Header, HTTPException
 
 
 async def verify_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
-    """占位：API Key 校验（默认关闭，填写 API_KEY 环境变量后自动启用）。
-
-    生产环境建议在此接入 JWT 或 OAuth2。
-    """
+    """可选 API Key：`Settings.api_key`（环境变量 `API_KEY`）非空时要求请求头 `X-API-Key` 一致。"""
     from app.core.config import get_settings
 
-    s = get_settings()
-    api_key = getattr(s, "api_key", None)
-    if api_key and x_api_key != api_key:
+    expected = (get_settings().api_key or "").strip()
+    if not expected:
+        return
+    if (x_api_key or "").strip() != expected:
         raise HTTPException(status_code=401, detail="Invalid API Key")

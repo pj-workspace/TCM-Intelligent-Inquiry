@@ -25,6 +25,12 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
+    from app.core.database import async_session_factory
+    from app.mcp.service import restore_mcp_tool_registrations
+
+    async with async_session_factory() as session:
+        await restore_mcp_tool_registrations(session)
+        await session.commit()
     s = get_settings()
     logger.info(
         "TCM Intelligent Inquiry API 启动 | 对话模型: %s | 向量模型: %s | PG/Redis/Qdrant 见 /health/deps",

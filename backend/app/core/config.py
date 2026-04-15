@@ -110,6 +110,12 @@ class Settings(BaseSettings):
         description="默认知识库 UUID（可选）",
     )
 
+    # ── 可选全局 API Key（除 JWT 外对敏感路由二次校验；留空则不启用）────────────────
+    api_key: str = Field(
+        default="",
+        description="非空时，知识库等受保护接口除 Authorization 外需 Header: X-API-Key",
+    )
+
     # ── JWT（登录鉴权）────────────────────────────────────────────────────────
     jwt_secret: str = Field(
         default="dev-only-change-me-use-long-random-string",
