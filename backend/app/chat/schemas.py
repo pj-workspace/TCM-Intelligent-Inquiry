@@ -9,6 +9,10 @@ class ChatMessage(BaseModel):
     content: str = Field(..., min_length=1)
 
 
+class ConversationTitleUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=512)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="本轮用户输入")
     history: list[ChatMessage] = Field(

@@ -177,7 +177,7 @@ async def _messages_to_lc(session: AsyncSession, conversation_id: str) -> list[H
             out.append(HumanMessage(content=m.content))
         elif m.role == "assistant":
             out.append(AIMessage(content=m.content))
-        # thinking 不进入模型上下文
+        # thinking / tool 不进入模型上下文
     return out
 
 
@@ -308,6 +308,9 @@ async def stream_chat(
         assistant_parts: list[str] = []
         thinking_buf: list[str] = []
         thinking_t0: float | None = None
+        #: 与 SSE on_tool_start 配对，供 on_tool_end 落库
+        tool_pending_by_run: dict[str, dict[str, Any]] = {}
+        tool_pending_fifo: list[dict[str, Any]] = []
 
         async def flush_thinking_segment() -> None:
             nonlocal thinking_buf, thinking_t0
@@ -364,6 +367,18 @@ async def stream_chat(
                 raw_in = data.get("input")
                 if raw_in is None:
                     raw_in = data.get("tool_input")
+                if run_id is not None:
+                    tool_pending_by_run[str(run_id)] = {
+                        "name": name,
+                        "input": _json_safe_for_sse(raw_in) if raw_in is not None else None,
+                    }
+                else:
+                    tool_pending_fifo.append(
+                        {
+                            "name": name,
+                            "input": _json_safe_for_sse(raw_in) if raw_in is not None else None,
+                        }
+                    )
                 payload: dict[str, Any] = {
                     "type": "tool-call",
                     "name": name,
@@ -378,15 +393,39 @@ async def stream_chat(
                 name = event.get("name") or ""
                 out = data.get("output")
                 preview = _serialize_tool_output(out)
+                run_key = str(run_id) if run_id is not None else None
+                start_meta: dict[str, Any] | None = None
+                if run_key is not None and run_key in tool_pending_by_run:
+                    start_meta = tool_pending_by_run.pop(run_key)
+                elif tool_pending_fifo:
+                    start_meta = tool_pending_fifo.pop(0)
+                tr_name = (start_meta or {}).get("name") or name
+                tr_input = (start_meta or {}).get("input") if start_meta else None
                 tr: dict[str, Any] = {
                     "type": "tool-result",
-                    "name": name,
+                    "name": tr_name,
                 }
                 if run_id is not None:
                     tr["runId"] = run_id
                 if preview:
                     tr["outputPreview"] = preview
                 yield _sse(tr)
+
+                rec: dict[str, Any] = {"name": tr_name, "outputPreview": preview}
+                if tr_input is not None:
+                    rec["input"] = tr_input
+                if run_key:
+                    rec["runId"] = run_key
+                async with async_session_factory() as session:
+                    session.add(
+                        MessageRecord(
+                            id=str(uuid.uuid4()),
+                            conversation_id=conv_id,
+                            role="tool",
+                            content=json.dumps(rec, ensure_ascii=False),
+                        )
+                    )
+                    await session.commit()
 
         await flush_thinking_segment()
         assistant_text = "".join(assistant_parts)

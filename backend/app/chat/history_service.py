@@ -67,3 +67,17 @@ async def delete_conversation(
     )
     await session.delete(conv)
     await session.commit()
+
+
+async def update_conversation_title(
+    session: AsyncSession,
+    conversation_id: str,
+    title: str,
+    user: UserRecord | None,
+    anon_session_secret: str | None = None,
+) -> None:
+    conv = await assert_can_use_conversation(
+        session, conversation_id, user, anon_session_secret
+    )
+    conv.title = title[:512]
+    await session.commit()

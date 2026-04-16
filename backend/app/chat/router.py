@@ -9,8 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user, get_current_user_optional
 from app.auth.models import UserRecord
 from app.chat.access import assert_can_use_conversation
-from app.chat.history_service import list_messages_for_conversation, list_my_conversations, delete_conversation
-from app.chat.schemas import ChatRequest, ConversationItem, MessageItem
+from app.chat.history_service import (
+    list_messages_for_conversation,
+    list_my_conversations,
+    delete_conversation,
+    update_conversation_title,
+)
+from app.chat.schemas import ChatRequest, ConversationItem, MessageItem, ConversationTitleUpdate
 from app.chat.service import stream_chat
 from app.core.database import async_session_factory, get_session
 
@@ -85,4 +90,19 @@ async def delete_conversation_route(
     x_anon_session: Annotated[str | None, Header(alias="X-Anonymous-Session")] = None,
 ):
     await delete_conversation(session, conversation_id, user, x_anon_session)
+    return {"success": True}
+
+
+@router.put(
+    "/conversations/{conversation_id}/title",
+    summary="修改会话标题",
+)
+async def update_conversation_title_route(
+    conversation_id: str,
+    req: ConversationTitleUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord | None, Depends(get_current_user_optional)],
+    x_anon_session: Annotated[str | None, Header(alias="X-Anonymous-Session")] = None,
+):
+    await update_conversation_title(session, conversation_id, req.title, user, x_anon_session)
     return {"success": True}

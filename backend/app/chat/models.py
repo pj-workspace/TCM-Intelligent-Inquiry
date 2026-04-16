@@ -34,7 +34,7 @@ class MessageRecord(Base):
         nullable=False,
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(16))  # user | assistant | thinking
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant | thinking | tool
     content: Mapped[str] = mapped_column(Text)
     #: 仅 role=thinking 时使用：该段思考耗时（秒）
     duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)

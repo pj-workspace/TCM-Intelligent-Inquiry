@@ -66,6 +66,8 @@ def _default_graph_fingerprint() -> str:
             s.deepseek_base_url,
             s.deepseek_chat_model,
             tool_names,
+            # 默认系统提示变更须使缓存失效（指纹不含数据库 Agent 自定义提示）
+            hashlib.sha256(_RAW_DEFAULT_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16],
         )
     )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

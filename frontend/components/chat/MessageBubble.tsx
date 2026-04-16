@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Copy,
@@ -23,6 +24,56 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+/**
+ * 模型常把有序列表写成「单独一行的 1. / 2.」再换行写正文，CommonMark 无法将其识别为同一条列表项。
+ * 合并为「1. 正文」以便正确渲染为 ol/li。
+ */
+function mergeOrphanOrderedListMarkers(md: string): string {
+  return md.replace(/(^|\n)(\d{1,3})\.\s*\n+(?=\S)/g, "$1$2. ");
+}
+
+/** GFM 表格只识别 ASCII `|`；部分模型会输出全角竖线 U+FF5C，导致无法解析为表格。 */
+function normalizeGfmPipes(md: string): string {
+  return md.replace(/\uFF5C/g, "|");
+}
+
+function preprocessAssistantMarkdown(md: string): string {
+  return mergeOrphanOrderedListMarkers(normalizeGfmPipes(md));
+}
+
+/** 助手正文已用 remark-gfm 解析为 table 元素；需显式边框与横向滚动，否则会像「挤成一行的纯文本」。 */
+const assistantMarkdownComponents: Components = {
+  table: ({ node: _n, children, ...props }) => (
+    <div className="my-4 w-full max-w-full overflow-x-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg)]">
+      <table
+        className="w-full min-w-[min(100%,520px)] border-collapse text-[0.95rem] leading-snug"
+        {...props}
+      >
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ node: _n, children, ...props }) => (
+    <thead {...props}>{children}</thead>
+  ),
+  th: ({ node: _n, children, ...props }) => (
+    <th
+      className="border border-[var(--border-color)] bg-[var(--muted)] px-3 py-2 text-left font-semibold text-[var(--fg)]"
+      {...props}
+    >
+      {children}
+    </th>
+  ),
+  td: ({ node: _n, children, ...props }) => (
+    <td
+      className="border border-[var(--border-color)] px-3 py-2 align-top text-[var(--fg)]"
+      {...props}
+    >
+      {children}
+    </td>
+  ),
+};
 
 /** 用于复制 / 朗读 / PDF 的纯文本（弱化 Markdown 标记） */
 export function markdownToPlainText(md: string): string {
@@ -202,7 +253,12 @@ export function MessageBubble({
     <div className="flex w-full max-w-3xl mx-auto py-4 px-4 md:px-0 justify-start">
       <div className="flex flex-col gap-2 max-w-[85%] items-start w-full">
         <div className="text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={assistantMarkdownComponents}
+          >
+            {preprocessAssistantMarkdown(content)}
+          </ReactMarkdown>
         </div>
 
         <div className="flex flex-wrap items-center gap-0.5 mt-1">

@@ -1,17 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/chat/Sidebar";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE } from "@/lib/api";
-import { MessageBubble } from "@/components/chat/MessageBubble";
+import { MessageBubble, markdownToPlainText } from "@/components/chat/MessageBubble";
 import { ToolCallIndicator } from "@/components/chat/ToolCallIndicator";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { ClaudeStar } from "@/components/chat/ClaudeStar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut } from "lucide-react";
+import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 type Message = {
@@ -48,6 +48,28 @@ function mapApiRowToMessage(msg: ApiMessageRow): Message {
           ? msg.duration_sec
           : undefined,
     };
+  }
+  if (msg.role === "tool") {
+    try {
+      const payload = JSON.parse(msg.content) as {
+        name?: string;
+        runId?: string;
+      };
+      return {
+        id: msg.id,
+        type: "tool",
+        toolName: typeof payload.name === "string" && payload.name ? payload.name : "tool",
+        status: "success",
+        runId: typeof payload.runId === "string" ? payload.runId : undefined,
+      };
+    } catch {
+      return {
+        id: msg.id,
+        type: "tool",
+        toolName: "tool",
+        status: "success",
+      };
+    }
   }
   return {
     id: msg.id,
@@ -104,6 +126,76 @@ export default function Home() {
   const { token, loading: authLoading, logout } = useAuth();
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState("");
+
+  useEffect(() => {
+    setIsEditingTitle(false);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!headerMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target as Node)) {
+        setHeaderMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [headerMenuOpen]);
+
+  const handleExportHistory = () => {
+    setHeaderMenuOpen(false);
+    if (!messages.length) return;
+    const title = serverConversations.find(c => c.id === conversationId)?.title || "会话记录";
+    let text = `${title}\n\n`;
+    for (const msg of messages) {
+      if (msg.type === "message") {
+        const role = msg.role === "user" ? "用户" : "TCM AI";
+        text += `[${role}]:\n${markdownToPlainText(msg.content || "")}\n\n`;
+      }
+    }
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSaveTitle = async () => {
+    if (!conversationId || !token || !editTitleValue.trim()) {
+      setIsEditingTitle(false);
+      return;
+    }
+    try {
+      await fetch(`${API_BASE}/api/chat/conversations/${conversationId}/title`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ title: editTitleValue.trim() }),
+      });
+      await refreshServerConversations();
+    } catch (e) {
+      console.error(e);
+    }
+    setIsEditingTitle(false);
+  };
+
+  /** 仅最后一条助手正文显示「重新生成」 */
+  const lastAssistantMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.type === "message" && m.role === "assistant") return m.id;
+    }
+    return null;
+  }, [messages]);
 
   const refreshServerConversations = useCallback(async () => {
     if (!token) return;
@@ -568,66 +660,90 @@ export default function Home() {
       />
 
       <main className="flex-1 flex flex-col relative min-w-0">
-        {/* 桌面端右上角用户菜单（loading 时占位，避免未恢复登录态时闪空白） */}
-        {authLoading ? (
-          <div
-            className="hidden md:flex absolute top-4 right-6 z-50 h-11 w-11 rounded-full bg-gray-200/70 animate-pulse"
-            aria-hidden
-          />
-        ) : token ? (
-          <div className="hidden md:flex absolute top-4 right-6 z-50">
-            <div className="relative group">
-              <button
-                type="button"
-                className="flex items-center justify-center w-11 h-11 rounded-full bg-white border border-[#e5e5e5] shadow-sm hover:bg-gray-50 transition-colors"
-                aria-label="账户"
-              >
-                <span className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold">
-                  P
-                </span>
-              </button>
-              <div className="absolute right-0 top-full mt-2 w-32 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-                <div className="bg-white rounded-lg shadow-lg border border-[#e5e5e5] py-1">
-                  <button
-                    onClick={logout}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    退出登录
-                  </button>
-                </div>
-              </div>
-            </div>
+        {/* 统一的顶部 Header */}
+        <header className="flex-shrink-0 h-14 flex items-center justify-between px-4 md:px-6 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm z-10">
+          <div className="flex items-center gap-2 max-w-[60%]">
+            <div className="font-semibold text-sm md:hidden">TCM AI</div>
+            {hasStarted && conversationId && (
+               <div className="hidden md:block font-medium text-sm text-gray-800 truncate">
+                 {isEditingTitle ? (
+                   <input 
+                     autoFocus
+                     className="border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:border-orange-400 w-full"
+                     value={editTitleValue}
+                     onChange={e => setEditTitleValue(e.target.value)}
+                     onBlur={handleSaveTitle}
+                     onKeyDown={e => { if (e.key === 'Enter') handleSaveTitle(); else if (e.key === 'Escape') setIsEditingTitle(false); }}
+                   />
+                 ) : (
+                   serverConversations.find(c => c.id === conversationId)?.title || "会话记录"
+                 )}
+               </div>
+            )}
           </div>
-        ) : null}
+          
+          <div className="flex items-center gap-1 md:gap-3">
+            {hasStarted && conversationId && (
+               <div className="relative" ref={headerMenuRef}>
+                 <button 
+                   onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
+                   className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 transition-colors"
+                 >
+                   <MoreVertical className="w-5 h-5" />
+                 </button>
+                 {headerMenuOpen && (
+                   <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-lg shadow-lg border border-[#e5e5e5] py-1 z-50">
+                     <button 
+                       onClick={() => {
+                         setIsEditingTitle(true);
+                         setEditTitleValue(serverConversations.find(c => c.id === conversationId)?.title || "");
+                         setHeaderMenuOpen(false);
+                       }}
+                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                     >
+                       <Edit2 className="w-4 h-4" /> 编辑标题
+                     </button>
+                     <button 
+                       onClick={handleExportHistory}
+                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                     >
+                       <Download className="w-4 h-4" /> 导出会话
+                     </button>
+                     <div className="my-1 border-t border-gray-100"></div>
+                     <button 
+                       onClick={() => {
+                         setHeaderMenuOpen(false);
+                         openDeleteDialog(conversationId);
+                       }}
+                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                     >
+                       <Trash2 className="w-4 h-4" /> 删除会话
+                     </button>
+                   </div>
+                 )}
+               </div>
+            )}
 
-        <header className="h-14 flex items-center justify-between px-4 border-b border-[#e5e5e5] md:hidden">
-          <div className="font-semibold text-sm">TCM AI</div>
-          <div className="flex items-center gap-1">
+            {/* 移动端新建会话按钮 */}
+            <button type="button" onClick={handleNewChat} className="p-2 md:hidden text-gray-600 hover:bg-gray-100 rounded-md">
+              <Plus className="w-5 h-5" />
+            </button>
+
+            {/* 用户菜单 */}
             {authLoading ? (
-              <div
-                className="h-8 w-14 rounded-md bg-gray-100 animate-pulse"
-                aria-hidden
-              />
-            ) : !token ? (
-              <Link
-                href="/login"
-                className="text-sm text-gray-600 px-2 py-1 rounded-md hover:bg-gray-100"
-              >
-                登录
-              </Link>
-            ) : (
+              <div className="h-8 w-8 md:h-9 md:w-9 rounded-full bg-gray-200/70 animate-pulse" aria-hidden />
+            ) : token ? (
               <div className="relative group">
                 <button
                   type="button"
-                  className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-gray-100 transition-colors"
+                  className="flex items-center justify-center w-8 h-8 md:w-9 md:h-9 rounded-full bg-white border border-[#e5e5e5] shadow-sm hover:bg-gray-50 transition-colors"
                   aria-label="账户"
                 >
-                  <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-bold">
+                  <span className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-bold">
                     P
                   </span>
                 </button>
-                <div className="absolute right-0 top-full mt-1 w-32 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                <div className="absolute right-0 top-full mt-2 w-32 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                   <div className="bg-white rounded-lg shadow-lg border border-[#e5e5e5] py-1">
                     <button
                       onClick={logout}
@@ -639,10 +755,14 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+            ) : (
+              <Link
+                href="/login"
+                className="text-sm text-gray-600 px-2 py-1 md:px-3 md:py-1.5 rounded-md hover:bg-gray-100"
+              >
+                登录
+              </Link>
             )}
-            <button type="button" onClick={handleNewChat} className="p-2">
-              <Plus className="w-5 h-5" />
-            </button>
           </div>
         </header>
 
@@ -672,7 +792,8 @@ export default function Home() {
                             modelName={msg.modelName}
                             assistantActionsDisabled={genState !== "idle"}
                             onAssistantRegenerate={
-                              msg.role === "assistant"
+                              msg.role === "assistant" &&
+                              msg.id === lastAssistantMessageId
                                 ? () => handleRegenerateAssistant(msg.id)
                                 : undefined
                             }
