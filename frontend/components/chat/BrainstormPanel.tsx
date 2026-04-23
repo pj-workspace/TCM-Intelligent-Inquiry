@@ -25,6 +25,10 @@ export type BrainstormStep =
       toolName: string;
       runId?: string;
       status: "running" | "success" | "error";
+      /** 工具入参摘要（SSE tool-call 或历史消息） */
+      inputPreview?: string;
+      /** 工具返回摘要（SSE tool-result 或历史消息） */
+      outputPreview?: string;
     };
 
 interface BrainstormPanelProps {
@@ -81,6 +85,12 @@ export function BrainstormPanel({
   const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<
     Record<string, boolean>
   >({});
+  /** 工具步骤：点击工具框展开入参/返回，按 step.id 记录 */
+  const [toolIoExpanded, setToolIoExpanded] = useState<Record<string, boolean>>({});
+
+  const toggleToolIo = useCallback((stepId: string) => {
+    setToolIoExpanded((prev) => ({ ...prev, [stepId]: !prev[stepId] }));
+  }, []);
 
   const isThinkingCollapsed = useCallback((id: string) => {
     return collapsedThinkingIds[id] ?? true;
@@ -351,15 +361,6 @@ export function BrainstormPanel({
                   {steps.map((step) =>
                     step.type === "thinking" ? (
                       <div key={step.id} className="relative pl-4 pt-0.5">
-                        <span
-                          aria-hidden
-                          className={clsx(
-                            "absolute left-[0.06rem] top-[0.76rem] h-1.5 w-1.5 rounded-full shadow-[0_0_0_3px_#fbfaf7]",
-                            step.durationSec == null
-                              ? "bg-[#d8b57a]"
-                              : "bg-[#ddd4c7]"
-                          )}
-                        />
                         <button
                           type="button"
                           onClick={() =>
@@ -454,48 +455,108 @@ export function BrainstormPanel({
                       </div>
                     ) : (
                       <div key={step.id} className="relative pl-4 pt-0.5">
-                        <span
-                          aria-hidden
-                          className={clsx(
-                            "absolute left-[0.06rem] top-[0.98rem] h-1.5 w-1.5 rounded-full shadow-[0_0_0_3px_#fbfaf7]",
-                            step.status === "running"
-                              ? "bg-[#d8b57a]"
-                              : step.status === "success"
-                              ? "bg-[#cfdbc8]"
-                              : "bg-[#e7c2c2]"
-                          )}
-                        />
-                        <div
-                          className={clsx(
-                            "flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[13px] transition-colors",
+                        {(() => {
+                          const hasIo = !!(
+                            step.inputPreview || step.outputPreview
+                          );
+                          const expanded = !!toolIoExpanded[step.id];
+                          const rowClass = clsx(
+                            "flex w-full min-w-0 items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[13px] transition-colors",
                             step.status === "running"
                               ? "border-orange-200 bg-white text-gray-700 shadow-[0_0_0_1px_rgba(251,146,60,0.12)]"
                               : step.status === "success"
                               ? "border-[#e5e5e5] bg-white text-gray-600"
-                              : "border-red-100 bg-red-50 text-red-600"
-                          )}
-                        >
-                          {step.status === "running" ? (
-                            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-orange-500" />
-                          ) : step.status === "success" ? (
-                            <Check className="h-4 w-4 shrink-0 text-green-500" />
-                          ) : (
-                            <Wrench className="h-4 w-4 shrink-0 text-red-500" />
-                          )}
-                          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                            <span>
-                              {step.status === "running"
-                                ? "调用工具中"
-                                : step.status === "success"
-                                ? "工具调用成功"
-                                : "工具调用失败"}
-                            </span>
-                            <span className="text-gray-300">·</span>
-                            <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600">
-                              {step.toolName}
-                            </span>
-                          </span>
-                        </div>
+                              : "border-red-100 bg-red-50 text-red-600",
+                            hasIo &&
+                              "cursor-pointer hover:border-gray-300 hover:bg-gray-50/90"
+                          );
+                          const rowInner = (
+                            <>
+                              {step.status === "running" ? (
+                                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-orange-500" />
+                              ) : step.status === "success" ? (
+                                <Check className="h-4 w-4 shrink-0 text-green-500" />
+                              ) : (
+                                <Wrench className="h-4 w-4 shrink-0 text-red-500" />
+                              )}
+                              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                                <span>
+                                  {step.status === "running"
+                                    ? "调用工具中"
+                                    : step.status === "success"
+                                    ? "工具调用成功"
+                                    : "工具调用失败"}
+                                </span>
+                                <span className="text-gray-300">·</span>
+                                <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600">
+                                  {step.toolName}
+                                </span>
+                              </span>
+                              {hasIo ? (
+                                <ChevronDown
+                                  aria-hidden
+                                  className={clsx(
+                                    "h-4 w-4 shrink-0 text-gray-400 transition-transform duration-200",
+                                    expanded && "rotate-180"
+                                  )}
+                                />
+                              ) : null}
+                            </>
+                          );
+                          return (
+                            <>
+                              {hasIo ? (
+                                <button
+                                  type="button"
+                                  className={rowClass}
+                                  aria-expanded={expanded}
+                                  onClick={() => toggleToolIo(step.id)}
+                                >
+                                  {rowInner}
+                                </button>
+                              ) : (
+                                <div className={rowClass}>{rowInner}</div>
+                              )}
+                              <AnimatePresence initial={false}>
+                                {hasIo && expanded && (
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: "auto", opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{
+                                      duration: 0.22,
+                                      ease: "easeInOut",
+                                    }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="mt-2 max-h-56 space-y-2 overflow-y-auto overscroll-contain rounded-lg border border-gray-100 bg-[#fafaf8] px-3 py-2.5 text-left text-[12px] text-gray-600">
+                                      {step.inputPreview ? (
+                                        <div>
+                                          <div className="mb-0.5 font-medium text-gray-500">
+                                            入参
+                                          </div>
+                                          <pre className="whitespace-pre-wrap break-words rounded-md bg-white/80 p-2 font-mono text-[11px] leading-relaxed text-gray-700 ring-1 ring-gray-100">
+                                            {step.inputPreview}
+                                          </pre>
+                                        </div>
+                                      ) : null}
+                                      {step.outputPreview ? (
+                                        <div>
+                                          <div className="mb-0.5 font-medium text-gray-500">
+                                            返回
+                                          </div>
+                                          <pre className="whitespace-pre-wrap break-words rounded-md bg-white/80 p-2 font-mono text-[11px] leading-relaxed text-gray-700 ring-1 ring-gray-100">
+                                            {step.outputPreview}
+                                          </pre>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </>
+                          );
+                        })()}
                       </div>
                     )
                   )}

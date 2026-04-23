@@ -1,4 +1,4 @@
-# 本地开发：PostgreSQL + Redis + Qdrant
+# 本地开发：PostgreSQL + Redis + Qdrant + SearXNG（可选联网检索）
 # 用法：在项目根目录执行  docker compose up -d
 # 后端连接：见 backend/.env.example
 
@@ -46,6 +46,15 @@ services:
       - tcm_qdrant_data:/qdrant/storage
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
+
+  # SearXNG：元搜索 JSON API，供 Agent 工具 searx_web_search（勿对公网裸暴露）
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: tcm-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   # Celery worker：异步入库（与 backend/.env 中 CELERY_INGEST_ENABLED=true 配合）
   # 容器内需使用服务名连接 PG/Redis/Qdrant，勿用 127.0.0.1

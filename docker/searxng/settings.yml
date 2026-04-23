@@ -1,0 +1,17 @@
+# 本地开发：启用 JSON API 供后端 Agent 工具调用（合并官方默认配置）
+# 文档：https://docs.searxng.org/admin/settings/settings.html#use-default-settings
+use_default_settings: true
+
+server:
+  secret_key: "tcm-dev-searxng-change-me-in-production-32chars-minimum"
+  bind_address: "0.0.0.0"
+  limiter: false
+  base_url: false
+
+search:
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 10.0

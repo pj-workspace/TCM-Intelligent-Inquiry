@@ -12,6 +12,7 @@ from typing import Final
 _TOOL_MODULES: Final[tuple[str, ...]] = (
     "app.agent.tools.tcm_search",
     "app.agent.tools.formula_lookup",
+    "app.agent.tools.searx_web_search",
 )
 
 _loaded: bool = False

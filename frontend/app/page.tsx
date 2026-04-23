@@ -48,6 +48,17 @@ type ApiMessageRow = {
   model_name?: string | null;
 };
 
+/** 将 SSE / 历史记录中的工具入参转为可展示字符串 */
+function toolIoToPreview(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
 function sumThinkingDurations(steps: BrainstormStep[]): number | undefined {
   const total = steps.reduce((sum, step) => {
     if (step.type !== "thinking") return sum;
@@ -105,6 +116,8 @@ function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
       const payload = JSON.parse(msg.content) as {
         name?: string;
         runId?: string;
+        outputPreview?: string;
+        input?: unknown;
       };
       return {
         id: msg.id,
@@ -112,6 +125,11 @@ function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
         toolName: typeof payload.name === "string" && payload.name ? payload.name : "tool",
         status: "success",
         runId: typeof payload.runId === "string" ? payload.runId : undefined,
+        inputPreview: toolIoToPreview(payload.input),
+        outputPreview:
+          typeof payload.outputPreview === "string" && payload.outputPreview
+            ? payload.outputPreview
+            : undefined,
       };
     } catch {
       return {
@@ -651,6 +669,9 @@ export default function Home() {
                         : "tool",
                     status: "running",
                     runId: data.runId ?? runKey,
+                    inputPreview: toolIoToPreview(
+                      (data as { input?: unknown }).input
+                    ),
                   };
                   const trace = prev.find(
                     (msg): msg is TraceMessage =>
@@ -683,6 +704,10 @@ export default function Home() {
               else if (data.type === 'tool-result') {
                 openThinkingStepId = null;
                 const rid = data.runId as string | undefined;
+                const outputPreviewFromEvent =
+                  typeof data.outputPreview === "string" && data.outputPreview
+                    ? data.outputPreview
+                    : undefined;
                 const elapsed = toolRunStartedAt != null ? Date.now() - toolRunStartedAt : 999;
                 toolRunStartedAt = null;
                 if (elapsed < 420) await delay(420 - elapsed);
@@ -708,7 +733,12 @@ export default function Home() {
                       ...msg,
                       steps: msg.steps.map((step, i) =>
                         i === idx && step.type === "tool"
-                          ? { ...step, status: "success" as const }
+                          ? {
+                              ...step,
+                              status: "success" as const,
+                              outputPreview:
+                                outputPreviewFromEvent ?? step.outputPreview,
+                            }
                           : step
                       ),
                     };

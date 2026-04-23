@@ -181,6 +181,18 @@ class Settings(BaseSettings):
         description="已启用 MCP 的周期发现/健康探测间隔（秒），0 关闭",
     )
 
+    # ── SearXNG（自托管元搜索，docker compose 服务 searxng 默认映射 8888）────
+    searxng_url: str = Field(
+        default="http://127.0.0.1:8888",
+        description="SearXNG 根 URL；设为空字符串可禁用联网检索请求",
+    )
+    searxng_timeout_seconds: float = Field(
+        default=20.0,
+        ge=3.0,
+        le=120.0,
+        description="调用 SearXNG /search 的超时（秒）",
+    )
+
     # ── 服务 ──────────────────────────────────────────────────────────────────
     cors_origins: str = Field(
         default="http://localhost:3000", description="逗号分隔的允许跨域来源"
