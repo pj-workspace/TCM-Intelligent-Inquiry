@@ -57,11 +57,48 @@
 }
 
 .ai-content ul {
-  @apply list-disc list-inside mb-4;
+  @apply list-disc list-outside mb-4 pl-6;
 }
 
+/* 不用浏览器 outside marker：在 flex/overflow 等布局下 marker 常与正文错行；改为 li 内绝对定位编号 */
 .ai-content ol {
-  @apply list-decimal list-inside mb-4;
+  list-style: none;
+  counter-reset: ai-ol;
+  @apply mb-4 pl-0;
+  margin-left: 0;
+}
+
+.ai-content ol > li {
+  list-style: none;
+  counter-increment: ai-ol;
+  position: relative;
+  padding-left: 1.85em;
+}
+
+.ai-content ol > li::before {
+  content: counter(ai-ol) ".";
+  position: absolute;
+  left: 0;
+  top: 0.08em;
+  width: 1.65em;
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  line-height: inherit;
+}
+
+.ai-content ol ol {
+  counter-reset: ai-ol;
+  @apply mt-2 mb-2;
+}
+
+/* 列表项内段落默认 mb 过大，收紧以免条目间距松散 */
+.ai-content li > p {
+  @apply mb-1 mt-0 first:mt-0;
+}
+
+.ai-content li > p:last-child {
+  @apply mb-0;
 }
 
 .ai-content code {
@@ -70,6 +107,14 @@
 
 .ai-content pre {
   @apply bg-[#1e1e1e] text-white p-4 rounded-lg overflow-x-auto my-4 font-mono text-sm;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.ai-content pre::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .ai-content pre code {
@@ -130,4 +175,154 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   animation: sidebar-conv-title-sweep 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes brainstorm-sweep {
+  0% {
+    transform: translateX(-130%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateX(130%);
+    opacity: 0;
+  }
+}
+
+/* 扫光层容器：需可定位、可裁剪；伪元素承担动画 */
+.brainstorm-sweep,
+.thinking-shimmer-sweep {
+  display: block;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.brainstorm-sweep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  will-change: transform, opacity;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 32%,
+    rgba(251, 191, 36, 0.22) 44%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(251, 191, 36, 0.28) 56%,
+    transparent 68%,
+    transparent 100%
+  );
+  animation: brainstorm-sweep 1.9s ease-in-out infinite;
+}
+
+/* 可滚动思考区顶部/底部的雾化遮罩，让文字进出视口更柔和 */
+.scroll-fade-shell {
+  position: relative;
+}
+
+.scroll-fade-top,
+.scroll-fade-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 38px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+  z-index: 2;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.scroll-fade-top {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(251, 250, 247, 1) 0%,
+    rgba(251, 250, 247, 0.96) 28%,
+    rgba(251, 250, 247, 0.72) 58%,
+    rgba(251, 250, 247, 0) 100%
+  );
+}
+
+.scroll-fade-bottom {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    rgba(251, 250, 247, 1) 0%,
+    rgba(251, 250, 247, 0.96) 28%,
+    rgba(251, 250, 247, 0.72) 58%,
+    rgba(251, 250, 247, 0) 100%
+  );
+}
+
+.scroll-fade-top.is-visible,
+.scroll-fade-bottom.is-visible {
+  opacity: 1;
+}
+
+/* 「思考中…」收起条：纯白高光扫过 */
+.thinking-shimmer-sweep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  will-change: transform, opacity;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 28%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0.92) 50%,
+    rgba(255, 255, 255, 0) 62%,
+    transparent 100%
+  );
+  animation: brainstorm-sweep 1.9s ease-in-out infinite;
+}
+
+/* 可滚动区域隐藏滚动条（含 macOS「始终显示滚动条」）；保留滚轮/触控板滚动 */
+.chat-scroll-area,
+.brainstorm-scroll-area,
+.thinking-scroll-area,
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+  scrollbar-gutter: auto;
+}
+
+.chat-scroll-area::-webkit-scrollbar,
+.brainstorm-scroll-area::-webkit-scrollbar,
+.thinking-scroll-area::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+}
+
+/* 提高优先级，避免被其它样式或子树覆盖 */
+html body .chat-scroll-area,
+html body .brainstorm-scroll-area,
+html body .thinking-scroll-area,
+html body .no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+html body .chat-scroll-area::-webkit-scrollbar,
+html body .brainstorm-scroll-area::-webkit-scrollbar,
+html body .thinking-scroll-area::-webkit-scrollbar,
+html body .no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }

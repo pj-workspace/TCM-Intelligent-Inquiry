@@ -7,27 +7,38 @@ import { Sidebar } from "@/components/chat/Sidebar";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE } from "@/lib/api";
 import { MessageBubble, markdownToPlainText } from "@/components/chat/MessageBubble";
-import { ToolCallIndicator } from "@/components/chat/ToolCallIndicator";
-import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import {
+  BrainstormPanel,
+  type BrainstormStep,
+} from "@/components/chat/BrainstormPanel";
 import { ClaudeStar } from "@/components/chat/ClaudeStar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download } from "lucide-react";
+import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download, ArrowDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type Message = {
+type ChatMessage = {
   id: string;
-  role?: "user" | "assistant";
-  type?: "message" | "thinking" | "tool";
-  content?: string;
-  toolName?: string;
-  /** 思考段结束后的时长（秒），持久化来自服务端 duration_sec） */
-  thinkingDurationSec?: number;
-  /** 与后端 tool-call / tool-result 的 runId 对齐，用于配对多条工具 */
-  runId?: string;
-  status?: "running" | "success" | "error";
+  role: "user" | "assistant";
+  type: "message";
+  content: string;
   /** 助手消息：来自 SSE meta.chatModel */
   modelName?: string;
 };
+
+type ThinkingStep = Extract<BrainstormStep, { type: "thinking" }>;
+type ToolStep = Extract<BrainstormStep, { type: "tool" }>;
+type FlatMessage = ChatMessage | ThinkingStep | ToolStep;
+
+type TraceMessage = {
+  id: string;
+  type: "trace";
+  steps: BrainstormStep[];
+  status: "streaming" | "done";
+  totalDurationSec?: number;
+  collapsed: boolean;
+};
+
+type Message = ChatMessage | TraceMessage;
 
 type ApiMessageRow = {
   id: string;
@@ -37,13 +48,53 @@ type ApiMessageRow = {
   model_name?: string | null;
 };
 
-function mapApiRowToMessage(msg: ApiMessageRow): Message {
+function sumThinkingDurations(steps: BrainstormStep[]): number | undefined {
+  const total = steps.reduce((sum, step) => {
+    if (step.type !== "thinking") return sum;
+    return sum + (step.durationSec ?? 0);
+  }, 0);
+  return total > 0 ? total : undefined;
+}
+
+function groupMessagesIntoTraces(items: FlatMessage[]): Message[] {
+  const grouped: Message[] = [];
+  let pendingSteps: BrainstormStep[] = [];
+
+  const flushPendingSteps = (collapsed: boolean) => {
+    if (!pendingSteps.length) return;
+    grouped.push({
+      id: `trace-${pendingSteps[0].id}`,
+      type: "trace",
+      steps: pendingSteps,
+      status: "done",
+      totalDurationSec: sumThinkingDurations(pendingSteps),
+      collapsed,
+    });
+    pendingSteps = [];
+  };
+
+  for (const item of items) {
+    if (item.type === "message") {
+      if (pendingSteps.length > 0) {
+        flushPendingSteps(item.role === "assistant");
+      }
+      grouped.push(item);
+      continue;
+    }
+    pendingSteps.push(item);
+  }
+
+  flushPendingSteps(true);
+  return grouped;
+}
+
+function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
   if (msg.role === "thinking") {
     return {
       id: msg.id,
       type: "thinking",
       content: msg.content,
-      thinkingDurationSec:
+      durationSec:
         msg.duration_sec != null && msg.duration_sec >= 0
           ? msg.duration_sec
           : undefined,
@@ -100,6 +151,10 @@ const messageTransition = {
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+/** 生成中：距底部小于该值则恢复自动跟随（略宽松，避免正文开始时跟丢） */
+const BOTTOM_SCROLL_THRESHOLD = 200;
+/** 空闲时：距底部小于该值视为在底部，用于隐藏「回到底部」、滚动事件里恢复跟随 */
+const BOTTOM_LOCK_THRESHOLD = 72;
 
 /** 未登录点发送时暂存输入框，从 /login 返回首页后恢复 */
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
@@ -110,19 +165,24 @@ export default function Home() {
   const [hasStarted, setHasStarted] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [genState, setGenState] = useState<GenerationState>('idle');
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const autoFollowMainRef = useRef(true);
+  const isNearBottomRef = useRef(true);
+  const lastMainScrollTopRef = useRef(0);
   /** 当前流式请求在首个 text-delta 前由 meta 写入，用于助手消息展示模型名 */
   const pendingChatModelRef = useRef<string | undefined>(undefined);
-  /** 流式思考块开始时间，用于右侧「思考时长」与收尾结算 */
-  const thinkingBlockStartedAt = useRef<Record<string, number>>({});
+  /** 流式思考 step 开始时间，用于单段时长结算 */
+  const thinkingStepStartedAt = useRef<Record<string, number>>({});
+  /** 整个头脑风暴 trace 的开始时间，用于总耗时结算 */
+  const traceStartedAt = useRef<Record<string, number>>({});
   
   const [conversationId, setConversationId] = useState<string | null>(null);
-  /** 当前正在接收流式 thinking-delta 的那一条思考块 id；仅该块显示「思考中」动效 */
-  const [streamingThinkingId, setStreamingThinkingId] = useState<string | null>(null);
   const [serverConversations, setServerConversations] = useState<
     { id: string; title: string }[]
   >([]);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const { token, loading: authLoading, logout } = useAuth();
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -211,17 +271,62 @@ export default function Home() {
     );
   }, [token]);
 
-  const scrollToBottom = (smooth: boolean) => {
-    messagesEndRef.current?.scrollIntoView({ 
+  const updateScrollState = useCallback(() => {
+    const el = scrollViewportRef.current;
+    if (!el) return;
+    const currentTop = el.scrollTop;
+    const prevTop = lastMainScrollTopRef.current;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const userScrolledUp = currentTop < prevTop - 2;
+    const atBottom = distance <= BOTTOM_LOCK_THRESHOLD;
+    const isNearBottom = distance <= BOTTOM_SCROLL_THRESHOLD;
+    // 内容高度骤降（如头脑风暴收起）时 scrollTop 会被钳位变小，并非用户上滑
+    if (userScrolledUp && distance > BOTTOM_LOCK_THRESHOLD) {
+      autoFollowMainRef.current = false;
+    } else if (atBottom) {
+      autoFollowMainRef.current = true;
+    }
+    lastMainScrollTopRef.current = currentTop;
+    isNearBottomRef.current = isNearBottom;
+    setShowScrollToBottom(hasStarted && !atBottom);
+  }, [hasStarted]);
+
+  const scrollToBottom = useCallback((smooth: boolean) => {
+    const el = scrollViewportRef.current;
+    if (!el) {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: smooth ? "smooth" : "auto",
+        block: "end",
+      });
+      return;
+    }
+    el.scrollTo({
+      top: el.scrollHeight,
       behavior: smooth ? "smooth" : "auto",
-      block: "end"
     });
-  };
+    requestAnimationFrame(updateScrollState);
+  }, [updateScrollState]);
 
   useEffect(() => {
-    const isSmooth = genState === "idle" || genState === "waiting";
-    scrollToBottom(isSmooth);
-  }, [messages, genState]);
+    updateScrollState();
+  }, [hasStarted, updateScrollState]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+    const el = scrollViewportRef.current;
+    if (el) {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const threshold =
+        genState !== "idle"
+          ? BOTTOM_SCROLL_THRESHOLD
+          : BOTTOM_LOCK_THRESHOLD;
+      if (distance <= threshold) {
+        autoFollowMainRef.current = true;
+      }
+    }
+    if (!autoFollowMainRef.current) return;
+    scrollToBottom(false);
+  }, [messages, genState, hasStarted, scrollToBottom]);
 
   useEffect(() => {
     try {
@@ -268,7 +373,7 @@ export default function Home() {
         if (!mr.ok || cancelled) return;
         const msgs = (await mr.json()) as ApiMessageRow[];
         if (!Array.isArray(msgs) || cancelled) return;
-        setMessages(msgs.map(mapApiRowToMessage));
+        setMessages(groupMessagesIntoTraces(msgs.map(mapApiRowToMessage)));
       } catch (e) {
         console.error(e);
       }
@@ -289,8 +394,13 @@ export default function Home() {
     setMessages([]);
     setHasStarted(false);
     setGenState("idle");
-    setStreamingThinkingId(null);
     setIsGeneratingTitle(false);
+    setShowScrollToBottom(false);
+    autoFollowMainRef.current = true;
+    isNearBottomRef.current = true;
+    lastMainScrollTopRef.current = 0;
+    thinkingStepStartedAt.current = {};
+    traceStartedAt.current = {};
   }, [authLoading, token]);
 
   const loadMessagesWithToken = async (convId: string, accessToken: string) => {
@@ -303,29 +413,60 @@ export default function Home() {
     if (!res.ok) throw new Error("Failed to fetch messages");
     const data = (await res.json()) as ApiMessageRow[];
     if (!Array.isArray(data)) return;
-    setMessages(data.map(mapApiRowToMessage));
+    setMessages(groupMessagesIntoTraces(data.map(mapApiRowToMessage)));
   };
 
-  const finalizeThinkingBlock = (id: string | null) => {
-    if (!id) return;
-    const start = thinkingBlockStartedAt.current[id];
+  const finalizeThinkingStep = useCallback((traceId: string | null, stepId: string | null) => {
+    if (!traceId || !stepId) return;
+    const start = thinkingStepStartedAt.current[stepId];
     if (start == null) return;
     const sec = Math.max(0, (Date.now() - start) / 1000);
-    delete thinkingBlockStartedAt.current[id];
+    delete thinkingStepStartedAt.current[stepId];
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === id && m.type === "thinking"
-          ? { ...m, thinkingDurationSec: sec }
+        m.type === "trace" && m.id === traceId
+          ? {
+              ...m,
+              steps: m.steps.map((step) =>
+                step.type === "thinking" && step.id === stepId
+                  ? { ...step, durationSec: sec }
+                  : step
+              ),
+            }
           : m
       )
     );
-  };
+  }, []);
+
+  const finalizeTrace = useCallback((traceId: string | null, collapsed: boolean) => {
+    if (!traceId) return;
+    const start = traceStartedAt.current[traceId];
+    const elapsedSec =
+      start != null ? Math.max(0, (Date.now() - start) / 1000) : undefined;
+    delete traceStartedAt.current[traceId];
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.type === "trace" && m.id === traceId
+          ? {
+              ...m,
+              status: "done",
+              collapsed,
+              totalDurationSec:
+                elapsedSec ?? m.totalDurationSec ?? sumThinkingDurations(m.steps),
+            }
+          : m
+      )
+    );
+  }, []);
 
   const handleSelectConversation = async (id: string) => {
     if (genState !== "idle" || !token) return;
-    setStreamingThinkingId(null);
     setIsGeneratingTitle(false);
     setMessages([]);
+    setShowScrollToBottom(false);
+    autoFollowMainRef.current = true;
+    isNearBottomRef.current = true;
+    lastMainScrollTopRef.current = 0;
 
     setConversationId(id);
     localStorage.setItem("tcm_conversation_id", id);
@@ -392,11 +533,18 @@ export default function Home() {
       if (!reader) return;
 
       const currentAssistantMsgId = Date.now().toString() + "-msg";
-      /** 当前这一段连续思考的块 id；遇到 tool / 正文输出时清空，下一段 thinking 新开一块 */
-      let openThinkingBlockId: string | null = null;
+      let currentTraceId: string | null = null;
+      let openThinkingStepId: string | null = null;
       let toolRunStartedAt: number | null = null;
 
       let hasAssistantMsg = false;
+
+      const ensureCurrentTraceId = () => {
+        if (currentTraceId != null) return currentTraceId;
+        currentTraceId = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        traceStartedAt.current[currentTraceId] = Date.now();
+        return currentTraceId;
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -432,72 +580,151 @@ export default function Home() {
               }
               else if (data.type === 'thinking-delta') {
                 const piece = data.textDelta ?? "";
-                if (openThinkingBlockId === null) {
+                const traceId = ensureCurrentTraceId();
+                if (openThinkingStepId === null) {
                   const nid = `think-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-                  openThinkingBlockId = nid;
-                  thinkingBlockStartedAt.current[nid] = Date.now();
-                  setStreamingThinkingId(nid);
+                  openThinkingStepId = nid;
+                  thinkingStepStartedAt.current[nid] = Date.now();
                   setGenState('thinking');
-                  setMessages((prev) => [...prev, { id: nid, type: 'thinking', content: piece }]);
+                  setMessages((prev) => {
+                    const trace = prev.find(
+                      (msg): msg is TraceMessage =>
+                        msg.type === "trace" && msg.id === traceId
+                    );
+                    if (!trace) {
+                      return [
+                        ...prev,
+                        {
+                          id: traceId,
+                          type: "trace",
+                          steps: [{ id: nid, type: "thinking", content: piece }],
+                          status: "streaming",
+                          totalDurationSec: undefined,
+                          collapsed: true,
+                        },
+                      ];
+                    }
+                    return prev.map((msg) =>
+                      msg.type === "trace" && msg.id === traceId
+                        ? {
+                            ...msg,
+                            status: "streaming",
+                            steps: [...msg.steps, { id: nid, type: "thinking", content: piece }],
+                          }
+                        : msg
+                    );
+                  });
                 } else {
                   setGenState('thinking');
-                  const tid = openThinkingBlockId;
+                  const tid = openThinkingStepId;
                   setMessages((prev) =>
                     prev.map((msg) =>
-                      msg.id === tid
-                        ? { ...msg, content: (msg.content || "") + piece }
+                      msg.type === "trace" && msg.id === traceId
+                        ? {
+                            ...msg,
+                            steps: msg.steps.map((step) =>
+                              step.type === "thinking" && step.id === tid
+                                ? { ...step, content: step.content + piece }
+                                : step
+                            ),
+                          }
                         : msg
                     )
                   );
                 }
               } 
               else if (data.type === 'tool-call') {
-                finalizeThinkingBlock(openThinkingBlockId);
-                openThinkingBlockId = null;
-                setStreamingThinkingId(null);
+                const traceId = ensureCurrentTraceId();
+                finalizeThinkingStep(traceId, openThinkingStepId);
+                openThinkingStepId = null;
                 const runKey = data.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const rowId = `tool-${runKey}`;
                 toolRunStartedAt = Date.now();
                 setGenState('tool');
-                setMessages((prev) => [
-                  ...prev,
-                  {
+                setMessages((prev) => {
+                  const toolStep: ToolStep = {
                     id: rowId,
-                    type: 'tool',
-                    toolName: data.name,
-                    status: 'running',
+                    type: "tool",
+                    toolName:
+                      typeof data.name === "string" && data.name
+                        ? data.name
+                        : "tool",
+                    status: "running",
                     runId: data.runId ?? runKey,
-                  },
-                ]);
+                  };
+                  const trace = prev.find(
+                    (msg): msg is TraceMessage =>
+                      msg.type === "trace" && msg.id === traceId
+                  );
+                  if (!trace) {
+                    return [
+                      ...prev,
+                      {
+                        id: traceId,
+                        type: "trace",
+                        steps: [toolStep],
+                        status: "streaming",
+                        totalDurationSec: undefined,
+                        collapsed: true,
+                      },
+                    ];
+                  }
+                  return prev.map((msg) =>
+                    msg.type === "trace" && msg.id === traceId
+                      ? {
+                          ...msg,
+                          status: "streaming",
+                          steps: [...msg.steps, toolStep],
+                        }
+                      : msg
+                  );
+                });
               } 
               else if (data.type === 'tool-result') {
-                openThinkingBlockId = null;
-                setStreamingThinkingId(null);
+                openThinkingStepId = null;
                 const rid = data.runId as string | undefined;
                 const elapsed = toolRunStartedAt != null ? Date.now() - toolRunStartedAt : 999;
                 toolRunStartedAt = null;
                 if (elapsed < 420) await delay(420 - elapsed);
                 setMessages((prev) => {
-                  let idx = -1;
-                  if (rid != null) {
-                    idx = prev.findIndex(
-                      (m) => m.type === 'tool' && m.status === 'running' && m.runId === rid
-                    );
-                  }
-                  if (idx === -1) {
-                    idx = prev.findIndex((m) => m.type === 'tool' && m.status === 'running');
-                  }
-                  if (idx === -1) return prev;
-                  return prev.map((m, i) =>
-                    i === idx ? { ...m, status: 'success' as const } : m
-                  );
+                  return prev.map((msg) => {
+                    if (msg.type !== "trace" || msg.id !== currentTraceId) return msg;
+                    let idx = -1;
+                    if (rid != null) {
+                      idx = msg.steps.findIndex(
+                        (step) =>
+                          step.type === "tool" &&
+                          step.status === "running" &&
+                          step.runId === rid
+                      );
+                    }
+                    if (idx === -1) {
+                      idx = msg.steps.findIndex(
+                        (step) => step.type === "tool" && step.status === "running"
+                      );
+                    }
+                    if (idx === -1) return msg;
+                    return {
+                      ...msg,
+                      steps: msg.steps.map((step, i) =>
+                        i === idx && step.type === "tool"
+                          ? { ...step, status: "success" as const }
+                          : step
+                      ),
+                    };
+                  });
                 });
                 await delay(150);
               } 
               else if (data.type === 'text-delta') {
-                finalizeThinkingBlock(openThinkingBlockId);
-                openThinkingBlockId = null;
-                setStreamingThinkingId(null);
+                finalizeThinkingStep(currentTraceId, openThinkingStepId);
+                openThinkingStepId = null;
+                if (currentTraceId) {
+                  finalizeTrace(currentTraceId, true);
+                  currentTraceId = null;
+                }
+                // 从头脑风暴切到正文时布局剧变，避免 scrollTop 钳位被误判为上滑而停止跟滚
+                autoFollowMainRef.current = true;
                 if (!hasAssistantMsg) {
                   hasAssistantMsg = true;
                   setGenState('typing');
@@ -546,6 +773,12 @@ export default function Home() {
               }
               else if (data.type === 'error') {
                  console.error("Backend error:", data.message);
+                 finalizeThinkingStep(currentTraceId, openThinkingStepId);
+                 openThinkingStepId = null;
+                 if (currentTraceId) {
+                   finalizeTrace(currentTraceId, false);
+                   currentTraceId = null;
+                 }
                  setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", type: "message", content: `**Error:** ${data.message}` }]);
               }
             } catch (e) {
@@ -554,17 +787,21 @@ export default function Home() {
           }
         }
       }
-      finalizeThinkingBlock(openThinkingBlockId);
+      finalizeThinkingStep(currentTraceId, openThinkingStepId);
+      if (currentTraceId) {
+        finalizeTrace(currentTraceId, false);
+      }
       await refreshServerConversations();
-      setStreamingThinkingId(null);
       setGenState('idle');
     } catch (error) {
       console.error('Chat error:', error);
-      for (const id of Object.keys(thinkingBlockStartedAt.current)) {
-        finalizeThinkingBlock(id);
+      finalizeThinkingStep(currentTraceId, openThinkingStepId);
+      if (currentTraceId) {
+        finalizeTrace(currentTraceId, false);
       }
+      thinkingStepStartedAt.current = {};
+      traceStartedAt.current = {};
       setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", type: "message", content: "**网络错误**：无法连接到服务器，请确保后端服务已启动。" }]);
-      setStreamingThinkingId(null);
       setGenState('idle');
     } finally {
       setIsGeneratingTitle(false);
@@ -587,6 +824,7 @@ export default function Home() {
     const userText = input.trim();
     setInput("");
     setHasStarted(true);
+    autoFollowMainRef.current = true;
     await runChatStream(userText, true);
   };
 
@@ -608,13 +846,17 @@ export default function Home() {
     setMessages((prev) => {
       const removed = prev.slice(userIdx + 1);
       for (const m of removed) {
-        if (m.type === "thinking" && m.id) {
-          delete thinkingBlockStartedAt.current[m.id];
+        if (m.type === "trace") {
+          delete traceStartedAt.current[m.id];
+          for (const step of m.steps) {
+            if (step.type === "thinking") {
+              delete thinkingStepStartedAt.current[step.id];
+            }
+          }
         }
       }
       return prev.slice(0, userIdx + 1);
     });
-    setStreamingThinkingId(null);
     void runChatStream(userText, false, { regenerateLastReply: true });
   };
 
@@ -630,10 +872,14 @@ export default function Home() {
     localStorage.removeItem("tcm_anon_secret");
     setConversationId(null);
     setMessages([]);
-    thinkingBlockStartedAt.current = {};
+    setShowScrollToBottom(false);
+    autoFollowMainRef.current = true;
+    isNearBottomRef.current = true;
+    lastMainScrollTopRef.current = 0;
+    thinkingStepStartedAt.current = {};
+    traceStartedAt.current = {};
     setHasStarted(false);
     setGenState("idle");
-    setStreamingThinkingId(null);
     setIsGeneratingTitle(false);
     if (token) {
       void refreshServerConversations();
@@ -835,7 +1081,11 @@ export default function Home() {
 
         <div className="flex-1 flex flex-col relative overflow-hidden">
           
-          <div className="flex-1 overflow-y-auto">
+          <div
+            ref={scrollViewportRef}
+            onScroll={updateScrollState}
+            className="chat-scroll-area no-scrollbar flex-1 overflow-y-auto"
+          >
             <AnimatePresence>
               {hasStarted && (
                 <motion.div 
@@ -878,7 +1128,7 @@ export default function Home() {
                         </motion.div>
                       );
                     }
-                    if (msg.type === "thinking") {
+                    if (msg.type === "trace") {
                       return (
                         <motion.div
                           key={msg.id}
@@ -886,25 +1136,21 @@ export default function Home() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={messageTransition}
                         >
-                          <ThinkingIndicator
-                            isThinking={
-                              streamingThinkingId === msg.id && genState === 'thinking'
+                          <BrainstormPanel
+                            steps={msg.steps}
+                            isStreaming={msg.status === "streaming"}
+                            durationSec={msg.totalDurationSec}
+                            collapsed={msg.collapsed}
+                            onToggle={() =>
+                              setMessages((prev) =>
+                                prev.map((item) =>
+                                  item.type === "trace" && item.id === msg.id
+                                    ? { ...item, collapsed: !item.collapsed }
+                                    : item
+                                )
+                              )
                             }
-                            content={msg.content!}
-                            durationSec={msg.thinkingDurationSec}
                           />
-                        </motion.div>
-                      );
-                    }
-                    if (msg.type === "tool") {
-                      return (
-                        <motion.div
-                          key={msg.id}
-                          initial={{ opacity: 0, y: 15 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={messageTransition}
-                        >
-                          <ToolCallIndicator toolName={msg.toolName!} status={msg.status!} />
                         </motion.div>
                       );
                     }
@@ -933,6 +1179,26 @@ export default function Home() {
               )}
             </AnimatePresence>
           </div>
+
+          <AnimatePresence>
+            {showScrollToBottom && hasStarted && (
+              <motion.button
+                type="button"
+                initial={{ opacity: 0, y: 10, scale: 0.92 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.92 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                onClick={() => {
+                  autoFollowMainRef.current = true;
+                  scrollToBottom(true);
+                }}
+                className="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#e5e5e5] bg-white/92 px-3.5 py-2 text-sm text-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.08)] backdrop-blur bottom-32 md:bottom-36 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+              >
+                <ArrowDown className="h-4 w-4" />
+                <span>回到底部</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
 
           <motion.div 
             layout
@@ -971,7 +1237,7 @@ export default function Home() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="描述您的症状，或询问中医知识..."
-                  className="w-full max-h-[200px] min-h-[60px] py-4 px-4 bg-transparent resize-none outline-none text-[16px] text-gray-800 placeholder:text-gray-400"
+                  className="no-scrollbar w-full max-h-[200px] min-h-[60px] overflow-y-auto py-4 px-4 bg-transparent resize-none outline-none text-[16px] text-gray-800 placeholder:text-gray-400"
                   rows={1}
                 />
                 

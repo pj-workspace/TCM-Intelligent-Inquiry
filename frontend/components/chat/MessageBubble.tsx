@@ -28,9 +28,19 @@ function escapeHtml(s: string): string {
 /**
  * 模型常把有序列表写成「单独一行的 1. / 2.」再换行写正文，CommonMark 无法将其识别为同一条列表项。
  * 合并为「1. 正文」以便正确渲染为 ol/li。
+ * 支持：编号与正文之间有多余空行、或中间仅有空白/空格行；支持半角 `.` 与全角 `．`。
  */
 function mergeOrphanOrderedListMarkers(md: string): string {
-  return md.replace(/(^|\n)(\d{1,3})\.\s*\n+(?=\S)/g, "$1$2. ");
+  let prev = md;
+  for (let i = 0; i < 8; i++) {
+    const next = prev.replace(
+      /(^|\n)(\d{1,3})(?:\.|．)[ \t]*(?:\r?\n[ \t]*)+(?=\S)/g,
+      "$1$2. "
+    );
+    if (next === prev) break;
+    prev = next;
+  }
+  return prev;
 }
 
 /** GFM 表格只识别 ASCII `|`；部分模型会输出全角竖线 U+FF5C，导致无法解析为表格。 */
@@ -45,7 +55,7 @@ function preprocessAssistantMarkdown(md: string): string {
 /** 助手正文已用 remark-gfm 解析为 table 元素；需显式边框与横向滚动，否则会像「挤成一行的纯文本」。 */
 const assistantMarkdownComponents: Components = {
   table: ({ node: _n, children, ...props }) => (
-    <div className="my-4 w-full max-w-full overflow-x-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg)]">
+    <div className="no-scrollbar my-4 w-full max-w-full overflow-x-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg)]">
       <table
         className="w-full min-w-[min(100%,520px)] border-collapse text-[0.95rem] leading-snug"
         {...props}
