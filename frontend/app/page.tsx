@@ -123,6 +123,7 @@ export default function Home() {
   const [serverConversations, setServerConversations] = useState<
     { id: string; title: string }[]
   >([]);
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const { token, loading: authLoading, logout } = useAuth();
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
@@ -289,6 +290,7 @@ export default function Home() {
     setHasStarted(false);
     setGenState("idle");
     setStreamingThinkingId(null);
+    setIsGeneratingTitle(false);
   }, [authLoading, token]);
 
   const loadMessagesWithToken = async (convId: string, accessToken: string) => {
@@ -322,6 +324,7 @@ export default function Home() {
   const handleSelectConversation = async (id: string) => {
     if (genState !== "idle" || !token) return;
     setStreamingThinkingId(null);
+    setIsGeneratingTitle(false);
     setMessages([]);
 
     setConversationId(id);
@@ -349,6 +352,10 @@ export default function Home() {
         ...prev,
         { id: userMsgId, role: "user", type: "message", content: userText },
       ]);
+    }
+
+    if (!conversationId) {
+      setIsGeneratingTitle(true);
     }
 
     setGenState("waiting");
@@ -411,6 +418,10 @@ export default function Home() {
                 if (data.conversationId) {
                   setConversationId(data.conversationId);
                   localStorage.setItem("tcm_conversation_id", data.conversationId);
+                  setServerConversations(prev => {
+                    if (prev.some(c => c.id === data.conversationId)) return prev;
+                    return [{ id: data.conversationId, title: "" }, ...prev];
+                  });
                 }
                 if (
                   typeof data.chatModel === "string" &&
@@ -511,6 +522,28 @@ export default function Home() {
                   );
                 }
               } 
+              else if (data.type === "title-updated") {
+                const cid =
+                  typeof data.conversationId === "string"
+                    ? data.conversationId
+                    : null;
+                const newTitle =
+                  typeof data.title === "string" ? data.title.trim() : "";
+                // 必须用 SSE 里的 conversationId：新建会话时闭包里的 conversationId 仍为 null，无法用来匹配列表项
+                if (cid) {
+                  const nextTitle = newTitle || "新会话";
+                  setServerConversations((prev) => {
+                    const idx = prev.findIndex((c) => c.id === cid);
+                    if (idx === -1) {
+                      return [{ id: cid, title: nextTitle }, ...prev];
+                    }
+                    return prev.map((c) =>
+                      c.id === cid ? { ...c, title: nextTitle } : c
+                    );
+                  });
+                }
+                setIsGeneratingTitle(false);
+              }
               else if (data.type === 'error') {
                  console.error("Backend error:", data.message);
                  setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", type: "message", content: `**Error:** ${data.message}` }]);
@@ -533,6 +566,8 @@ export default function Home() {
       setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", type: "message", content: "**网络错误**：无法连接到服务器，请确保后端服务已启动。" }]);
       setStreamingThinkingId(null);
       setGenState('idle');
+    } finally {
+      setIsGeneratingTitle(false);
     }
   };
 
@@ -599,6 +634,7 @@ export default function Home() {
     setHasStarted(false);
     setGenState("idle");
     setStreamingThinkingId(null);
+    setIsGeneratingTitle(false);
     if (token) {
       void refreshServerConversations();
     }
@@ -638,6 +674,14 @@ export default function Home() {
     }
   };
 
+  /** 侧栏在 md 以下隐藏，移动端用顶栏骨架表示「会话标题加载中」 */
+  const showMobileTitleSkeleton =
+    Boolean(token) &&
+    hasStarted &&
+    genState !== "idle" &&
+    (!conversationId ||
+      !(serverConversations.find((c) => c.id === conversationId)?.title ?? "").trim());
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#fdfdfc]">
       <ConfirmDialog
@@ -657,15 +701,26 @@ export default function Home() {
         onNewChat={handleNewChat}
         onSelect={handleSelectConversation}
         onDelete={openDeleteDialog}
+        streamBusy={genState !== "idle"}
+        isGeneratingTitle={isGeneratingTitle}
       />
 
       <main className="flex-1 flex flex-col relative min-w-0">
         {/* 统一的顶部 Header */}
         <header className="flex-shrink-0 h-14 flex items-center justify-between px-4 md:px-6 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-2 max-w-[60%]">
-            <div className="font-semibold text-sm md:hidden">TCM AI</div>
+          <div className="flex items-center gap-2 max-w-[60%] min-w-0 flex-1 md:flex-initial">
+            <div className="font-semibold text-sm shrink-0 md:hidden">TCM AI</div>
+            {showMobileTitleSkeleton && (
+              <div
+                className="md:hidden flex-1 min-w-0 max-w-[15rem] flex items-center"
+                aria-busy
+                aria-label="正在加载会话标题"
+              >
+                <div className="skeleton-text-shimmer h-4 w-32 rounded-md" />
+              </div>
+            )}
             {hasStarted && conversationId && (
-               <div className="hidden md:block font-medium text-sm text-gray-800 truncate">
+               <div className="hidden md:block font-medium text-sm text-gray-800 truncate min-h-[1.25rem]">
                  {isEditingTitle ? (
                    <input 
                      autoFocus
@@ -675,8 +730,20 @@ export default function Home() {
                      onBlur={handleSaveTitle}
                      onKeyDown={e => { if (e.key === 'Enter') handleSaveTitle(); else if (e.key === 'Escape') setIsEditingTitle(false); }}
                    />
+                 ) : isGeneratingTitle ? (
+                   <span className="block text-transparent select-none" aria-hidden>
+                     &nbsp;
+                   </span>
                  ) : (
-                   serverConversations.find(c => c.id === conversationId)?.title || "会话记录"
+                   <span
+                     key={
+                       serverConversations.find((c) => c.id === conversationId)
+                         ?.title || "会话记录"
+                     }
+                     className="block truncate font-medium sidebar-conv-title-sweep"
+                   >
+                     {serverConversations.find(c => c.id === conversationId)?.title || "会话记录"}
+                   </span>
                  )}
                </div>
             )}

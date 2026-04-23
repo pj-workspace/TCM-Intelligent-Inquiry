@@ -4,6 +4,7 @@ import json
 import secrets
 import time
 import uuid
+import asyncio
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -181,6 +182,54 @@ async def _messages_to_lc(session: AsyncSession, conversation_id: str) -> list[H
     return out
 
 
+async def _generate_title_async(msg_in: str, conv_id: str) -> str:
+    """异步生成标题并更新到数据库"""
+    from app.llm.chat_factory import build_chat_model
+    from sqlalchemy import update
+
+    fallback_title = _truncate(msg_in, 10)
+    title = fallback_title
+
+    try:
+        model = build_chat_model()
+        prompt = (
+            "请根据用户的首条消息，总结出一个简短的会话标题（10个字以内）。"
+            "只输出标题文本，不要包含任何标点符号、引号或额外解释。\n\n"
+            f"用户消息：{msg_in}"
+        )
+
+        async def _call_model():
+            res = await model.ainvoke(prompt)
+            # ainvoke 返回 AIMessage 时 content 可能为 str 或 block 列表，需统一提取
+            raw = _extract_text(res) if res is not None else ""
+            if not raw and hasattr(res, "content"):
+                raw = str(getattr(res, "content", "") or "")
+            return raw.strip()
+
+        # 略长于主对话首 token，避免慢模型误判为超时；仍由 wait_for 保证不无限阻塞
+        ai_title = await asyncio.wait_for(_call_model(), timeout=12.0)
+        if ai_title:
+            ai_title = ai_title.strip("'\"")
+            title = _truncate(ai_title, 10)
+    except TimeoutError:
+        logger.warning("generate conversation title timed out, using fallback")
+    except Exception as e:
+        logger.warning("Failed to generate title asynchronously: %s", e)
+        
+    try:
+        async with async_session_factory() as session:
+            await session.execute(
+                update(ConversationRecord)
+                .where(ConversationRecord.id == conv_id)
+                .values(title=title)
+            )
+            await session.commit()
+    except Exception as e:
+        logger.exception("Failed to save generated title")
+        
+    return title
+
+
 async def stream_chat(
     message: str,
     history: list[ChatMessage],
@@ -206,6 +255,9 @@ async def stream_chat(
     ctx_token = chat_user_id.set(user_id)
     conv_id: str | None = conversation_id
     effective_agent_id = agent_id
+    is_new_conversation = False
+    title_task = None
+    title_yielded = False
 
     try:
         yield _sse({"type": "notice", "safetyNotice": STREAM_SAFETY_NOTICE})
@@ -266,8 +318,9 @@ async def stream_chat(
             async with async_session_factory() as session:
                 lc_messages = await _messages_to_lc(session, conv_id)
         else:
+            is_new_conversation = True
             conv_id = str(uuid.uuid4())
-            title = msg_in[:200] if len(msg_in) > 200 else msg_in
+            title = "新会话"
             anon_sec = secrets.token_hex(32) if user_id is None else None
             async with async_session_factory() as session:
                 session.add(
@@ -291,6 +344,9 @@ async def stream_chat(
 
             prior = _history_to_lc(history)
             lc_messages = prior + [HumanMessage(content=msg_in)]
+            
+            # 开启异步标题生成任务
+            title_task = asyncio.create_task(_generate_title_async(msg_in, conv_id))
 
         meta_out: dict[str, Any] = {
             "type": "meta",
@@ -333,6 +389,22 @@ async def stream_chat(
                 await session.commit()
 
         async for event in graph.astream_events({"messages": lc_messages}, version="v2"):
+            if title_task and not title_yielded and title_task.done():
+                title_yielded = True
+                try:
+                    new_title = title_task.result()
+                    yield _sse(
+                        {"type": "title-updated", "title": new_title, "conversationId": conv_id}
+                    )
+                except Exception:
+                    yield _sse(
+                        {
+                            "type": "title-updated",
+                            "title": _truncate(msg_in, 10),
+                            "conversationId": conv_id,
+                        }
+                    )
+
             etype = event.get("event")
             data = event.get("data") if isinstance(event.get("data"), dict) else {}
             run_id = event.get("run_id")
@@ -442,10 +514,31 @@ async def stream_chat(
             )
             await session.commit()
 
+        if title_task and not title_yielded:
+            try:
+                new_title = await title_task
+                yield _sse(
+                    {"type": "title-updated", "title": new_title, "conversationId": conv_id}
+                )
+            except Exception:
+                fb = _truncate(msg_in, 10)
+                yield _sse(
+                    {"type": "title-updated", "title": fb, "conversationId": conv_id}
+                )
+
         yield "data: [DONE]\n\n"
 
     except Exception as exc:
         logger.exception("stream_chat error")
+        if title_task and not title_yielded and is_new_conversation and conv_id:
+            title_task.cancel()
+            yield _sse(
+                {
+                    "type": "title-updated",
+                    "title": _truncate(msg_in, 10),
+                    "conversationId": conv_id,
+                }
+            )
         if conv_id:
             try:
                 async with async_session_factory() as session:

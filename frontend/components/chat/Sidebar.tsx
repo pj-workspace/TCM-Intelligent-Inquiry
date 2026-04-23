@@ -16,6 +16,9 @@ type SidebarProps = {
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete?: (id: string) => void;
+  /** 是否正在流式生成（与 isGeneratingTitle 解耦，避免与 SSE 同一帧批量更新导致骨架从不展示） */
+  streamBusy?: boolean;
+  isGeneratingTitle?: boolean;
 };
 
 export function Sidebar({
@@ -24,8 +27,18 @@ export function Sidebar({
   onNewChat,
   onSelect,
   onDelete,
+  streamBusy = false,
+  isGeneratingTitle,
 }: SidebarProps) {
   const { loading, token } = useAuth();
+
+  /**
+   * meta 未到前：activeId 为空、列表可能仍为空，仅靠 isGeneratingTitle 可能与流式事件同一批次提交，界面从不刷出骨架。
+   * 用 streamBusy（genState !== idle）+ 无会话 id 作为可靠信号。
+   */
+  const showPendingNewChatSkeleton = Boolean(
+    token && streamBusy && activeId == null
+  );
 
   return (
     <div className="w-[260px] h-full bg-[#f9f9f8] border-r border-[#e5e5e5] flex flex-col flex-shrink-0 hidden md:flex">
@@ -44,34 +57,66 @@ export function Sidebar({
         <div className="text-xs font-semibold text-gray-400 mb-3 px-3">
           我的会话
         </div>
-        {conversations.length === 0 ? (
-          loading ? (
-            <div className="px-3 space-y-2">
-              <div className="h-4 w-48 rounded bg-gray-100 animate-pulse" />
-              <div className="h-4 w-36 rounded bg-gray-100/80 animate-pulse" />
-            </div>
-          ) : (
-            <p className="px-3 text-sm text-gray-400 leading-relaxed">
-              暂无会话历史，快来聊聊吧～
-            </p>
-          )
+        {loading ? (
+          <div className="px-3 space-y-2">
+            <div className="h-4 w-48 rounded bg-gray-100 animate-pulse" />
+            <div className="h-4 w-36 rounded bg-gray-100/80 animate-pulse" />
+          </div>
+        ) : conversations.length === 0 && !showPendingNewChatSkeleton ? (
+          <p className="px-3 text-sm text-gray-400 leading-relaxed">
+            暂无会话历史，快来聊聊吧～
+          </p>
         ) : (
           <div className="space-y-0.5">
+            {showPendingNewChatSkeleton && (
+              <div
+                className="relative w-full flex min-h-[2.75rem] items-center px-3 py-2.5 text-sm rounded-xl bg-white shadow-sm border border-[#e5e5e5] pointer-events-none"
+                aria-busy
+                aria-label="正在生成会话标题"
+              >
+                <div className="flex min-w-0 flex-1 items-center pr-2">
+                  <div className="skeleton-text-shimmer h-4 w-2/3 rounded-md" />
+                </div>
+              </div>
+            )}
             {conversations.map((c) => {
               const isActive = activeId === c.id;
+              const titleEmpty = !(c.title && c.title.trim());
+              const isGenerating =
+                isActive &&
+                (Boolean(isGeneratingTitle) ||
+                  (streamBusy && titleEmpty));
+
               return (
                 <div
                   key={c.id}
                   className={clsx(
-                    "group relative w-full flex items-center px-3 py-2.5 text-sm rounded-xl transition-colors cursor-pointer",
+                    "group relative w-full flex min-h-[2.75rem] items-center px-3 py-2.5 text-sm rounded-xl transition-colors",
                     isActive
                       ? "bg-white shadow-sm border border-[#e5e5e5] text-gray-900 font-medium"
-                      : "text-gray-600 hover:bg-gray-100/80 border border-transparent"
+                      : "text-gray-600 hover:bg-gray-100/80 border border-transparent",
+                    isGenerating ? "cursor-default" : "cursor-pointer"
                   )}
-                  onClick={() => onSelect(c.id)}
+                  onClick={isGenerating ? undefined : () => onSelect(c.id)}
+                  role={isGenerating ? "presentation" : undefined}
                 >
-                  <span className="truncate pr-6">{c.title}</span>
-                  {onDelete && (
+                  <div className="flex min-w-0 flex-1 items-center pr-6">
+                    {isGenerating ? (
+                      <div className="skeleton-text-shimmer h-4 w-3/4 rounded-md" />
+                    ) : isActive ? (
+                      <span
+                        key={c.title || "empty"}
+                        className="block min-w-0 truncate font-medium sidebar-conv-title-sweep"
+                      >
+                        {c.title || "新会话"}
+                      </span>
+                    ) : (
+                      <span className="block min-w-0 truncate">
+                        {c.title || "新会话"}
+                      </span>
+                    )}
+                  </div>
+                  {onDelete && !isGenerating && (
                     <button
                       type="button"
                       onClick={(e) => {
