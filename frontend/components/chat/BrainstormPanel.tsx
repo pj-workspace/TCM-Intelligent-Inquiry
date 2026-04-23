@@ -12,6 +12,8 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { displayToolNameZh } from "@/lib/tool-labels";
+
 export type BrainstormStep =
   | {
       id: string;
@@ -59,6 +61,15 @@ function getEdgeFadeState(el: HTMLDivElement | null): EdgeFadeState {
   };
 }
 
+/** outputPreview 截取第一行，去掉 [N] 前缀，最多 90 字符 */
+function firstLinePreview(raw: string): string {
+  const firstLine = raw.split("\n")[0] ?? "";
+  // 去掉 "[1] [engine] " 或 "[1]" 前缀
+  const cleaned = firstLine.replace(/^\[\d+\](\s*\[[^\]]*\])?\s*/, "").trim();
+  const src = cleaned || firstLine.trim();
+  return src.length > 90 ? src.slice(0, 89) + "…" : src;
+}
+
 export function BrainstormPanel({
   steps,
   isStreaming,
@@ -85,7 +96,6 @@ export function BrainstormPanel({
   const [collapsedThinkingIds, setCollapsedThinkingIds] = useState<
     Record<string, boolean>
   >({});
-  /** 工具步骤：点击工具框展开入参/返回，按 step.id 记录 */
   const [toolIoExpanded, setToolIoExpanded] = useState<Record<string, boolean>>({});
 
   const toggleToolIo = useCallback((stepId: string) => {
@@ -95,16 +105,21 @@ export function BrainstormPanel({
   const isThinkingCollapsed = useCallback((id: string) => {
     return collapsedThinkingIds[id] ?? true;
   }, [collapsedThinkingIds]);
-  const finishedThinkingCount = useMemo(
-    () =>
-      steps.filter(
-        (step) => step.type === "thinking" && typeof step.durationSec === "number"
-      ).length,
+
+  const toolCount = useMemo(
+    () => steps.filter((s) => s.type === "tool").length,
     [steps]
   );
 
   const title = isStreaming ? "头脑风暴中" : "头脑风暴";
   const isOpen = !collapsed;
+
+  const subtitle = useMemo(() => {
+    if (isStreaming) return "";
+    if (toolCount > 0) return `调用了 ${toolCount} 个工具`;
+    return `共 ${steps.length} 个阶段`;
+  }, [isStreaming, toolCount, steps.length]);
+
   const activeThinkingStep = useMemo(() => {
     for (let i = steps.length - 1; i >= 0; i--) {
       const step = steps[i];
@@ -161,7 +176,6 @@ export function BrainstormPanel({
     });
   }, []);
 
-  /** 用户展开头脑风暴时：所有思考先收起；若仍在流式输出，则只展开当前进行中的那一段 */
   useEffect(() => {
     const wasCollapsed = prevPanelCollapsedRef.current;
     prevPanelCollapsedRef.current = collapsed;
@@ -187,7 +201,6 @@ export function BrainstormPanel({
     });
   }, [collapsed, steps, isStreaming]);
 
-  /** 某段思考刚结束（首次出现 duration）时自动收起正文，避免与用户手动展开打架 */
   useEffect(() => {
     for (const s of steps) {
       if (s.type !== "thinking" || s.durationSec == null) continue;
@@ -199,7 +212,6 @@ export function BrainstormPanel({
     }
   }, [steps]);
 
-  /** 流式进行中：新开始的一段思考自动展开正文，便于跟随输出 */
   useEffect(() => {
     const id = activeThinkingStep?.id ?? null;
     if (!isOpen || !isStreaming || !id) {
@@ -277,6 +289,8 @@ export function BrainstormPanel({
   return (
     <div className="flex gap-4 w-full max-w-3xl mx-auto py-2 px-4 md:px-0 justify-start">
       <div className="max-w-[85%] w-full rounded-2xl border border-[#ece9e3] bg-[#fbfaf7] shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+
+        {/* ── 头部 ─────────────────────────────────────── */}
         <button
           type="button"
           onClick={onToggle}
@@ -309,21 +323,22 @@ export function BrainstormPanel({
               <span className="block truncate text-[13px] font-medium text-gray-700">
                 {title}
               </span>
-              {!isStreaming && (
-                <span className="block truncate text-xs text-gray-500">
-                  {`共 ${steps.length} 个阶段${
-                    finishedThinkingCount > 0
-                      ? `，${finishedThinkingCount} 段思考`
-                      : ""
-                  }`}
+              {subtitle && (
+                <span className="block truncate text-[11px] text-gray-400">
+                  {subtitle}
                 </span>
               )}
             </span>
           </span>
 
+          {/* 总耗时 */}
           <span className="relative z-0 shrink-0 text-right">
-            <span className="block text-[13px] font-medium tabular-nums text-gray-700">
-              {durationSec != null ? formatDurationSec(durationSec) : isStreaming ? "..." : ""}
+            <span className="block text-[13px] font-medium tabular-nums text-gray-600">
+              {durationSec != null
+                ? formatDurationSec(durationSec)
+                : isStreaming
+                ? "..."
+                : ""}
             </span>
             <span className="block text-[11px] text-gray-400">
               {isStreaming ? "进行中" : durationSec != null ? "总耗时" : ""}
@@ -337,6 +352,7 @@ export function BrainstormPanel({
           )}
         </button>
 
+        {/* ── 展开内容 ────────────────────────────────── */}
         <AnimatePresence initial={false}>
           {isOpen && (
             <motion.div
@@ -352,215 +368,231 @@ export function BrainstormPanel({
                   onScroll={updateBrainstormScrollState}
                   className="brainstorm-scroll-area no-scrollbar max-h-[min(28rem,58vh)] overflow-y-auto overscroll-contain px-4 pb-4 pr-3 [scrollbar-width:none] [-ms-overflow-style:none]"
                 >
-                  <div className="relative pl-5">
+                  {/* 步骤列表 */}
+                  <div className="relative flex flex-col pl-5">
+                    {/* 时间轴竖线 */}
                     <span
                       aria-hidden
-                      className="pointer-events-none absolute left-[0.55rem] top-1 bottom-1 w-px rounded-full bg-gradient-to-b from-[#f1ebe1] via-[#e6ddd0] to-[#f3ede5] opacity-70"
+                      className="pointer-events-none absolute left-[0.55rem] top-1 bottom-1 w-px rounded-full bg-gradient-to-b from-[#f1ebe1] via-[#e6ddd0] to-[#f3ede5] opacity-60"
                     />
-                    <div className="space-y-3">
-                  {steps.map((step) =>
-                    step.type === "thinking" ? (
-                      <div key={step.id} className="relative pl-4 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCollapsedThinkingIds((prev) => {
-                              const cur = prev[step.id] ?? true;
-                              return { ...prev, [step.id]: !cur };
-                            })
-                          }
-                          className={clsx(
-                            "relative isolate flex w-full cursor-pointer items-center justify-between gap-3 overflow-hidden rounded-xl px-2 py-1 text-left transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200",
-                            step.durationSec == null &&
-                              isThinkingCollapsed(step.id) &&
-                              "bg-white/40"
-                          )}
-                          aria-expanded={!isThinkingCollapsed(step.id)}
-                        >
-                          <span className="relative z-0 flex min-w-0 items-center gap-2">
-                            <motion.span
-                              animate={{
-                                rotate: isThinkingCollapsed(step.id) ? -90 : 0,
-                              }}
-                              transition={{ duration: 0.18, ease: "easeInOut" }}
-                              className="shrink-0 text-gray-400"
-                            >
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            </motion.span>
-                            <span className="text-[12px] font-medium text-gray-500">
-                              {step.durationSec != null ? "思考过程" : "思考中..."}
-                            </span>
-                          </span>
-                          <span className="relative z-0 text-[12px] tabular-nums text-gray-400">
-                            {step.durationSec != null
-                              ? formatDurationSec(step.durationSec)
-                              : ""}
-                          </span>
-                          {step.durationSec == null &&
-                            isThinkingCollapsed(step.id) && (
-                              <span
-                                aria-hidden
-                                className="thinking-shimmer-sweep pointer-events-none absolute inset-0 z-[1] rounded-xl mix-blend-soft-light"
-                              />
+
+                    {steps.map((step, idx) => {
+                      const isFirst = idx === 0;
+                      if (step.type === "thinking") {
+                        /* ── 推理行：辅助注释风格 ── */
+                        const active = step.durationSec == null;
+                        const tCollapsed = isThinkingCollapsed(step.id);
+                        return (
+                          <div
+                            key={step.id}
+                            className={clsx(
+                              "relative pl-3",
+                              isFirst ? "mt-2" : "mt-1"
                             )}
-                        </button>
-                        <AnimatePresence initial={false}>
-                          {!isThinkingCollapsed(step.id) && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.22, ease: "easeInOut" }}
-                              className="overflow-hidden"
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCollapsedThinkingIds((prev) => ({
+                                  ...prev,
+                                  [step.id]: !(prev[step.id] ?? true),
+                                }))
+                              }
+                              className="relative flex w-full cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-left hover:bg-black/[0.04] focus-visible:outline-none"
+                              aria-expanded={!tCollapsed}
                             >
-                              <div className="scroll-fade-shell relative mt-1">
-                                <div
-                                  ref={(el) => {
-                                    thinkingScrollRefs.current[step.id] = el;
-                                  }}
-                                  onScroll={() => updateThinkingScrollState(step.id)}
-                                  className="thinking-scroll-area no-scrollbar max-h-[min(10rem,24vh)] overflow-y-auto overscroll-contain rounded-xl bg-transparent px-3 py-2.5 [scrollbar-width:none] [-ms-overflow-style:none]"
+                              <motion.span
+                                animate={{ rotate: tCollapsed ? -90 : 0 }}
+                                transition={{ duration: 0.16, ease: "easeInOut" }}
+                                className="shrink-0"
+                              >
+                                <ChevronDown className="h-3 w-3 text-gray-300" />
+                              </motion.span>
+                              <span
+                                className={clsx(
+                                  "text-[11px]",
+                                  active ? "text-gray-400" : "text-gray-400/80"
+                                )}
+                              >
+                                {active ? "推理中…" : "推理过程"}
+                              </span>
+                              {active && tCollapsed && (
+                                <span
+                                  aria-hidden
+                                  className="thinking-shimmer-sweep pointer-events-none absolute inset-0 z-[1] rounded-md mix-blend-soft-light"
+                                />
+                              )}
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                              {!tCollapsed && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                                  className="overflow-hidden"
                                 >
-                                  <div className="relative pl-4">
+                                  <div className="scroll-fade-shell relative mt-1 ml-1">
+                                    <div
+                                      ref={(el) => {
+                                        thinkingScrollRefs.current[step.id] = el;
+                                      }}
+                                      onScroll={() =>
+                                        updateThinkingScrollState(step.id)
+                                      }
+                                      className="thinking-scroll-area no-scrollbar max-h-[min(10rem,24vh)] overflow-y-auto overscroll-contain rounded-xl bg-transparent px-3 py-2.5 [scrollbar-width:none] [-ms-overflow-style:none]"
+                                    >
+                                      <div className="relative pl-3.5">
+                                        <span
+                                          aria-hidden
+                                          className="absolute left-0 top-0 bottom-0 w-px rounded-full bg-gradient-to-b from-[#e7dfd3] via-[#d7cebf] to-[#ece5da]"
+                                        />
+                                        <p className="whitespace-pre-wrap text-[13px] italic leading-relaxed text-gray-500">
+                                          {step.content}
+                                          {active && (
+                                            <span className="ml-1 inline-block h-3.5 w-1 animate-pulse bg-gray-400 align-middle" />
+                                          )}
+                                        </p>
+                                      </div>
+                                    </div>
                                     <span
                                       aria-hidden
-                                      className="absolute left-0 top-0 bottom-0 w-px rounded-full bg-gradient-to-b from-[#e7dfd3] via-[#d7cebf] to-[#ece5da]"
-                                    />
-                                    <p className="whitespace-pre-wrap text-[14px] italic leading-relaxed text-gray-600">
-                                      {step.content}
-                                      {step.durationSec == null && (
-                                        <span className="ml-1 inline-block h-4 w-1.5 animate-pulse bg-gray-400 align-middle" />
+                                      className={clsx(
+                                        "scroll-fade-top",
+                                        thinkingEdgeFades[step.id]?.top &&
+                                          "is-visible"
                                       )}
-                                    </p>
+                                    />
+                                    <span
+                                      aria-hidden
+                                      className={clsx(
+                                        "scroll-fade-bottom",
+                                        thinkingEdgeFades[step.id]?.bottom &&
+                                          "is-visible"
+                                      )}
+                                    />
                                   </div>
-                                </div>
-                                <span
-                                  aria-hidden
-                                  className={clsx(
-                                    "scroll-fade-top",
-                                    thinkingEdgeFades[step.id]?.top && "is-visible"
-                                  )}
-                                />
-                                <span
-                                  aria-hidden
-                                  className={clsx(
-                                    "scroll-fade-bottom",
-                                    thinkingEdgeFades[step.id]?.bottom && "is-visible"
-                                  )}
-                                />
-                              </div>
-                            </motion.div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      }
+
+                      /* ── 工具行：主角卡片 ── */
+                      const hasIo = !!(step.inputPreview || step.outputPreview);
+                      const expanded = !!toolIoExpanded[step.id];
+                      const preview =
+                        step.outputPreview && !expanded
+                          ? firstLinePreview(step.outputPreview)
+                          : null;
+
+                      const cardClass = clsx(
+                        "flex w-full min-w-0 items-center justify-start gap-2 rounded-xl border px-3 py-2 text-[12.5px] transition-colors",
+                        step.status === "running"
+                          ? "border-orange-200 bg-white/90 text-gray-700 shadow-[0_0_0_1px_rgba(251,146,60,0.10)]"
+                          : step.status === "success"
+                          ? "border-[#e8e8e5] bg-white/70 text-gray-600"
+                          : "border-red-100 bg-red-50/70 text-red-600",
+                        hasIo &&
+                          "cursor-pointer hover:border-gray-300 hover:bg-white"
+                      );
+
+                      const titleZh = displayToolNameZh(step.toolName);
+                      const cardInner = (
+                        <>
+                          {step.status === "running" ? (
+                            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-orange-400" />
+                          ) : step.status === "success" ? (
+                            <Check className="h-3.5 w-3.5 shrink-0 text-green-500" />
+                          ) : (
+                            <Wrench className="h-3.5 w-3.5 shrink-0 text-red-400" />
                           )}
-                        </AnimatePresence>
-                      </div>
-                    ) : (
-                      <div key={step.id} className="relative pl-4 pt-0.5">
-                        {(() => {
-                          const hasIo = !!(
-                            step.inputPreview || step.outputPreview
-                          );
-                          const expanded = !!toolIoExpanded[step.id];
-                          const rowClass = clsx(
-                            "flex w-full min-w-0 items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-[13px] transition-colors",
-                            step.status === "running"
-                              ? "border-orange-200 bg-white text-gray-700 shadow-[0_0_0_1px_rgba(251,146,60,0.12)]"
-                              : step.status === "success"
-                              ? "border-[#e5e5e5] bg-white text-gray-600"
-                              : "border-red-100 bg-red-50 text-red-600",
-                            hasIo &&
-                              "cursor-pointer hover:border-gray-300 hover:bg-gray-50/90"
-                          );
-                          const rowInner = (
-                            <>
-                              {step.status === "running" ? (
-                                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-orange-500" />
-                              ) : step.status === "success" ? (
-                                <Check className="h-4 w-4 shrink-0 text-green-500" />
-                              ) : (
-                                <Wrench className="h-4 w-4 shrink-0 text-red-500" />
+                          <span className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-gray-700">
+                            {titleZh}
+                          </span>
+                          {hasIo ? (
+                            <ChevronDown
+                              aria-hidden
+                              className={clsx(
+                                "ml-auto h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform duration-200",
+                                expanded && "rotate-180"
                               )}
-                              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                                <span>
-                                  {step.status === "running"
-                                    ? "调用工具中"
-                                    : step.status === "success"
-                                    ? "工具调用成功"
-                                    : "工具调用失败"}
-                                </span>
-                                <span className="text-gray-300">·</span>
-                                <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-600">
-                                  {step.toolName}
-                                </span>
-                              </span>
-                              {hasIo ? (
-                                <ChevronDown
-                                  aria-hidden
-                                  className={clsx(
-                                    "h-4 w-4 shrink-0 text-gray-400 transition-transform duration-200",
-                                    expanded && "rotate-180"
-                                  )}
-                                />
-                              ) : null}
-                            </>
-                          );
-                          return (
-                            <>
-                              {hasIo ? (
-                                <button
-                                  type="button"
-                                  className={rowClass}
-                                  aria-expanded={expanded}
-                                  onClick={() => toggleToolIo(step.id)}
-                                >
-                                  {rowInner}
-                                </button>
-                              ) : (
-                                <div className={rowClass}>{rowInner}</div>
-                              )}
-                              <AnimatePresence initial={false}>
-                                {hasIo && expanded && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: "auto", opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{
-                                      duration: 0.22,
-                                      ease: "easeInOut",
-                                    }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="mt-2 max-h-56 space-y-2 overflow-y-auto overscroll-contain rounded-lg border border-gray-100 bg-[#fafaf8] px-3 py-2.5 text-left text-[12px] text-gray-600">
-                                      {step.inputPreview ? (
-                                        <div>
-                                          <div className="mb-0.5 font-medium text-gray-500">
-                                            入参
-                                          </div>
-                                          <pre className="whitespace-pre-wrap break-words rounded-md bg-white/80 p-2 font-mono text-[11px] leading-relaxed text-gray-700 ring-1 ring-gray-100">
-                                            {step.inputPreview}
-                                          </pre>
-                                        </div>
-                                      ) : null}
-                                      {step.outputPreview ? (
-                                        <div>
-                                          <div className="mb-0.5 font-medium text-gray-500">
-                                            返回
-                                          </div>
-                                          <pre className="whitespace-pre-wrap break-words rounded-md bg-white/80 p-2 font-mono text-[11px] leading-relaxed text-gray-700 ring-1 ring-gray-100">
-                                            {step.outputPreview}
-                                          </pre>
-                                        </div>
-                                      ) : null}
+                            />
+                          ) : null}
+                        </>
+                      );
+
+                      return (
+                        <div
+                          key={step.id}
+                          className={clsx(
+                            "relative pl-3",
+                            isFirst ? "mt-2" : "mt-2.5"
+                          )}
+                        >
+                          {hasIo ? (
+                            <button
+                              type="button"
+                              className={cardClass}
+                              aria-expanded={expanded}
+                              title={step.toolName}
+                              onClick={() => toggleToolIo(step.id)}
+                            >
+                              {cardInner}
+                            </button>
+                          ) : (
+                            <div className={cardClass} title={step.toolName}>
+                              {cardInner}
+                            </div>
+                          )}
+
+                          {/* 结果首行预览：不展开时始终可见 */}
+                          {preview && (
+                            <p className="mt-1 truncate px-1 text-[11px] italic leading-snug text-gray-400">
+                              {preview}
+                            </p>
+                          )}
+
+                          {/* 展开详情 */}
+                          <AnimatePresence initial={false}>
+                            {hasIo && expanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.22, ease: "easeInOut" }}
+                                className="overflow-hidden"
+                              >
+                                <div className="mt-2 max-h-56 space-y-2 overflow-y-auto overscroll-contain rounded-lg border border-gray-100 bg-[#fafaf8] px-3 py-2.5 text-[12px] text-gray-600">
+                                  {step.inputPreview ? (
+                                    <div>
+                                      <div className="mb-0.5 text-[11px] font-medium text-gray-400">
+                                        入参
+                                      </div>
+                                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white/80 p-2 font-mono text-[11px] leading-relaxed text-gray-700 ring-1 ring-gray-100">
+                                        {step.inputPreview}
+                                      </pre>
                                     </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    )
-                  )}
-                    </div>
+                                  ) : null}
+                                  {step.outputPreview ? (
+                                    <div>
+                                      <div className="mb-0.5 text-[11px] font-medium text-gray-400">
+                                        返回
+                                      </div>
+                                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white/80 p-2 font-mono text-[11px] leading-relaxed text-gray-700 ring-1 ring-gray-100">
+                                        {step.outputPreview}
+                                      </pre>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
                 <span

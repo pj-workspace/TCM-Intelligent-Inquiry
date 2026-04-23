@@ -531,6 +531,7 @@ export default function Home() {
           message: userText,
           conversation_id: conversationId,
           regenerate_last_reply: opts?.regenerateLastReply ?? false,
+          agent_id: localStorage.getItem("tcm_default_agent_id") ?? undefined,
         }),
       });
 

@@ -154,13 +154,13 @@ export function Sidebar({
             登录 / 注册
           </Link>
         ) : null}
-        <button
-          type="button"
+        <Link
+          href="/settings"
           className="w-full flex items-center gap-3 px-2 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md transition-colors text-left"
         >
           <Settings className="w-4 h-4 text-gray-500" />
           <span>设置</span>
-        </button>
+        </Link>
       </div>
     </div>
   );
