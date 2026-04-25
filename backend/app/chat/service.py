@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import ConversationRecord, MessageRecord
 from app.chat.schemas import ChatMessage
-from app.core.chat_context import chat_user_id
+from app.core.chat_context import chat_agent_kb_id, chat_user_id
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.config import active_chat_model_label
@@ -253,6 +253,7 @@ async def stream_chat(
         return
 
     ctx_token = chat_user_id.set(user_id)
+    kb_ctx_token: object | None = None
     conv_id: str | None = conversation_id
     effective_agent_id = agent_id
     is_new_conversation = False
@@ -358,6 +359,16 @@ async def stream_chat(
         if anon_sec:
             meta_out["anonSessionSecret"] = anon_sec
         yield _sse(meta_out)
+
+        agent_kb_id: str | None = None
+        if effective_agent_id:
+            from app.agent.models import AgentRecord
+
+            async with async_session_factory() as session:
+                arow = await session.get(AgentRecord, effective_agent_id)
+                if arow is not None and getattr(arow, "default_kb_id", None):
+                    agent_kb_id = str(arow.default_kb_id).strip() or None
+        kb_ctx_token = chat_agent_kb_id.set(agent_kb_id)
 
         graph = await build_agent_graph(effective_agent_id)
 
@@ -557,4 +568,6 @@ async def stream_chat(
         yield _sse({"type": "error", "message": str(exc)})
         yield "data: [DONE]\n\n"
     finally:
+        if kb_ctx_token is not None:
+            chat_agent_kb_id.reset(kb_ctx_token)
         chat_user_id.reset(ctx_token)

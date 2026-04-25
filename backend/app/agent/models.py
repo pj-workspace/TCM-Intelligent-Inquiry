@@ -17,3 +17,5 @@ class AgentRecord(Base):
     # 启用的工具名列表；空列表表示使用注册表中的全部工具
     tool_names: Mapped[list[str]] = mapped_column(JSON, default=list)
     system_prompt: Mapped[str] = mapped_column(Text, default="")
+    # 对话时 search_tcm_knowledge 未显式传 kb_id 时优先使用的知识库（须为用户自有库）
+    default_kb_id: Mapped[str | None] = mapped_column(String(36), nullable=True, default=None)

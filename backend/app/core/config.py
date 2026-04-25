@@ -187,10 +187,10 @@ class Settings(BaseSettings):
         description="SearXNG 根 URL；设为空字符串可禁用联网检索请求",
     )
     searxng_timeout_seconds: float = Field(
-        default=20.0,
+        default=10.0,
         ge=3.0,
         le=120.0,
-        description="调用 SearXNG /search 的超时（秒）",
+        description="调用 SearXNG /search 的超时（秒），宜与容器内 outgoing.request_timeout 同量级以免久等",
     )
 
     # ── 服务 ──────────────────────────────────────────────────────────────────

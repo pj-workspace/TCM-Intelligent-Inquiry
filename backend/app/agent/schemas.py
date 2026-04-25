@@ -8,6 +8,9 @@ class AgentCreateRequest(BaseModel):
     description: str = Field(default="", description="Agent 用途说明")
     system_prompt: str = Field(default="", description="自定义系统提示（空则使用默认）")
     tool_names: list[str] = Field(default_factory=list, description="启用的工具名列表")
+    default_kb_id: str | None = Field(
+        default=None, description="默认知识库 ID（search_tcm_knowledge 未传 kb_id 时使用）"
+    )
 
 
 class AgentUpdateRequest(BaseModel):
@@ -17,6 +20,7 @@ class AgentUpdateRequest(BaseModel):
     description: str | None = None
     system_prompt: str | None = None
     tool_names: list[str] | None = None
+    default_kb_id: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -25,6 +29,7 @@ class AgentResponse(BaseModel):
     description: str
     tool_names: list[str]
     system_prompt: str = ""
+    default_kb_id: str | None = None
 
 
 class AgentListResponse(BaseModel):

@@ -37,10 +37,10 @@ async def list_agents(
 @router.post("", response_model=AgentResponse, summary="创建 Agent")
 async def create_agent(
     req: AgentCreateRequest,
-    _: Annotated[UserRecord, Depends(require_api_user)],
+    user: Annotated[UserRecord, Depends(require_api_user)],
     svc: AgentService = Depends(_svc),
 ):
-    return await svc.create_agent(req)
+    return await svc.create_agent(req, user.id)
 
 
 @router.get("/tools", summary="列出所有可用工具")
@@ -64,10 +64,10 @@ async def get_agent(
 async def update_agent(
     agent_id: str,
     req: AgentUpdateRequest,
-    _: Annotated[UserRecord, Depends(require_api_user)],
+    user: Annotated[UserRecord, Depends(require_api_user)],
     svc: AgentService = Depends(_svc),
 ):
-    return await svc.update_agent(agent_id, req)
+    return await svc.update_agent(agent_id, req, user.id)
 
 
 @router.delete("/{agent_id}", status_code=204, summary="删除 Agent")

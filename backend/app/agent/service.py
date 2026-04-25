@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import AgentRecord
+from app.knowledge.models import KnowledgeBaseRecord
 from app.agent.schemas import (
     AgentCreateRequest,
     AgentListResponse,
@@ -29,7 +30,14 @@ def _to_response(row: AgentRecord) -> AgentResponse:
         description=row.description or "",
         tool_names=[str(x) for x in names],
         system_prompt=row.system_prompt or "",
+        default_kb_id=getattr(row, "default_kb_id", None),
     )
+
+
+async def _ensure_kb_owned_by_user(session: AsyncSession, kb_id: str, user_id: str) -> None:
+    row = await session.get(KnowledgeBaseRecord, kb_id)
+    if row is None or row.owner_id != user_id:
+        raise ValidationError("知识库不存在或不属于当前用户，无法绑定为默认知识库。")
 
 
 class AgentService:
@@ -47,16 +55,19 @@ class AgentService:
             raise NotFoundError(f"Agent '{agent_id}' 不存在")
         return _to_response(row)
 
-    async def create_agent(self, req: AgentCreateRequest) -> AgentResponse:
+    async def create_agent(self, req: AgentCreateRequest, user_id: str) -> AgentResponse:
         ensure_tools_loaded()
         available = set(tool_registry.names())
         names = req.tool_names or []
         if names:
             unknown = [n for n in names if n not in available]
             if unknown:
-                from app.core.exceptions import ValidationError
-
                 raise ValidationError(f"未知工具: {unknown}，可用工具: {sorted(available)}")
+
+        dk: str | None = None
+        if req.default_kb_id and str(req.default_kb_id).strip():
+            dk = str(req.default_kb_id).strip()
+            await _ensure_kb_owned_by_user(self._session, dk, user_id)
 
         agent_id = str(uuid.uuid4())
         tool_list = names if names else sorted(available)
@@ -66,19 +77,28 @@ class AgentService:
             description=req.description or "",
             tool_names=tool_list,
             system_prompt=req.system_prompt or "",
+            default_kb_id=dk,
         )
         self._session.add(row)
         await self._session.flush()
         logger.info("创建 Agent id=%s name=%s tools=%s", agent_id, req.name, tool_list)
         return _to_response(row)
 
-    async def update_agent(self, agent_id: str, req: AgentUpdateRequest) -> AgentResponse:
+    async def update_agent(self, agent_id: str, req: AgentUpdateRequest, user_id: str) -> AgentResponse:
         row = await self._session.get(AgentRecord, agent_id)
         if row is None:
             raise NotFoundError(f"Agent '{agent_id}' 不存在")
         patch = req.model_dump(exclude_unset=True)
         if not patch:
             raise ValidationError("至少提供一个要更新的字段")
+        if "default_kb_id" in patch:
+            kid = patch["default_kb_id"]
+            if kid is None or (isinstance(kid, str) and not kid.strip()):
+                row.default_kb_id = None
+            else:
+                dk = str(kid).strip()
+                await _ensure_kb_owned_by_user(self._session, dk, user_id)
+                row.default_kb_id = dk
         if "tool_names" in patch:
             ensure_tools_loaded()
             available = set(tool_registry.names())
@@ -105,7 +125,7 @@ class AgentService:
         row = await self._session.get(AgentRecord, agent_id)
         if row is None:
             raise NotFoundError(f"Agent '{agent_id}' 不存在")
-        self._session.delete(row)
+        await self._session.delete(row)
         invalidate_agent_graph_cache(agent_id)
         logger.info("删除 Agent id=%s", agent_id)
 

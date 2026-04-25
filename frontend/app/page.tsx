@@ -613,7 +613,7 @@ export default function Home() {
                           steps: [{ id: nid, type: "thinking", content: piece }],
                           status: "streaming",
                           totalDurationSec: undefined,
-                          collapsed: true,
+                          collapsed: false,
                         },
                       ];
                     }
@@ -681,7 +681,7 @@ export default function Home() {
                         steps: [toolStep],
                         status: "streaming",
                         totalDurationSec: undefined,
-                        collapsed: true,
+                        collapsed: false,
                       },
                     ];
                   }

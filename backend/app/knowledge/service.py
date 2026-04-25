@@ -82,7 +82,7 @@ class KnowledgeService:
         if row is None or row.owner_id != owner_id:
             raise NotFoundError(f"知识库 '{kb_id}' 不存在")
         await delete_kb_vectors(kb_id)
-        self._session.delete(row)
+        await self._session.delete(row)
         logger.info("删除知识库 id=%s", kb_id)
 
     async def ingest_file(

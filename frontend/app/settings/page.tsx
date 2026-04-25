@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
-import { ArrowLeft, Box, Plug, Bot } from "lucide-react";
+import { ArrowLeft, Box, Plug, Bot, Database } from "lucide-react";
 import { BuiltinToolsTab } from "@/components/settings/BuiltinToolsTab";
 import { McpTab } from "@/components/settings/McpTab";
 import { AgentsTab } from "@/components/settings/AgentsTab";
+import { KnowledgeTab } from "@/components/settings/KnowledgeTab";
 
-type TabId = "builtin" | "mcp" | "agents";
+type TabId = "builtin" | "mcp" | "knowledge" | "agents";
 
 export default function SettingsPage() {
   const { loading, token } = useAuth();
@@ -72,6 +73,17 @@ export default function SettingsPage() {
               MCP 服务
             </button>
             <button
+              onClick={() => setActiveTab("knowledge")}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                activeTab === "knowledge"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <Database className="h-4 w-4" />
+              知识库
+            </button>
+            <button
               onClick={() => setActiveTab("agents")}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                 activeTab === "agents"
@@ -90,6 +102,7 @@ export default function SettingsPage() {
           <div className="mx-auto max-w-4xl">
             {activeTab === "builtin" && <BuiltinToolsTab />}
             {activeTab === "mcp" && <McpTab />}
+            {activeTab === "knowledge" && <KnowledgeTab />}
             {activeTab === "agents" && <AgentsTab />}
           </div>
         </main>

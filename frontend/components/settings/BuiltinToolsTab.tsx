@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, apiHeaders } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { TOOL_LABEL_ZH } from "@/lib/tool-labels";
 import { Box, CheckCircle2 } from "lucide-react";
@@ -19,7 +19,7 @@ export function BuiltinToolsTab() {
     const fetchTools = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/agents/tools`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: apiHeaders(token),
         });
         if (!res.ok) throw new Error("获取工具列表失败");
         const data = await res.json();

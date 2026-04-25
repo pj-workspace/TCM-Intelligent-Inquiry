@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { Plus, Trash2, RefreshCw, Plug, ChevronDown, Check } from "lucide-react";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 type McpServer = {
@@ -46,9 +47,9 @@ export function McpTab() {
     if (!token) return;
     try {
       const res = await fetch(`${API_BASE}/api/mcp`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: apiHeaders(token),
       });
-      if (!res.ok) throw new Error("获取 MCP 服务失败");
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
       setServers(data.servers || []);
     } catch (err) {
@@ -70,10 +71,7 @@ export function McpTab() {
     try {
       const res = await fetch(`${API_BASE}/api/mcp`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: apiJsonHeaders(token),
         body: JSON.stringify({
           name: formData.name.trim(),
           url: formData.url.trim(),
@@ -83,15 +81,15 @@ export function McpTab() {
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || "添加失败");
+        throw new Error(await parseApiError(res));
       }
 
       await fetchServers();
       setShowAddForm(false);
       setFormData({ name: "", url: "", description: "" });
+      toast.success("MCP 服务已添加");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "添加失败");
+      toast.error(err instanceof Error ? err.message : "添加失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -103,15 +101,15 @@ export function McpTab() {
     try {
       const res = await fetch(`${API_BASE}/api/mcp/${id}/refresh`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: apiHeaders(token),
       });
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || "刷新失败");
+        throw new Error(await parseApiError(res));
       }
       await fetchServers();
+      toast.success("已重新探测并刷新");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "刷新失败");
+      toast.error(err instanceof Error ? err.message : "刷新失败");
     } finally {
       setRefreshingId(null);
     }
@@ -123,16 +121,16 @@ export function McpTab() {
     try {
       const res = await fetch(`${API_BASE}/api/mcp/${deleteId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: apiHeaders(token),
       });
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || "删除失败");
+        throw new Error(await parseApiError(res));
       }
       setServers((prev) => prev.filter((s) => s.id !== deleteId));
       setDeleteId(null);
+      toast.success("MCP 服务已删除");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : "删除失败");
     } finally {
       setIsDeleting(false);
     }

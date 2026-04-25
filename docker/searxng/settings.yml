@@ -13,5 +13,12 @@ search:
     - html
     - json
 
+# 单引擎出网：不宜过长，否则在断网/无 VPN 时用户要等很久才看到失败。
+# 需要更久可在本机加 SEARXNG_TIMEOUT_SECONDS 与下面一并略调大。
 outgoing:
-  request_timeout: 10.0
+  request_timeout: 8.0
+
+# 上游默认 disabled: true；国内环境可开启，与公网引擎互补
+engines:
+  - name: baidu
+    disabled: false

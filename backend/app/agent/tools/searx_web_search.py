@@ -15,11 +15,53 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _searx_diagnostics_for_llm(payload: dict[str, Any]) -> str:
+    """results 为空时，把 SearXNG 的引擎级错误写进回执，便于排查「联网搜索没结果」。"""
+    u = payload.get("unresponsive_engines")
+    lines: list[str] = []
+    if isinstance(u, list) and u:
+        for ent in u[:8]:
+            if (
+                isinstance(ent, (list, tuple))
+                and len(ent) >= 2
+                and isinstance(ent[0], str)
+            ):
+                lines.append(f"  - {ent[0]}: {ent[1]}")
+            elif isinstance(ent, str):
+                lines.append(f"  - {ent}")
+        if lines:
+            return (
+                "当前各搜索引擎未返回有效结果，引擎状态：\n"
+                + "\n".join(lines)
+                + "\n\n常见原因：出网被拦、DNS/代理、或目标站点限流/超时。可调大 "
+                "SearXNG 的 `outgoing.request_timeout`、检查 Docker 出网、换网络后重试。"
+            )
+
+    n = payload.get("number_of_results")
+    if (
+        isinstance(n, (int, float))
+        and n == 0
+        and not (isinstance(u, list) and u)
+    ):
+        return (
+            "SearXNG 报告 0 条命中。请确认 `SEARXNG_URL` 指向可用实例、"
+            "SearXNG 容器到公网是否畅通，以及 `search.formats` 含 `json`。"
+        )
+    return (
+        "常见原因：本机/ Docker 到公网出站受限、目标站点限流/超时。"
+        "可尝试调大 `docker/searxng/settings.yml` 的 `outgoing.request_timeout` 后执行 "
+        "`docker compose restart searxng`，或检查代理/换网络环境。"
+    )
+
+
 def format_searx_results_for_llm(payload: dict[str, Any], max_results: int) -> str:
     """将 SearXNG JSON 中的 results 转为模型可读文本（单测可直调）。"""
     rows = payload.get("results")
     if not isinstance(rows, list) or not rows:
-        return "SearXNG 未返回任何结果条目（results 为空）。"
+        return (
+            "SearXNG 未返回任何结果条目（results 为空）。\n"
+            + _searx_diagnostics_for_llm(payload)
+        )
 
     lines: list[str] = []
     n_shown = 0
@@ -62,6 +104,9 @@ async def run_searx_web_search(
 
     lang = (language or "zh").strip() or "zh"
     params = {"q": q, "format": "json", "language": lang}
+    # 中文默认只调百度引擎，国内网络通常可达，且避免境外引擎全超时导致久等无结果
+    if lang.lower().startswith("zh"):
+        params["engines"] = "baidu"
     timeout = httpx.Timeout(s.searxng_timeout_seconds)
 
     try:
@@ -95,12 +140,12 @@ async def run_searx_web_search(
 
 @tool_registry.register
 @tool
-async def searx_web_search(query: str, max_results: int = 5, language: str = "zh") -> str:
+async def searx_web_search(query: str, max_results: int = 10, language: str = "zh") -> str:
     """使用自托管 SearXNG 检索公网网页摘要（元搜索，非中医知识库）。
 
     参数：
     - query: 检索关键词或短语。
-    - max_results: 返回条数上限，默认 5，最大 15。
-    - language: 搜索语言偏好（如 zh、en），默认 zh。
+    - max_results: 返回条数上限，默认 10，最大 20。
+    - language: 搜索语言偏好（如 zh、en），默认 zh；为中文时请求会优先使用 SearXNG 的百度引擎（须在 settings 中启用）。
     """
     return await run_searx_web_search(query, max_results=max_results, language=language)

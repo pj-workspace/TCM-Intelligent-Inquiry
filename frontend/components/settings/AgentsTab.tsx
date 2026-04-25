@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { API_BASE } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { Plus, Edit2, Trash2, Bot, Star, Save, X } from "lucide-react";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Select } from "@/components/ui/Select";
 import { displayToolNameZh } from "@/lib/tool-labels";
 
 type Agent = {
@@ -13,12 +15,16 @@ type Agent = {
   description: string;
   system_prompt: string;
   tool_names: string[];
+  default_kb_id?: string | null;
 };
+
+type KnowledgeBaseLite = { id: string; name: string };
 
 export function AgentsTab() {
   const { token } = useAuth();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [availableTools, setAvailableTools] = useState<string[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,17 +42,21 @@ export function AgentsTab() {
     description: "",
     system_prompt: "",
     tool_names: [] as string[],
+    default_kb_id: "",
   });
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!token) return;
     try {
-      const [agentsRes, toolsRes] = await Promise.all([
+      const [agentsRes, toolsRes, kbRes] = await Promise.all([
         fetch(`${API_BASE}/api/agents`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: apiHeaders(token),
         }),
         fetch(`${API_BASE}/api/agents/tools`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: apiHeaders(token),
+        }),
+        fetch(`${API_BASE}/api/knowledge`, {
+          headers: apiHeaders(token),
         }),
       ]);
       if (!agentsRes.ok || !toolsRes.ok) throw new Error("获取数据失败");
@@ -56,18 +66,31 @@ export function AgentsTab() {
       ]);
       setAgents(agentsData.agents || []);
       setAvailableTools(toolsData.tools || []);
+      if (kbRes.ok) {
+        const kbJson = (await kbRes.json()) as {
+          knowledge_bases?: { id: string; name: string }[];
+        };
+        setKnowledgeBases(
+          (kbJson.knowledge_bases || []).map((k) => ({
+            id: k.id,
+            name: k.name,
+          }))
+        );
+      } else {
+        setKnowledgeBases([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     void fetchData();
     const stored = localStorage.getItem("tcm_default_agent_id");
     if (stored) setDefaultAgentId(stored);
-  }, [token]);
+  }, [token, fetchData]);
 
   const handleSetDefault = (id: string | null) => {
     if (id) {
@@ -85,6 +108,7 @@ export function AgentsTab() {
       description: "",
       system_prompt: "",
       tool_names: [],
+      default_kb_id: "",
     });
   };
 
@@ -95,6 +119,7 @@ export function AgentsTab() {
       description: agent.description,
       system_prompt: agent.system_prompt,
       tool_names: agent.tool_names,
+      default_kb_id: agent.default_kb_id?.trim() || "",
     });
   };
 
@@ -125,27 +150,25 @@ export function AgentsTab() {
     try {
       const res = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: apiJsonHeaders(token),
         body: JSON.stringify({
           name: formData.name.trim(),
           description: formData.description.trim(),
           system_prompt: formData.system_prompt.trim(),
           tool_names: formData.tool_names,
+          default_kb_id: formData.default_kb_id.trim() || null,
         }),
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || "保存失败");
+        throw new Error(await parseApiError(res));
       }
 
       await fetchData();
       setEditingId(null);
+      toast.success(isNew ? "Agent 已创建" : "已保存");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "保存失败");
+      toast.error(err instanceof Error ? err.message : "保存失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -157,17 +180,17 @@ export function AgentsTab() {
     try {
       const res = await fetch(`${API_BASE}/api/agents/${deleteId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: apiHeaders(token),
       });
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || "删除失败");
+        throw new Error(await parseApiError(res));
       }
-      setAgents((prev) => prev.filter((a) => a.id !== deleteId));
       if (defaultAgentId === deleteId) handleSetDefault(null);
       setDeleteId(null);
+      await fetchData();
+      toast.success("已删除该 Agent");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : "删除失败");
     } finally {
       setIsDeleting(false);
     }
@@ -199,7 +222,7 @@ export function AgentsTab() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Agent 管理</h2>
           <p className="mt-1 text-sm text-gray-500">
-            自定义系统提示词和绑定的工具集，创建多用途的 AI 助手。
+            自定义系统提示词、工具集与默认知识库，创建多用途的 AI 助手。
           </p>
         </div>
         {editingId === null && (
@@ -268,6 +291,29 @@ export function AgentsTab() {
                 rows={3}
                 value={formData.system_prompt}
                 onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-700">
+                默认知识库（search_tcm_knowledge 未指定 kb_id 时使用）
+              </label>
+              <Select
+                value={formData.default_kb_id}
+                onValueChange={(v) =>
+                  setFormData((prev) => ({ ...prev, default_kb_id: v }))
+                }
+                placeholder="选择默认知识库"
+                options={[
+                  {
+                    value: "",
+                    label: "不指定（按系统默认或您名下第一个知识库）",
+                  },
+                  ...knowledgeBases.map((k) => ({
+                    value: k.id,
+                    label: k.name,
+                  })),
+                ]}
               />
             </div>
 
@@ -388,6 +434,23 @@ export function AgentsTab() {
                             <span className="text-xs italic text-gray-400">无</span>
                           )}
                         </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="text-[11px] font-medium text-gray-400">默认知识库</div>
+                        <p className="mt-1 text-xs text-gray-600">
+                          {agent.default_kb_id ? (
+                            <>
+                              {knowledgeBases.find((k) => k.id === agent.default_kb_id)
+                                ?.name ?? "（未在列表中）"}{" "}
+                              <span className="font-mono text-gray-400">
+                                {agent.default_kb_id}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="italic text-gray-400">未指定</span>
+                          )}
+                        </p>
                       </div>
                     </div>
                   </div>

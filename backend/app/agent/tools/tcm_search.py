@@ -3,7 +3,7 @@
 from langchain_core.tools import tool
 
 from app.agent.tools.registry import tool_registry
-from app.core.chat_context import chat_user_id
+from app.core.chat_context import chat_agent_kb_id, chat_user_id
 from app.core.config import get_settings
 from app.core.database import async_session_factory
 from app.knowledge.models import KnowledgeBaseRecord
@@ -25,6 +25,10 @@ async def _resolve_kb_id(explicit_kb_id: str | None) -> str | None:
     uid = chat_user_id.get()
     s = get_settings()
     default_kid = s.default_knowledge_base_id.strip()
+
+    agent_kb = chat_agent_kb_id.get()
+    if agent_kb and agent_kb.strip() and not (explicit_kb_id and explicit_kb_id.strip()):
+        explicit_kb_id = agent_kb.strip()
 
     if explicit_kb_id and explicit_kb_id.strip():
         kid = explicit_kb_id.strip()
@@ -72,7 +76,7 @@ async def search_tcm_knowledge(
 
     参数：
     - query: 检索问题或关键词。
-    - kb_id: 可选，指定知识库 ID；不传则使用当前用户默认或第一个自有知识库。
+    - kb_id: 可选，指定知识库 ID；不传则优先使用当前 Agent 绑定的默认知识库，否则按环境变量/用户名下第一个自有库解析。
     - top_k: 返回片段条数，默认 5。
     """
     q = (query or "").strip()
