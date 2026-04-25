@@ -59,6 +59,13 @@ function toolIoToPreview(v: unknown): string | undefined {
   }
 }
 
+function isToolOutputFailure(output?: string): boolean {
+  if (!output) return false;
+  return /无法|失败|错误|异常|拒绝|未配置|不能为空|需要登录|没有可用|未返回任何结果|not configured|error|failed|exception/i.test(
+    output
+  );
+}
+
 function sumThinkingDurations(steps: BrainstormStep[]): number | undefined {
   const total = steps.reduce((sum, step) => {
     if (step.type !== "thinking") return sum;
@@ -123,7 +130,7 @@ function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
         id: msg.id,
         type: "tool",
         toolName: typeof payload.name === "string" && payload.name ? payload.name : "tool",
-        status: "success",
+        status: isToolOutputFailure(payload.outputPreview) ? "error" : "success",
         runId: typeof payload.runId === "string" ? payload.runId : undefined,
         inputPreview: toolIoToPreview(payload.input),
         outputPreview:
@@ -331,17 +338,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!hasStarted) return;
-    const el = scrollViewportRef.current;
-    if (el) {
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const threshold =
-        genState !== "idle"
-          ? BOTTOM_SCROLL_THRESHOLD
-          : BOTTOM_LOCK_THRESHOLD;
-      if (distance <= threshold) {
-        autoFollowMainRef.current = true;
-      }
-    }
     if (!autoFollowMainRef.current) return;
     scrollToBottom(false);
   }, [messages, genState, hasStarted, scrollToBottom]);
@@ -519,6 +515,11 @@ export default function Home() {
 
     setGenState("waiting");
     const startTime = Date.now();
+    const currentAssistantMsgId = Date.now().toString() + "-msg";
+    let currentTraceId: string | null = null;
+    let openThinkingStepId: string | null = null;
+    let toolRunStartedAt: number | null = null;
+    let hasAssistantMsg = false;
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -550,13 +551,6 @@ export default function Home() {
       let buffer = '';
 
       if (!reader) return;
-
-      const currentAssistantMsgId = Date.now().toString() + "-msg";
-      let currentTraceId: string | null = null;
-      let openThinkingStepId: string | null = null;
-      let toolRunStartedAt: number | null = null;
-
-      let hasAssistantMsg = false;
 
       const ensureCurrentTraceId = () => {
         if (currentTraceId != null) return currentTraceId;
@@ -730,13 +724,16 @@ export default function Home() {
                       );
                     }
                     if (idx === -1) return msg;
+                    const nextStatus = isToolOutputFailure(outputPreviewFromEvent)
+                      ? "error"
+                      : "success";
                     return {
                       ...msg,
                       steps: msg.steps.map((step, i) =>
                         i === idx && step.type === "tool"
                           ? {
                               ...step,
-                              status: "success" as const,
+                              status: nextStatus,
                               outputPreview:
                                 outputPreviewFromEvent ?? step.outputPreview,
                             }
@@ -753,9 +750,9 @@ export default function Home() {
                 if (currentTraceId) {
                   finalizeTrace(currentTraceId, true);
                   currentTraceId = null;
+                  // 从头脑风暴切到正文时布局剧变，避免 scrollTop 钳位被误判为上滑而停止跟滚
+                  autoFollowMainRef.current = true;
                 }
-                // 从头脑风暴切到正文时布局剧变，避免 scrollTop 钳位被误判为上滑而停止跟滚
-                autoFollowMainRef.current = true;
                 if (!hasAssistantMsg) {
                   hasAssistantMsg = true;
                   setGenState('typing');
@@ -773,7 +770,7 @@ export default function Home() {
                   setGenState('typing');
                   setMessages((prev) =>
                     prev.map((msg) =>
-                      msg.id === currentAssistantMsgId
+                      msg.type === "message" && msg.id === currentAssistantMsgId
                         ? { ...msg, content: (msg.content || "") + data.textDelta }
                         : msg
                     )
@@ -1125,8 +1122,10 @@ export default function Home() {
                   transition={{ duration: 0.3 }}
                   className="pt-8"
                 >
-                  {messages.map((msg) => {
+                  {messages.map((msg, idx) => {
+                    const prevMsg = messages[idx - 1];
                     if (msg.type === "message") {
+                      const afterTrace = prevMsg?.type === "trace";
                       return (
                         <motion.div
                           key={msg.id}
@@ -1138,6 +1137,7 @@ export default function Home() {
                             role={msg.role!}
                             content={msg.content!}
                             modelName={msg.modelName}
+                            noTopPad={afterTrace && msg.role === "assistant"}
                             assistantActionsDisabled={genState !== "idle"}
                             onAssistantRegenerate={
                               msg.role === "assistant" &&
@@ -1205,7 +1205,7 @@ export default function Home() {
                     )}
                   </AnimatePresence>
 
-                  <div ref={messagesEndRef} className="h-[40vh] min-h-[240px] shrink-0" />
+                  <div ref={messagesEndRef} className="h-50 shrink-0" />
                 </motion.div>
               )}
             </AnimatePresence>

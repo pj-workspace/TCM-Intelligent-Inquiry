@@ -211,11 +211,10 @@
   background: linear-gradient(
     110deg,
     transparent 0%,
-    transparent 32%,
-    rgba(251, 191, 36, 0.22) 44%,
-    rgba(255, 255, 255, 0.5) 50%,
-    rgba(251, 191, 36, 0.28) 56%,
-    transparent 68%,
+    transparent 28%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0.88) 50%,
+    rgba(255, 255, 255, 0) 62%,
     transparent 100%
   );
   animation: brainstorm-sweep 1.9s ease-in-out infinite;
@@ -231,22 +230,20 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 38px;
+  height: 44px;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity 220ms ease;
   z-index: 2;
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 
 .scroll-fade-top {
   top: 0;
   background: linear-gradient(
     to bottom,
-    rgba(251, 250, 247, 1) 0%,
-    rgba(251, 250, 247, 0.96) 28%,
-    rgba(251, 250, 247, 0.72) 58%,
+    rgba(251, 250, 247, 0.88) 0%,
+    rgba(251, 250, 247, 0.55) 40%,
+    rgba(251, 250, 247, 0.2) 72%,
     rgba(251, 250, 247, 0) 100%
   );
 }
@@ -255,9 +252,9 @@
   bottom: 0;
   background: linear-gradient(
     to top,
-    rgba(251, 250, 247, 1) 0%,
-    rgba(251, 250, 247, 0.96) 28%,
-    rgba(251, 250, 247, 0.72) 58%,
+    rgba(251, 250, 247, 0.88) 0%,
+    rgba(251, 250, 247, 0.55) 40%,
+    rgba(251, 250, 247, 0.2) 72%,
     rgba(251, 250, 247, 0) 100%
   );
 }

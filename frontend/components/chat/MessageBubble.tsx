@@ -128,6 +128,7 @@ interface MessageBubbleProps {
   onAssistantRegenerate?: () => void;
   /** 用户消息：将内容填入输入框 */
   onUserEdit?: (text: string) => void;
+  noTopPad?: boolean;
 }
 
 export function MessageBubble({
@@ -137,6 +138,7 @@ export function MessageBubble({
   assistantActionsDisabled,
   onAssistantRegenerate,
   onUserEdit,
+  noTopPad,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const [menuOpen, setMenuOpen] = useState(false);
@@ -260,7 +262,7 @@ export function MessageBubble({
   }
 
   return (
-    <div className="flex w-full max-w-3xl mx-auto py-4 px-4 md:px-0 justify-start">
+    <div className={clsx("flex w-full max-w-3xl mx-auto px-4 md:px-0 justify-start", noTopPad ? "pt-0 pb-4" : "py-4")}>
       <div className="flex flex-col gap-2 max-w-[85%] items-start w-full">
         <div className="text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full">
           <ReactMarkdown
@@ -271,10 +273,11 @@ export function MessageBubble({
           </ReactMarkdown>
         </div>
 
+        {!assistantActionsDisabled && (
         <div className="flex flex-wrap items-center gap-0.5 mt-1">
           <button
             type="button"
-            disabled={assistantActionsDisabled || !onAssistantRegenerate}
+            disabled={!onAssistantRegenerate}
             onClick={onAssistantRegenerate}
             className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 disabled:opacity-40 disabled:pointer-events-none transition-colors"
             title="重新生成"
@@ -357,6 +360,7 @@ export function MessageBubble({
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
