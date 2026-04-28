@@ -1,5 +1,7 @@
 """Agent 管理 API 的请求/响应模型。"""
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -35,3 +37,35 @@ class AgentResponse(BaseModel):
 class AgentListResponse(BaseModel):
     agents: list[AgentResponse]
     total: int
+
+
+# ── 内置工具元数据 ────────────────────────────────────────────────────────────
+
+class ToolArgInfo(BaseModel):
+    name: str
+    type: str
+    required: bool
+    default: Any | None = None
+    description: str = ""
+
+
+class BuiltinToolInfo(BaseModel):
+    name: str
+    label: str
+    description: str
+    category: str
+    args_schema: list[ToolArgInfo]
+    used_by_agents: int
+
+
+class ToolListResponse(BaseModel):
+    tools: list[BuiltinToolInfo]
+
+
+class ToolInvokeRequest(BaseModel):
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolInvokeResponse(BaseModel):
+    result: str
+    elapsed_ms: int

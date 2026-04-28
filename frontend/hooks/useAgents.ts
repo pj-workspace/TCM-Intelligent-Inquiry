@@ -4,11 +4,32 @@ import { useCallback, useEffect, useState } from "react";
 import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import { toast } from "sonner";
 import type { Agent, AgentFormData, KnowledgeBaseLite } from "@/types/agent";
+import type { BuiltinToolInfo } from "@/types/tool";
+
+/**
+ * 创建 Agent 时预填的系统提示词模板。
+ * 用 `<待填>` / 空白方括号留出关键差异化描述，鼓励用户按场景改写。
+ */
+export const DEFAULT_SYSTEM_PROMPT = `你是一位 <待填：角色定位，例如「资深中医临床医生」「中医文献研究员」>，专长于 <待填：擅长方向，例如「内科疑难杂症的辨证施治」「经方派理论与临床应用」>。
+
+工作目标：
+- <待填：核心目标 1，例如「基于经典文献回答用户的中医问题」>
+- <待填：核心目标 2，例如「在涉及方剂时给出组成、功效、主治与常见加减」>
+
+回答规范：
+1. 先用一句话概括结论，再展开论证；尽量结构化（要点 / 表格）。
+2. 涉及辨证、方剂、药物时优先调用已绑定的检索 / 查询工具核实，避免凭空给方。
+3. 引用知识库或网络资料时附上来源（书名 / 篇目 / URL）。
+4. 任何处方建议都需提示「学习参考，不能替代执业医师面诊」。
+
+风格偏好：<待填：例如「严谨克制，多用经典文献语汇」「通俗易懂，配合现代医学解释」>。
+
+如用户问题超出能力范围或证据不足，请明确说明并给出进一步检索 / 问诊的建议。`;
 
 const INITIAL_FORM: AgentFormData = {
   name: "",
   description: "",
-  system_prompt: "",
+  system_prompt: DEFAULT_SYSTEM_PROMPT,
   tool_names: [],
   default_kb_id: "",
 };
@@ -16,6 +37,7 @@ const INITIAL_FORM: AgentFormData = {
 export function useAgents(token: string | null) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [availableTools, setAvailableTools] = useState<string[]>([]);
+  const [toolInfos, setToolInfos] = useState<BuiltinToolInfo[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +62,10 @@ export function useAgents(token: string | null) {
         toolsRes.json(),
       ]);
       setAgents(agentsData.agents || []);
-      setAvailableTools(toolsData.tools || []);
+      // tools 接口返回结构化元数据；同时保留 name 数组兼容旧调用
+      const rawTools: BuiltinToolInfo[] = toolsData.tools || [];
+      setToolInfos(rawTools);
+      setAvailableTools(rawTools.map((t) => t.name));
       if (kbRes.ok) {
         const kbJson = (await kbRes.json()) as {
           knowledge_bases?: { id: string; name: string }[];
@@ -85,6 +110,17 @@ export function useAgents(token: string | null) {
       description: agent.description,
       system_prompt: agent.system_prompt,
       tool_names: agent.tool_names,
+      default_kb_id: agent.default_kb_id?.trim() || "",
+    });
+  };
+
+  const handleStartClone = (agent: Agent) => {
+    setEditingId("new");
+    setFormData({
+      name: `${agent.name} 副本`,
+      description: agent.description,
+      system_prompt: agent.system_prompt,
+      tool_names: [...agent.tool_names],
       default_kb_id: agent.default_kb_id?.trim() || "",
     });
   };
@@ -155,6 +191,7 @@ export function useAgents(token: string | null) {
   return {
     agents,
     availableTools,
+    toolInfos,
     knowledgeBases,
     loading,
     error,
@@ -169,6 +206,7 @@ export function useAgents(token: string | null) {
     handleSetDefault,
     handleStartCreate,
     handleStartEdit,
+    handleStartClone,
     handleCancelEdit,
     toggleTool,
     handleSubmit,

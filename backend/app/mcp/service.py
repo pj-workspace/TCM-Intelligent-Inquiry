@@ -21,6 +21,23 @@ from app.mcp.tool_bridge import register_mcp_tools_for_server, unregister_mcp_to
 logger = get_logger(__name__)
 
 
+def _row_headers(row: McpServerRecord) -> dict[str, str]:
+    h = row.headers if isinstance(row.headers, dict) else {}
+    return {str(k): str(v) for k, v in h.items()}
+
+
+def _mask_headers(headers: dict[str, str]) -> dict[str, str]:
+    """响应时对敏感 header 值脱敏（仅保留前 6 字符 + ***）。"""
+    masked: dict[str, str] = {}
+    sensitive = {"authorization", "x-api-key", "api-key", "token"}
+    for k, v in headers.items():
+        if k.lower() in sensitive:
+            masked[k] = v[:6] + "***" if len(v) > 6 else "***"
+        else:
+            masked[k] = v
+    return masked
+
+
 def _to_response(row: McpServerRecord) -> McpServerResponse:
     names = row.tool_names if isinstance(row.tool_names, list) else []
     probe_at = row.last_probe_at.isoformat() if row.last_probe_at else None
@@ -30,6 +47,7 @@ def _to_response(row: McpServerRecord) -> McpServerResponse:
         url=row.url,
         description=row.description or "",
         enabled=row.enabled,
+        headers=_mask_headers(_row_headers(row)),
         tool_names=[str(x) for x in names],
         last_probe_at=probe_at,
         last_probe_error=row.last_probe_error,
@@ -56,7 +74,15 @@ class McpService:
     async def register_server(self, req: McpServerCreateRequest) -> McpServerResponse:
         """注册 MCP 服务并自动发现其工具列表；启用时挂入 LangChain 工具注册表。"""
         safe_url = assert_mcp_url_allowed(req.url)
-        tool_names = await discover_tools(safe_url)
+        hdrs = dict(req.headers) if req.headers else {}
+        probe_error: str | None = None
+        try:
+            tool_names = await discover_tools(safe_url, headers=hdrs or None)
+            if not tool_names:
+                probe_error = "协议握手成功但未发现任何工具，请确认端点路径正确"
+        except Exception as exc:
+            tool_names = []
+            probe_error = str(exc)[:500]
         now = datetime.now(timezone.utc)
         server_id = str(uuid.uuid4())
         row = McpServerRecord(
@@ -65,18 +91,20 @@ class McpService:
             url=safe_url,
             description=req.description or "",
             enabled=req.enabled,
+            headers=hdrs,
             tool_names=tool_names,
         )
         self._session.add(row)
         await self._session.flush()
         row.last_probe_at = now
-        row.last_probe_error = None if tool_names else None
+        row.last_probe_error = probe_error
         if req.enabled and tool_names:
             register_mcp_tools_for_server(
                 server_id,
                 req.name,
                 row.url,
                 tool_names,
+                headers=hdrs or None,
             )
         logger.info(
             "注册 MCP 服务 id=%s name=%s tools=%s langchain=%s",
@@ -102,16 +130,25 @@ class McpService:
             raise NotFoundError(f"MCP 服务 '{server_id}' 不存在")
         safe_url = assert_mcp_url_allowed(row.url)
         row.url = safe_url
-        tool_names = await discover_tools(safe_url)
+        hdrs = _row_headers(row) or None
+        probe_error: str | None = None
+        try:
+            tool_names = await discover_tools(safe_url, headers=hdrs)
+            if not tool_names:
+                probe_error = "协议握手成功但未发现任何工具，请确认端点路径正确"
+        except Exception as exc:
+            tool_names = []
+            probe_error = str(exc)[:500]
         row.tool_names = tool_names
         row.last_probe_at = datetime.now(timezone.utc)
-        row.last_probe_error = None if tool_names else None
+        row.last_probe_error = probe_error
         await self._session.flush()
         register_mcp_tools_for_server(
             server_id,
             row.name,
             safe_url,
             tool_names if row.enabled else [],
+            headers=hdrs,
         )
         logger.info("刷新 MCP 工具 id=%s tools=%s", server_id, tool_names)
         return _to_response(row)
@@ -128,7 +165,8 @@ async def probe_enabled_mcp_servers(session: AsyncSession) -> None:
         try:
             safe_url = assert_mcp_url_allowed(row.url)
             row.url = safe_url
-            tool_names = await discover_tools(safe_url)
+            hdrs = _row_headers(row) or None
+            tool_names = await discover_tools(safe_url, headers=hdrs)
             row.tool_names = tool_names
             row.last_probe_at = now
             row.last_probe_error = None
@@ -137,6 +175,7 @@ async def probe_enabled_mcp_servers(session: AsyncSession) -> None:
                 row.name,
                 safe_url,
                 tool_names,
+                headers=hdrs,
             )
             logger.info("MCP 周期探测 id=%s tools=%s", row.id, tool_names)
         except Exception as exc:
@@ -152,12 +191,13 @@ async def restore_mcp_tool_registrations(session: AsyncSession) -> None:
     for row in rows:
         if not row.enabled:
             continue
+        hdrs = _row_headers(row) or None
         tool_names = row.tool_names if isinstance(row.tool_names, list) else []
         if not tool_names:
             try:
                 safe_url = assert_mcp_url_allowed(row.url)
                 row.url = safe_url
-                tool_names = await discover_tools(safe_url)
+                tool_names = await discover_tools(safe_url, headers=hdrs)
                 row.tool_names = tool_names
             except Exception as exc:
                 logger.warning(
@@ -172,6 +212,7 @@ async def restore_mcp_tool_registrations(session: AsyncSession) -> None:
                 row.name,
                 row.url,
                 tool_names,
+                headers=hdrs,
             )
             logger.info(
                 "启动恢复 MCP 工具 id=%s name=%s tools=%s",

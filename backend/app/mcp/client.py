@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -18,12 +19,25 @@ from app.mcp.url_policy import assert_mcp_url_allowed
 
 logger = get_logger(__name__)
 
+# 每种传输协议的握手超时（秒），两种协议串行尝试，总上限约 2×_TRANSPORT_TIMEOUT
+_TRANSPORT_TIMEOUT = 10
 
-async def probe_server_reachable(server_url: str) -> bool:
+
+_EMPTY_HEADERS: dict[str, str] = {}
+
+
+async def probe_server_reachable(
+    server_url: str,
+    headers: dict[str, str] | None = None,
+) -> bool:
     """HEAD/GET 根路径，判断服务是否在线（辅助诊断，非 MCP 协议）。"""
     base = assert_mcp_url_allowed(server_url).rstrip("/")
     timeout = httpx.Timeout(5.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=False,
+        headers=headers or _EMPTY_HEADERS,
+    ) as client:
         for method, path in (("HEAD", ""), ("GET", "/"), ("GET", "/health")):
             try:
                 url = f"{base}{path}" if path else base
@@ -41,16 +55,27 @@ async def probe_server_reachable(server_url: str) -> bool:
 @asynccontextmanager
 async def _open_mcp_session(
     server_url: str,
+    headers: dict[str, str] | None = None,
 ) -> AsyncGenerator[ClientSession, None]:
     """依次尝试 Streamable HTTP、SSE，建立已 initialize 的 ClientSession。"""
     url = assert_mcp_url_allowed(server_url).rstrip("/")
+    extra = headers or _EMPTY_HEADERS
+    timeout = httpx.Timeout(_TRANSPORT_TIMEOUT)
     last_exc: Exception | None = None
     for factory in (streamable_http_client, sse_client):
         try:
-            async with factory(url) as streams:  # type: ignore[arg-type]
+            kwargs: dict[str, Any] = {"headers": extra}
+            # streamable_http_client 支持 timeout 参数；sse_client 通过 httpx_client_factory 控制
+            if factory is streamable_http_client:
+                kwargs["timeout"] = timeout
+            else:
+                kwargs["httpx_client_factory"] = lambda **_kw: httpx.AsyncClient(
+                    timeout=timeout, headers=extra, follow_redirects=True
+                )
+            async with factory(url, **kwargs) as streams:  # type: ignore[arg-type]
                 read_stream, write_stream = streams[0], streams[1]
                 async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+                    await asyncio.wait_for(session.initialize(), timeout=_TRANSPORT_TIMEOUT)
                     yield session
                     return
         except Exception as exc:
@@ -95,26 +120,41 @@ def _format_call_tool_result(result: types.CallToolResult) -> str:
     return text if text else "(空结果)"
 
 
-async def discover_tools(server_url: str) -> list[str]:
-    """连接 MCP 服务并返回 tools/list 中的工具名。"""
+async def discover_tools(
+    server_url: str,
+    headers: dict[str, str] | None = None,
+) -> list[str]:
+    """连接 MCP 服务并返回 tools/list 中的工具名。总超时 = 2×_TRANSPORT_TIMEOUT + 5s。"""
     assert_mcp_url_allowed(server_url)
-    try:
-        async with _open_mcp_session(server_url) as session:
+    total_timeout = _TRANSPORT_TIMEOUT * 2 + 5
+
+    async def _attempt() -> list[str]:
+        async with _open_mcp_session(server_url, headers=headers) as session:
             return await _list_tool_names(session)
+
+    try:
+        return await asyncio.wait_for(_attempt(), timeout=total_timeout)
+    except asyncio.TimeoutError:
+        logger.warning("MCP discover_tools 超时(%ds) url=%s", total_timeout, server_url)
     except Exception as exc:
         logger.warning("MCP discover_tools 失败 url=%s: %s", server_url, exc)
     # 退化：仅 HTTP 探测，避免把普通站点误标为可用工具
-    if await probe_server_reachable(server_url):
+    if await probe_server_reachable(server_url, headers=headers):
         logger.info("MCP 协议握手失败但 HTTP 可达: %s", server_url)
     return []
 
 
-async def call_tool(server_url: str, tool_name: str, arguments: dict[str, Any]) -> str:
+async def call_tool(
+    server_url: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    headers: dict[str, str] | None = None,
+) -> str:
     """调用 tools/call 并返回文本化结果。"""
     assert_mcp_url_allowed(server_url)
     logger.info("MCP call_tool url=%s tool=%s", server_url, tool_name)
     try:
-        async with _open_mcp_session(server_url) as session:
+        async with _open_mcp_session(server_url, headers=headers) as session:
             result = await session.call_tool(tool_name, arguments or {})
             return _format_call_tool_result(result)
     except Exception as exc:

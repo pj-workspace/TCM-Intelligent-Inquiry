@@ -18,6 +18,7 @@ class McpServerRecord(Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    headers: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     tool_names: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     last_probe_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

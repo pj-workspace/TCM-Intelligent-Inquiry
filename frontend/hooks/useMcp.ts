@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import { toast } from "sonner";
 import type { McpServer } from "@/types/mcp";
+import type { McpFormData } from "@/components/settings/McpAddForm";
 
 export function useMcp(token: string | null) {
   const [servers, setServers] = useState<McpServer[]>([]);
@@ -13,10 +14,11 @@ export function useMcp(token: string | null) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<McpFormData>({
     name: "",
     url: "",
     description: "",
+    authToken: "",
   });
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>(
@@ -50,6 +52,13 @@ export function useMcp(token: string | null) {
     if (!token || !formData.name.trim() || !formData.url.trim()) return;
     setIsSubmitting(true);
     try {
+      const headers: Record<string, string> = {};
+      const token_ = formData.authToken.trim();
+      if (token_) {
+        headers["Authorization"] = token_.startsWith("Bearer ")
+          ? token_
+          : `Bearer ${token_}`;
+      }
       const res = await fetch(`${API_BASE}/api/mcp`, {
         method: "POST",
         headers: apiJsonHeaders(token),
@@ -58,13 +67,20 @@ export function useMcp(token: string | null) {
           url: formData.url.trim(),
           description: formData.description.trim(),
           enabled: true,
+          headers,
         }),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
+      const added = await res.json() as { tool_names?: string[]; last_probe_error?: string | null };
       await fetchServers();
       setShowAddForm(false);
-      setFormData({ name: "", url: "", description: "" });
-      toast.success("MCP 服务已添加");
+      setFormData({ name: "", url: "", description: "", authToken: "" });
+      const toolCount = added.tool_names?.length ?? 0;
+      if (added.last_probe_error) {
+        toast.warning(`已保存，但探测异常：${added.last_probe_error}`);
+      } else {
+        toast.success(`MCP 服务已添加，发现 ${toolCount} 个工具`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "添加失败");
     } finally {
@@ -81,8 +97,14 @@ export function useMcp(token: string | null) {
         headers: apiHeaders(token),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
+      const refreshed = await res.json() as { tool_names?: string[]; last_probe_error?: string | null };
       await fetchServers();
-      toast.success("已重新探测并刷新");
+      const toolCount = refreshed.tool_names?.length ?? 0;
+      if (refreshed.last_probe_error) {
+        toast.warning(`刷新完成，但探测异常：${refreshed.last_probe_error}`);
+      } else {
+        toast.success(`刷新完成，发现 ${toolCount} 个工具`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "刷新失败");
     } finally {

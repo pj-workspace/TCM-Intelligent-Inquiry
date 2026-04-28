@@ -12,6 +12,7 @@ export function AgentsTab() {
   const {
     agents,
     availableTools,
+    toolInfos,
     knowledgeBases,
     loading,
     error,
@@ -26,6 +27,7 @@ export function AgentsTab() {
     handleSetDefault,
     handleStartCreate,
     handleStartEdit,
+    handleStartClone,
     handleCancelEdit,
     toggleTool,
     handleSubmit,
@@ -54,14 +56,19 @@ export function AgentsTab() {
         onCancel={() => !isDeleting && setDeleteId(null)}
       />
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Agent 管理</h2>
           <p className="mt-1 text-sm text-gray-500">
             自定义系统提示词、工具集与默认知识库，创建多用途的 AI 助手。
           </p>
         </div>
-        {editingId === null && (
+        <div className="flex items-center gap-3">
+          {agents.length > 0 && (
+            <div className="hidden items-center gap-1.5 rounded-full bg-gray-50 px-3 py-1.5 text-xs text-gray-500 ring-1 ring-inset ring-gray-200 sm:flex">
+              共 <span className="font-semibold text-gray-700">{agents.length}</span> 个 Agent
+            </div>
+          )}
           <button
             onClick={handleStartCreate}
             className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-gray-800"
@@ -69,7 +76,7 @@ export function AgentsTab() {
             <Plus className="h-4 w-4" />
             创建 Agent
           </button>
-        )}
+        </div>
       </div>
 
       {error && (
@@ -78,12 +85,37 @@ export function AgentsTab() {
         </div>
       )}
 
+      <div className="grid gap-4">
+        {agents.length === 0 && !error ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 py-12 text-center text-sm text-gray-500">
+            <Bot className="mb-3 h-8 w-8 text-gray-300" />
+            <p>暂无自定义 Agent</p>
+            <p className="mt-1 text-xs">点击右上角创建新的智能助手</p>
+          </div>
+        ) : (
+          agents.map((agent) => (
+            <AgentCard
+              key={agent.id}
+              agent={agent}
+              isDefault={defaultAgentId === agent.id}
+              knowledgeBases={knowledgeBases}
+              toolInfos={toolInfos}
+              onSetDefault={handleSetDefault}
+              onEdit={handleStartEdit}
+              onClone={handleStartClone}
+              onDelete={setDeleteId}
+            />
+          ))
+        )}
+      </div>
+
       {editingId !== null && (
         <AgentForm
           editingId={editingId}
           formData={formData}
           setFormData={setFormData}
           availableTools={availableTools}
+          toolInfos={toolInfos}
           knowledgeBases={knowledgeBases}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
@@ -91,31 +123,6 @@ export function AgentsTab() {
           toggleTool={toggleTool}
         />
       )}
-
-      <div className="grid gap-4">
-        {editingId === null && agents.length === 0 && !error ? (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 py-12 text-center text-sm text-gray-500">
-            <Bot className="mb-3 h-8 w-8 text-gray-300" />
-            <p>暂无自定义 Agent</p>
-            <p className="mt-1 text-xs">点击右上角创建新的智能助手</p>
-          </div>
-        ) : (
-          agents.map((agent) => {
-            if (agent.id === editingId) return null;
-            return (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                isDefault={defaultAgentId === agent.id}
-                knowledgeBases={knowledgeBases}
-                onSetDefault={handleSetDefault}
-                onEdit={handleStartEdit}
-                onDelete={setDeleteId}
-              />
-            );
-          })
-        )}
-      </div>
     </div>
   );
 }

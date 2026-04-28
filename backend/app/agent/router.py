@@ -13,6 +13,9 @@ from app.agent.schemas import (
     AgentListResponse,
     AgentResponse,
     AgentUpdateRequest,
+    ToolInvokeRequest,
+    ToolInvokeResponse,
+    ToolListResponse,
 )
 from app.agent.service import AgentService
 from app.auth.deps import require_api_user
@@ -43,12 +46,26 @@ async def create_agent(
     return await svc.create_agent(req, user.id)
 
 
-@router.get("/tools", summary="列出所有可用工具")
+@router.get("/tools", response_model=ToolListResponse, summary="列出所有可用工具（结构化）")
 async def list_tools(
     _: Annotated[UserRecord, Depends(require_api_user)],
     svc: AgentService = Depends(_svc),
 ):
-    return {"tools": await svc.list_available_tools()}
+    return await svc.list_available_tools()
+
+
+@router.post(
+    "/tools/{tool_name}/invoke",
+    response_model=ToolInvokeResponse,
+    summary="在线试用内置工具",
+)
+async def invoke_tool(
+    tool_name: str,
+    req: ToolInvokeRequest,
+    user: Annotated[UserRecord, Depends(require_api_user)],
+    svc: AgentService = Depends(_svc),
+):
+    return await svc.invoke_tool(tool_name, req.args, user.id)
 
 
 @router.get("/{agent_id}", response_model=AgentResponse, summary="获取 Agent 详情")

@@ -1,26 +1,52 @@
 "use client";
 
-import { Bot, Star, Edit2, Trash2 } from "lucide-react";
+import { useState } from "react";
+import {
+  Bot,
+  ChevronDown,
+  Copy,
+  Edit2,
+  FileText,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { displayToolNameZh } from "@/lib/tool-labels";
 import type { Agent, KnowledgeBaseLite } from "@/types/agent";
+import type { BuiltinToolInfo } from "@/types/tool";
 
 interface AgentCardProps {
   agent: Agent;
   isDefault: boolean;
   knowledgeBases: KnowledgeBaseLite[];
+  toolInfos: BuiltinToolInfo[];
   onSetDefault: (id: string | null) => void;
   onEdit: (agent: Agent) => void;
+  onClone: (agent: Agent) => void;
   onDelete: (id: string) => void;
 }
+
+const CATEGORY_DOT: Record<string, string> = {
+  knowledge: "bg-orange-400",
+  formula: "bg-emerald-400",
+  web: "bg-blue-400",
+  system: "bg-gray-400",
+};
 
 export function AgentCard({
   agent,
   isDefault,
   knowledgeBases,
+  toolInfos,
   onSetDefault,
   onEdit,
+  onClone,
   onDelete,
 }: AgentCardProps) {
+  const [showPrompt, setShowPrompt] = useState(false);
+  const toolInfoMap = new Map(toolInfos.map((t) => [t.name, t]));
+  const trimmedPrompt = agent.system_prompt?.trim() ?? "";
+  const hasPrompt = trimmedPrompt.length > 0;
+
   return (
     <div
       className={`overflow-hidden rounded-xl border bg-white shadow-sm transition-all hover:shadow-md ${
@@ -30,7 +56,7 @@ export function AgentCard({
       }`}
     >
       <div className="flex items-start justify-between p-5">
-        <div className="flex items-start gap-4">
+        <div className="flex min-w-0 items-start gap-4">
           <div
             className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
               isDefault
@@ -40,8 +66,8 @@ export function AgentCard({
           >
             <Bot className="h-5 w-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-semibold text-gray-900">{agent.name}</h3>
               {isDefault && (
                 <span className="flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-700">
@@ -55,18 +81,30 @@ export function AgentCard({
             </p>
 
             <div className="mt-3">
-              <div className="text-[11px] font-medium text-gray-400">绑定工具</div>
+              <div className="text-[11px] font-medium text-gray-400">
+                绑定工具（{agent.tool_names.length}）
+              </div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {agent.tool_names.length > 0 ? (
-                  agent.tool_names.map((t) => (
-                    <span
-                      key={t}
-                      className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700"
-                      title={t}
-                    >
-                      {displayToolNameZh(t)}
-                    </span>
-                  ))
+                  agent.tool_names.map((t) => {
+                    const info = toolInfoMap.get(t);
+                    const isMcp = !info && t.startsWith("mcp_");
+                    const dot = info
+                      ? CATEGORY_DOT[info.category] ?? "bg-gray-400"
+                      : isMcp
+                      ? "bg-blue-400"
+                      : "bg-gray-400";
+                    return (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1.5 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700"
+                        title={t}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                        {info?.label ?? displayToolNameZh(t)}
+                      </span>
+                    );
+                  })
                 ) : (
                   <span className="text-xs italic text-gray-400">无</span>
                 )}
@@ -78,8 +116,8 @@ export function AgentCard({
               <p className="mt-1 text-xs text-gray-600">
                 {agent.default_kb_id ? (
                   <>
-                    {knowledgeBases.find((k) => k.id === agent.default_kb_id)
-                      ?.name ?? "（未在列表中）"}{" "}
+                    {knowledgeBases.find((k) => k.id === agent.default_kb_id)?.name ??
+                      "（未在列表中）"}{" "}
                     <span className="font-mono text-gray-400">
                       {agent.default_kb_id}
                     </span>
@@ -92,7 +130,7 @@ export function AgentCard({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={() => onSetDefault(isDefault ? null : agent.id)}
             title={isDefault ? "取消默认" : "设为默认"}
@@ -103,6 +141,13 @@ export function AgentCard({
             }`}
           >
             <Star className={`h-4 w-4 ${isDefault ? "fill-orange-500" : ""}`} />
+          </button>
+          <button
+            onClick={() => onClone(agent)}
+            title="克隆此 Agent"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          >
+            <Copy className="h-4 w-4" />
           </button>
           <button
             onClick={() => onEdit(agent)}
@@ -119,6 +164,42 @@ export function AgentCard({
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
+      </div>
+
+      {/* 系统提示词折叠区 */}
+      <div className="border-t border-gray-50 bg-[#fafaf8]">
+        <button
+          type="button"
+          onClick={() => hasPrompt && setShowPrompt((v) => !v)}
+          disabled={!hasPrompt}
+          className={`flex w-full items-center justify-between px-5 py-2.5 text-xs text-gray-500 transition-colors ${
+            hasPrompt ? "hover:bg-gray-100/50" : "cursor-default opacity-60"
+          }`}
+        >
+          <span className="flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            系统提示词
+            {hasPrompt ? (
+              <span className="text-gray-400">（{trimmedPrompt.length} 字符）</span>
+            ) : (
+              <span className="italic text-gray-400">未配置（使用系统默认）</span>
+            )}
+          </span>
+          {hasPrompt && (
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform ${
+                showPrompt ? "rotate-180" : ""
+              }`}
+            />
+          )}
+        </button>
+        {hasPrompt && showPrompt && (
+          <div className="border-t border-gray-100 px-5 py-3">
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-600">
+              {trimmedPrompt}
+            </pre>
+          </div>
+        )}
       </div>
     </div>
   );

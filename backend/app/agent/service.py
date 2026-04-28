@@ -1,7 +1,11 @@
 """Agent 管理服务：配置持久化到 PostgreSQL。"""
 
+import re
+import time
 import uuid
+from typing import Any
 
+from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +16,10 @@ from app.agent.schemas import (
     AgentListResponse,
     AgentResponse,
     AgentUpdateRequest,
+    BuiltinToolInfo,
+    ToolArgInfo,
+    ToolInvokeResponse,
+    ToolListResponse,
 )
 from app.agent.tools.loader import ensure_tools_loaded
 from app.agent.tools.registry import tool_registry
@@ -20,6 +28,58 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# ── 工具静态元数据 ─────────────────────────────────────────────────────────────
+_TOOL_META: dict[str, dict[str, str]] = {
+    "search_tcm_knowledge": {"label": "知识库检索", "category": "knowledge"},
+    "formula_lookup":       {"label": "方剂查询",   "category": "formula"},
+    "recommend_formulas":   {"label": "方剂推荐",   "category": "formula"},
+    "searx_web_search":     {"label": "联网搜索",   "category": "web"},
+}
+
+
+def _parse_docstring_arg_descs(docstring: str) -> dict[str, str]:
+    """从 docstring 提取 `- arg_name: desc` 格式的参数说明。"""
+    result: dict[str, str] = {}
+    in_params = False
+    for line in docstring.splitlines():
+        stripped = line.strip()
+        if stripped in ("参数：", "参数:", "Args:", "Arguments:"):
+            in_params = True
+            continue
+        if in_params:
+            m = re.match(r"^-\s+(\w+)\s*:\s*(.+)$", stripped)
+            if m:
+                result[m.group(1)] = m.group(2).strip()
+            elif stripped and not stripped.startswith("-"):
+                in_params = False
+    return result
+
+
+def _parse_tool_args(tool: BaseTool) -> list[ToolArgInfo]:
+    if tool.args_schema is None:
+        return []
+    try:
+        schema = tool.args_schema.model_json_schema()
+    except Exception:
+        return []
+    props = schema.get("properties", {})
+    required_set = set(schema.get("required", []))
+    arg_descs = _parse_docstring_arg_descs(tool.description or "")
+    args: list[ToolArgInfo] = []
+    for name, info in props.items():
+        t = info.get("type", "string")
+        if "anyOf" in info:
+            non_null = [x.get("type") for x in info["anyOf"] if x.get("type") != "null"]
+            t = non_null[0] if non_null else "string"
+        args.append(ToolArgInfo(
+            name=name,
+            type=t or "string",
+            required=name in required_set,
+            default=info.get("default"),
+            description=arg_descs.get(name, ""),
+        ))
+    return args
 
 
 def _to_response(row: AgentRecord) -> AgentResponse:
@@ -129,6 +189,48 @@ class AgentService:
         invalidate_agent_graph_cache(agent_id)
         logger.info("删除 Agent id=%s", agent_id)
 
-    async def list_available_tools(self) -> list[str]:
+    async def list_available_tools(self) -> ToolListResponse:
         ensure_tools_loaded()
-        return tool_registry.names()
+        r = await self._session.execute(select(AgentRecord))
+        agents = r.scalars().all()
+
+        infos: list[BuiltinToolInfo] = []
+        for tool in tool_registry.all():
+            meta = _TOOL_META.get(tool.name, {"label": tool.name, "category": "system"})
+            used = sum(1 for a in agents if tool.name in (a.tool_names or []))
+            infos.append(BuiltinToolInfo(
+                name=tool.name,
+                label=meta["label"],
+                description=(tool.description or "").strip(),
+                category=meta["category"],
+                args_schema=_parse_tool_args(tool),
+                used_by_agents=used,
+            ))
+        return ToolListResponse(tools=infos)
+
+    async def invoke_tool(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        user_id: str,
+    ) -> ToolInvokeResponse:
+        ensure_tools_loaded()
+        tool = tool_registry._tools.get(tool_name)
+        if tool is None:
+            raise NotFoundError(f"工具 '{tool_name}' 不存在")
+
+        from app.core.chat_context import chat_user_id  # avoid circular at module level
+        ctx_token = chat_user_id.set(user_id)
+        start = time.monotonic()
+        try:
+            # ainvoke 是 LangChain 推荐的结构化调用方式，支持 dict 参数
+            result = await tool.ainvoke(args if args else {})
+        except Exception as exc:
+            result = f"执行出错：{exc}"
+        finally:
+            chat_user_id.reset(ctx_token)
+
+        return ToolInvokeResponse(
+            result=str(result),
+            elapsed_ms=int((time.monotonic() - start) * 1000),
+        )

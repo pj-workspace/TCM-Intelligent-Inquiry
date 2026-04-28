@@ -49,24 +49,24 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-# 知识库新增的嵌入指纹列：dev 模式下需对老库做轻量补列（PostgreSQL 9.6+）
-_KB_AUTO_MIGRATE_DDL: tuple[str, ...] = (
-    "ALTER TABLE knowledge_bases "
-    "ADD COLUMN IF NOT EXISTS embedding_provider VARCHAR(50)",
-    "ALTER TABLE knowledge_bases "
-    "ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(120)",
-    "ALTER TABLE knowledge_bases "
-    "ADD COLUMN IF NOT EXISTS embedding_dim INTEGER",
+# 轻量补列 DDL（PostgreSQL ADD COLUMN IF NOT EXISTS，对老库安全幂等）
+_AUTO_MIGRATE_DDL: tuple[str, ...] = (
+    # knowledge_bases：嵌入指纹列
+    "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS embedding_provider VARCHAR(50)",
+    "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(120)",
+    "ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS embedding_dim INTEGER",
+    # mcp_servers：请求头列
+    "ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS headers JSONB NOT NULL DEFAULT '{}'",
 )
 
 
-async def _auto_migrate_kb_columns() -> None:
-    """对 `knowledge_bases` 表补齐嵌入指纹列；仅 PostgreSQL 生效（IF NOT EXISTS 语法依赖 PG）。"""
+async def _auto_migrate_columns() -> None:
+    """对已有表补齐新增列；仅 PostgreSQL 生效（IF NOT EXISTS 语法依赖 PG）。"""
     s = get_settings()
     if "postgres" not in (s.database_url or "").lower():
         return
     async with engine.begin() as conn:
-        for stmt in _KB_AUTO_MIGRATE_DDL:
+        for stmt in _AUTO_MIGRATE_DDL:
             try:
                 await conn.execute(text(stmt))
             except Exception as exc:
@@ -88,4 +88,4 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    await _auto_migrate_kb_columns()
+    await _auto_migrate_columns()
