@@ -1,0 +1,34 @@
+export type BrainstormStep =
+  | {
+      id: string;
+      type: "thinking";
+      content: string;
+      durationSec?: number;
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolName: string;
+      runId?: string;
+      status: "running" | "success" | "error";
+      /** 工具入参摘要（SSE tool-call 或历史消息） */
+      inputPreview?: string;
+      /** 工具返回摘要（SSE tool-result 或历史消息） */
+      outputPreview?: string;
+    };
+
+export interface BrainstormPanelProps {
+  steps: BrainstormStep[];
+  isStreaming: boolean;
+  durationSec?: number;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}
+
+export type WebResultItem = {
+  title: string;
+  url?: string;
+  summary?: string;
+};
+
+export type EdgeFadeState = { top: boolean; bottom: boolean };

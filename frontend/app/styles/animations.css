@@ -1,0 +1,117 @@
+/* 骨架屏：文字条的高光扫过动效 */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f4f4f5 0%,
+    #f4f4f5 40%,
+    #e4e4e7 50%,
+    #f4f4f5 60%,
+    #f4f4f5 100%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+/* 标题出现：文字本身渐显，同时一道高光扫过 */
+@keyframes sidebar-conv-title-sweep {
+  0% {
+    background-position: 100% 0;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    background-position: 0% 0;
+    opacity: 1;
+  }
+}
+
+.sidebar-conv-title-sweep {
+  display: inline-block;
+  max-width: 100%;
+  background: linear-gradient(
+    120deg,
+    #111827 0%,
+    #111827 40%,
+    #fbbf24 50%,
+    #111827 60%,
+    #111827 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sidebar-conv-title-sweep 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes brainstorm-sweep {
+  0% {
+    transform: translateX(-130%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateX(130%);
+    opacity: 0;
+  }
+}
+
+/* 扫光层容器：需可定位、可裁剪；伪元素承担动画 */
+.brainstorm-sweep,
+.thinking-shimmer-sweep {
+  display: block;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.brainstorm-sweep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  will-change: transform, opacity;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 28%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0.88) 50%,
+    rgba(255, 255, 255, 0) 62%,
+    transparent 100%
+  );
+  animation: brainstorm-sweep 1.9s ease-in-out infinite;
+}
+
+/* 「思考中…」收起条：纯白高光扫过 */
+.thinking-shimmer-sweep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  will-change: transform, opacity;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 28%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0.92) 50%,
+    rgba(255, 255, 255, 0) 62%,
+    transparent 100%
+  );
+  animation: brainstorm-sweep 1.9s ease-in-out infinite;
+}

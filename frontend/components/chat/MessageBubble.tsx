@@ -1,123 +1,11 @@
 "use client";
 
-import clsx from "clsx";
 import { useCallback, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import type { Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import {
-  Copy,
-  Check,
-  MoreVertical,
-  Pencil,
-  RefreshCw,
-  Volume2,
-  Square,
-  FileDown,
-  Sparkles,
-} from "lucide-react";
+import { markdownToPlainText } from "@/lib/markdown-utils";
+import { UserBubble } from "@/components/chat/UserBubble";
+import { AssistantBubble } from "@/components/chat/AssistantBubble";
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/**
- * 模型常把有序列表写成「单独一行的 1. / 2.」再换行写正文，CommonMark 无法将其识别为同一条列表项。
- * 合并为「1. 正文」以便正确渲染为 ol/li。
- * 支持：编号与正文之间有多余空行、或中间仅有空白/空格行；支持半角 `.` 与全角 `．`。
- */
-function mergeOrphanOrderedListMarkers(md: string): string {
-  let prev = md;
-  for (let i = 0; i < 8; i++) {
-    const next = prev.replace(
-      /(^|\n)(\d{1,3})(?:\.|．)[ \t]*(?:\r?\n[ \t]*)+(?=\S)/g,
-      "$1$2. "
-    );
-    if (next === prev) break;
-    prev = next;
-  }
-  return prev;
-}
-
-/** GFM 表格只识别 ASCII `|`；部分模型会输出全角竖线 U+FF5C，导致无法解析为表格。 */
-function normalizeGfmPipes(md: string): string {
-  return md.replace(/\uFF5C/g, "|");
-}
-
-function preprocessAssistantMarkdown(md: string): string {
-  return mergeOrphanOrderedListMarkers(normalizeGfmPipes(md));
-}
-
-/** 助手正文已用 remark-gfm 解析为 table 元素；需显式边框与横向滚动，否则会像「挤成一行的纯文本」。 */
-const assistantMarkdownComponents: Components = {
-  table: ({ node: _n, children, ...props }) => (
-    <div className="no-scrollbar my-4 w-full max-w-full overflow-x-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg)]">
-      <table
-        className="w-full min-w-[min(100%,520px)] border-collapse text-[0.95rem] leading-snug"
-        {...props}
-      >
-        {children}
-      </table>
-    </div>
-  ),
-  thead: ({ node: _n, children, ...props }) => (
-    <thead {...props}>{children}</thead>
-  ),
-  th: ({ node: _n, children, ...props }) => (
-    <th
-      className="border border-[var(--border-color)] bg-[var(--muted)] px-3 py-2 text-left font-semibold text-[var(--fg)]"
-      {...props}
-    >
-      {children}
-    </th>
-  ),
-  td: ({ node: _n, children, ...props }) => (
-    <td
-      className="border border-[var(--border-color)] px-3 py-2 align-top text-[var(--fg)]"
-      {...props}
-    >
-      {children}
-    </td>
-  ),
-};
-
-/** 用于复制 / 朗读 / PDF 的纯文本（弱化 Markdown 标记） */
-export function markdownToPlainText(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, "\n")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/^#+\s+/gm, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function exportAssistantAsPdf(title: string, markdown: string) {
-  const plain = markdownToPlainText(markdown);
-  const w = window.open("", "_blank");
-  if (!w) return;
-  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(
-    title
-  )}</title><style>
-    body{font-family:system-ui,sans-serif;padding:28px;max-width:720px;margin:0 auto;color:#111;line-height:1.6}
-    h1{font-size:1.25rem;font-weight:600;margin:0 0 16px}
-    pre{white-space:pre-wrap;word-break:break-word;font-size:14px;margin:0}
-    @media print{body{padding:16px}}
-  </style></head><body>
-  <h1>${escapeHtml(title)}</h1>
-  <pre>${escapeHtml(plain)}</pre>
-  <script>window.onload=function(){window.print();}</script>
-  </body></html>`;
-  w.document.write(doc);
-  w.document.close();
-}
-
+export { markdownToPlainText };
 
 interface MessageBubbleProps {
   role: "user" | "assistant";
@@ -217,156 +105,30 @@ export function MessageBubble({
 
   if (isUser) {
     return (
-      <div
-        className={clsx(
-          "flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto py-4 px-4 sm:px-5 md:px-6 lg:px-8",
-          "justify-end"
-        )}
-      >
-        <div className="flex min-w-0 max-w-[88%] flex-row-reverse items-start gap-2 group sm:max-w-[min(76%,34rem)] md:max-w-[min(70%,35rem)]">
-          <div
-            className={clsx(
-              "text-[15px] leading-relaxed break-words [overflow-wrap:anywhere]",
-              "bg-[#f4f4f4] text-[#1a1a1a] rounded-2xl rounded-tr-sm px-5 py-3.5"
-            )}
-          >
-            {content}
-          </div>
-          <div
-            className="flex flex-row items-center gap-0.5 pt-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity duration-150 shrink-0"
-            aria-hidden
-          >
-            <button
-              type="button"
-              onClick={() => void handleCopy()}
-              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
-              title={copied ? "已复制" : "复制"}
-              aria-label={copied ? "已复制" : "复制"}
-            >
-              {copied ? (
-                <Check className="w-4 h-4 text-green-600" strokeWidth={1.75} />
-              ) : (
-                <Copy className="w-4 h-4" strokeWidth={1.75} />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => onUserEdit?.(content)}
-              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
-              title="填入输入框编辑"
-              aria-label="填入输入框编辑"
-            >
-              <Pencil className="w-4 h-4" strokeWidth={1.75} />
-            </button>
-          </div>
-        </div>
-      </div>
+      <UserBubble
+        content={content}
+        copied={copied}
+        onCopy={() => void handleCopy()}
+        onEdit={onUserEdit}
+      />
     );
   }
 
   return (
-    <div className={clsx("flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 sm:px-5 md:px-6 lg:px-8 justify-start", noTopPad ? "pt-0 pb-4" : "py-4")}>
-      <div className="flex min-w-0 w-full max-w-full flex-col items-start gap-2">
-        <div className="text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full min-w-0 md:max-w-[68ch] lg:max-w-[80ch] xl:max-w-[96ch]">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={assistantMarkdownComponents}
-          >
-            {preprocessAssistantMarkdown(
-              content + (interrupted ? "\n\n> *输出已被终止*" : "")
-            )}
-          </ReactMarkdown>
-        </div>
-
-        {!assistantActionsDisabled && (
-        <div className="flex flex-wrap items-center gap-0.5 mt-1">
-          <button
-            type="button"
-            disabled={!onAssistantRegenerate}
-            onClick={onAssistantRegenerate}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-            title="重新生成"
-            aria-label="重新生成"
-          >
-            <RefreshCw className="w-4 h-4" strokeWidth={1.75} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleCopy()}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
-            title={copied ? "已复制" : "复制"}
-            aria-label={copied ? "已复制" : "复制"}
-          >
-            {copied ? (
-              <Check className="w-4 h-4 text-green-600" strokeWidth={1.75} />
-            ) : (
-              <Copy className="w-4 h-4" strokeWidth={1.75} />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={toggleReadAloud}
-            className={clsx(
-              "p-1.5 rounded-lg transition-colors",
-              ttsPlaying
-                ? "text-orange-600 bg-orange-50 hover:bg-orange-100"
-                : "text-gray-500 hover:text-gray-800 hover:bg-black/5"
-            )}
-            title={ttsPlaying ? "停止朗读" : "朗读"}
-            aria-label={ttsPlaying ? "停止朗读" : "朗读"}
-            aria-pressed={ttsPlaying}
-          >
-            {ttsPlaying ? (
-              <Square className="w-4 h-4" strokeWidth={1.75} />
-            ) : (
-              <Volume2 className="w-4 h-4" strokeWidth={1.75} />
-            )}
-          </button>
-
-          <div className="relative" ref={menuRef}>
-            <button
-              type="button"
-              onClick={() => setMenuOpen((o) => !o)}
-              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
-              title="更多"
-              aria-expanded={menuOpen}
-              aria-label="更多选项"
-            >
-              <MoreVertical className="w-4 h-4" strokeWidth={1.75} />
-            </button>
-            {menuOpen && (
-              <div
-                className="absolute left-0 bottom-full mb-1 z-50 min-w-[220px] rounded-xl border border-[#e8e8e8] bg-white py-1 shadow-lg text-sm"
-                role="menu"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100/80"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    exportAssistantAsPdf("TCM AI 回复", content);
-                  }}
-                >
-                  <FileDown className="w-4 h-4 shrink-0 opacity-70" />
-                  导出为 PDF
-                </button>
-                <div className="my-1 h-px bg-[#eee]" />
-                <div className="flex items-start gap-2 px-3 py-2.5 text-gray-500">
-                  <Sparkles className="w-4 h-4 shrink-0 mt-0.5 opacity-70" />
-                  <div>
-                    <div className="text-xs text-gray-400 mb-0.5">模型</div>
-                    <div className="text-[13px] text-gray-800 font-medium leading-snug break-all">
-                      {modelName?.trim() || "—"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        )}
-      </div>
-    </div>
+    <AssistantBubble
+      content={content}
+      modelName={modelName}
+      assistantActionsDisabled={assistantActionsDisabled}
+      onAssistantRegenerate={onAssistantRegenerate}
+      noTopPad={noTopPad}
+      interrupted={interrupted}
+      copied={copied}
+      onCopy={() => void handleCopy()}
+      ttsPlaying={ttsPlaying}
+      onToggleTts={toggleReadAloud}
+      menuOpen={menuOpen}
+      onMenuToggle={() => setMenuOpen((o) => !o)}
+      menuRef={menuRef}
+    />
   );
 }
