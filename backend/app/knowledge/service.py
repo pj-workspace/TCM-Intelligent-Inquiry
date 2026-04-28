@@ -1,6 +1,7 @@
 """知识库管理服务：元数据存 PostgreSQL，向量存 Qdrant。"""
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from langchain_core.documents import Document
 from sqlalchemy import delete, func, select
@@ -81,6 +82,7 @@ class KnowledgeService:
         self,
         row: KnowledgeBaseRecord,
         document_count: int,
+        total_chunks: int = 0,
     ) -> KnowledgeBaseResponse:
         return KnowledgeBaseResponse(
             id=row.id,
@@ -92,10 +94,20 @@ class KnowledgeService:
             embedding_model=row.embedding_model,
             embedding_dim=row.embedding_dim,
             metadata={},
+            total_chunks=total_chunks,
         )
 
+    async def _sum_chunks(self, kb_id: str) -> int:
+        stmt = select(func.sum(KnowledgeDocumentRecord.chunk_count)).where(
+            KnowledgeDocumentRecord.kb_id == kb_id
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
     async def _row_to_response(self, row: KnowledgeBaseRecord) -> KnowledgeBaseResponse:
-        return self._build_response(row, await self._count_documents(row.id))
+        doc_count = await self._count_documents(row.id)
+        total_chunks = await self._sum_chunks(row.id)
+        return self._build_response(row, doc_count, total_chunks)
 
     # ── KB CRUD ───────────────────────────────────────────────────────────────
     async def list_kbs(self, owner_id: str) -> KnowledgeBaseListResponse:
@@ -118,8 +130,19 @@ class KnowledgeService:
         count_rows = (await self._session.execute(count_stmt)).all()
         counts: dict[str, int] = {kb_id: int(n or 0) for kb_id, n in count_rows}
 
+        chunks_stmt = (
+            select(KnowledgeDocumentRecord.kb_id, func.sum(KnowledgeDocumentRecord.chunk_count))
+            .where(KnowledgeDocumentRecord.kb_id.in_(ids))
+            .group_by(KnowledgeDocumentRecord.kb_id)
+        )
+        chunks_rows = (await self._session.execute(chunks_stmt)).all()
+        total_chunks_map: dict[str, int] = {kb_id: int(n or 0) for kb_id, n in chunks_rows}
+
         return KnowledgeBaseListResponse(
-            knowledge_bases=[self._build_response(r, counts.get(r.id, 0)) for r in rows],
+            knowledge_bases=[
+                self._build_response(r, counts.get(r.id, 0), total_chunks_map.get(r.id, 0))
+                for r in rows
+            ],
             total=len(rows),
         )
 
@@ -216,6 +239,7 @@ class KnowledgeService:
         filename: str,
         content: bytes,
         owner_id: str,
+        progress_cb: Callable[[str, int], Awaitable[None]] | None = None,
     ) -> IngestResponse:
         row = await self._session.get(KnowledgeBaseRecord, kb_id)
         if row is None or row.owner_id != owner_id:
@@ -241,7 +265,30 @@ class KnowledgeService:
             row.embedding_model = model
             row.embedding_dim = int(dim)
 
+        # 指纹校验完成，开始文本提取阶段
+        if progress_cb is not None:
+            await progress_cb("extracting", 5)
+
+        # 检查同 KB 内是否已存在同名文档
+        existing_doc_stmt = select(KnowledgeDocumentRecord).where(
+            KnowledgeDocumentRecord.kb_id == kb_id,
+            KnowledgeDocumentRecord.filename == filename,
+        )
+        existing_doc = (await self._session.execute(existing_doc_stmt)).scalars().first()
+        if existing_doc is not None:
+            # 先删除旧向量，再删除旧记录（覆盖语义）
+            await delete_document_vectors(kb_id, existing_doc.id)
+            await self._session.execute(
+                delete(KnowledgeDocumentRecord).where(KnowledgeDocumentRecord.id == existing_doc.id)
+            )
+            await self._session.flush()
+            logger.info("覆盖同名文档 kb_id=%s filename=%s old_doc_id=%s", kb_id, filename, existing_doc.id)
+
         text = extract_plain_text(filename, content)
+
+        # 文本提取完成，进入分块阶段
+        if progress_cb is not None:
+            await progress_cb("chunking", 15)
 
         # 先创建文档记录拿到 doc_id，再把它注入到每个 chunk 的 metadata
         doc_id = str(uuid.uuid4())
@@ -266,8 +313,18 @@ class KnowledgeService:
             ch.metadata.setdefault("source", filename)
             ch.metadata["kb_doc_id"] = doc_id
 
+        # 分块完成，进入嵌入向量化阶段
+        if progress_cb is not None:
+            await progress_cb("embedding", 20)
+
+        async def _emb_progress(pct: int) -> None:
+            if progress_cb is not None:
+                # 将嵌入阶段 0-100 映射到整体进度 20-85
+                mapped = 20 + int(pct * 0.65)
+                await progress_cb("embedding", mapped)
+
         try:
-            count = await upsert_documents(kb_id, chunks)
+            count = await upsert_documents(kb_id, chunks, progress_cb=_emb_progress)
         except Exception:
             # 写入向量失败：回滚 PG 中的文档记录，避免出现孤立的元数据行
             await self._session.execute(
@@ -275,8 +332,16 @@ class KnowledgeService:
             )
             raise
 
+        # 向量写入完成
+        if progress_cb is not None:
+            await progress_cb("writing", 90)
+
         doc_record.chunk_count = int(count)
         await self._session.flush()
+
+        # 全部完成
+        if progress_cb is not None:
+            await progress_cb("done", 100)
 
         return IngestResponse(
             kb_id=kb_id,

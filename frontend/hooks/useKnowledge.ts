@@ -210,6 +210,8 @@ export function useKnowledge(token: string | null) {
       const data = (await res.json()) as {
         status?: string;
         error?: string | null;
+        phase?: string | null;
+        progress?: number | null;
       };
       const st = data.status || "unknown";
       let completedKbId: string | null = null;
@@ -227,7 +229,13 @@ export function useKnowledge(token: string | null) {
               toast.error(`「${j.filename}」${err}`);
             }
           }
-          return { ...j, status: st, error: errMsg };
+          return {
+            ...j,
+            status: st,
+            error: errMsg,
+            phase: data.phase ?? j.phase,
+            serverProgress: data.progress ?? j.serverProgress,
+          };
         })
       );
       if (TERMINAL.has(st)) {
@@ -266,53 +274,146 @@ export function useKnowledge(token: string | null) {
     };
   }, []);
 
-  const handlePickFile = () => fileInputRef.current?.click();
+  const submitFileToIngest = useCallback(
+    (file: File, kbId: string): Promise<void> => {
+      if (!token) return Promise.resolve();
+      const fd = new FormData();
+      fd.append("file", file);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !token || !uploadKbId) {
-      if (!uploadKbId) toast.warning("请先选择要上传到的知识库");
-      return;
-    }
-    const lower = file.name.toLowerCase();
-    if (
-      !lower.endsWith(".pdf") &&
-      !lower.endsWith(".txt") &&
-      !lower.endsWith(".md") &&
-      !lower.endsWith(".docx")
-    ) {
-      toast.error("仅支持 PDF、TXT、Markdown（.md）、Word（.docx）文件");
-      return;
-    }
-    const fd = new FormData();
-    fd.append("file", file);
-    setError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/knowledge/${uploadKbId}/ingest-async`,
-        {
-          method: "POST",
-          headers: apiHeaders(token),
-          body: fd,
-        }
-      );
-      if (!res.ok) throw new Error(await parseApiError(res));
-      const data = (await res.json()) as { job_id?: string };
-      const jobId = data.job_id;
-      if (!jobId) throw new Error("未返回 job_id");
+      // 占位 jobId，上传完成后替换为服务端返回的真实 jobId
+      const placeholderId = `uploading-${Date.now()}-${Math.random()}`;
+
+      // 添加占位条目，显示上传进度
       setIngestJobs((prev) => [
         ...prev,
-        { kbId: uploadKbId, filename: file.name, jobId, status: "pending" },
+        {
+          kbId,
+          filename: file.name,
+          jobId: placeholderId,
+          status: "uploading",
+          uploadProgress: 0,
+          fileBlob: file,
+        },
       ]);
-      startPoll(jobId);
-      toast.success("已提交入库任务，请稍候查看进度");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      toast.error(msg);
-    }
-  };
+
+      return new Promise<void>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        const headers = apiHeaders(token);
+
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setIngestJobs((prev) =>
+            prev.map((j) =>
+              j.jobId === placeholderId ? { ...j, uploadProgress: pct } : j
+            )
+          );
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            let jobId: string | undefined;
+            try {
+              const data = JSON.parse(xhr.responseText) as { job_id?: string };
+              jobId = data.job_id;
+            } catch {
+              /* ignore */
+            }
+            if (!jobId) {
+              setIngestJobs((prev) =>
+                prev.map((j) =>
+                  j.jobId === placeholderId
+                    ? { ...j, status: "failed", error: "未返回 job_id", uploadProgress: undefined }
+                    : j
+                )
+              );
+              toast.error(`「${file.name}」提交失败：未返回 job_id`);
+              resolve();
+              return;
+            }
+            // 替换占位 jobId，清除上传进度，切换为 pending（等服务端处理）
+            setIngestJobs((prev) =>
+              prev.map((j) =>
+                j.jobId === placeholderId
+                  ? { ...j, jobId, status: "pending", uploadProgress: undefined }
+                  : j
+              )
+            );
+            startPoll(jobId);
+          } else {
+            let errMsg = xhr.statusText || "上传失败";
+            try {
+              const body = JSON.parse(xhr.responseText) as {
+                detail?: unknown;
+                message?: unknown;
+              };
+              const d = body.detail ?? body.message;
+              if (typeof d === "string") errMsg = d;
+            } catch {
+              /* ignore */
+            }
+            setIngestJobs((prev) =>
+              prev.map((j) =>
+                j.jobId === placeholderId
+                  ? { ...j, status: "failed", error: errMsg, uploadProgress: undefined }
+                  : j
+              )
+            );
+            toast.error(`「${file.name}」提交失败：${errMsg}`);
+          }
+          resolve();
+        };
+
+        xhr.onerror = () => {
+          const msg = "网络错误，请检查连接后重试";
+          setIngestJobs((prev) =>
+            prev.map((j) =>
+              j.jobId === placeholderId
+                ? { ...j, status: "failed", error: msg, uploadProgress: undefined }
+                : j
+            )
+          );
+          toast.error(`「${file.name}」${msg}`);
+          resolve();
+        };
+
+        xhr.open("POST", `${API_BASE}/api/knowledge/${kbId}/ingest-async`);
+        for (const [k, v] of Object.entries(headers)) {
+          xhr.setRequestHeader(k, v);
+        }
+        xhr.send(fd);
+      });
+    },
+    [token, startPoll]
+  );
+
+  const handleFilesSelected = useCallback(
+    async (files: File[]) => {
+      if (!token || !uploadKbId) {
+        if (!uploadKbId) toast.warning("请先选择要上传到的知识库");
+        return;
+      }
+      setError(null);
+      toast.success(`已提交 ${files.length} 个文件的入库任务，请稍候查看进度`);
+      for (const file of files) {
+        await submitFileToIngest(file, uploadKbId);
+      }
+    },
+    [token, uploadKbId, submitFileToIngest]
+  );
+
+  const handleRetry = useCallback(
+    async (job: IngestJobState) => {
+      if (!job.fileBlob) {
+        toast.warning("请重新选择文件");
+        return;
+      }
+      stopPoll(job.jobId);
+      setIngestJobs((prev) => prev.filter((j) => j.jobId !== job.jobId));
+      await submitFileToIngest(job.fileBlob, job.kbId);
+    },
+    [submitFileToIngest, stopPoll]
+  );
 
   // =====================================================================
   // 文档管理
@@ -471,8 +572,8 @@ export function useKnowledge(token: string | null) {
     setUploadKbId,
     ingestJobs,
     fileInputRef,
-    handlePickFile,
-    handleFileChange,
+    handleFilesSelected,
+    handleRetry,
     // 文档
     expandedKbId,
     documentsCache,

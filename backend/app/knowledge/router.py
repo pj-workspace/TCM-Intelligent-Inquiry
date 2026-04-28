@@ -65,6 +65,8 @@ async def get_ingest_job(
     return IngestJobStatusResponse(
         job_id=data.get("job_id", job_id),
         status=data.get("status", "unknown"),
+        phase=data.get("phase"),
+        progress=data.get("progress"),
         result=data.get("result"),
         error=data.get("error"),
     )

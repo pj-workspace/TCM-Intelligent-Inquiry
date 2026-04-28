@@ -3,6 +3,7 @@
 每个知识库对应一个 collection，命名：`kb_<uuid>`（连字符替换为下划线）。
 """
 
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 
 from langchain_core.documents import Document
@@ -64,15 +65,28 @@ def _ensure_collection(kb_id: str) -> None:
     logger.info("qdrant created collection=%s dim=%s", name, dim)
 
 
-async def upsert_documents(kb_id: str, documents: list[Document]) -> int:
-    """写入分块文档（由 Qdrant 调用嵌入模型生成向量）。"""
+async def upsert_documents(
+    kb_id: str,
+    documents: list[Document],
+    progress_cb: Callable[[int], Awaitable[None]] | None = None,
+    batch_size: int = 50,
+) -> int:
+    """写入分块文档。progress_cb 接收 0-100 的整数进度（仅嵌入+写入阶段）。"""
     if not documents:
         return 0
     _ensure_collection(kb_id)
     store = _vector_store(kb_id)
-    await store.aadd_documents(documents)
-    logger.info("qdrant upsert kb_id=%s chunks=%d", kb_id, len(documents))
-    return len(documents)
+    total = len(documents)
+    done = 0
+    for i in range(0, total, batch_size):
+        batch = documents[i : i + batch_size]
+        await store.aadd_documents(batch)
+        done += len(batch)
+        if progress_cb is not None:
+            pct = int(done / total * 100)
+            await progress_cb(pct)
+    logger.info("qdrant upsert kb_id=%s chunks=%d", kb_id, total)
+    return total
 
 
 async def similarity_search(

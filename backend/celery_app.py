@@ -34,5 +34,9 @@ def make_celery() -> Celery:
 
 celery_app = make_celery()
 
+# 确保所有 ORM 模型都注册到 SQLAlchemy metadata，避免外键解析失败
+import app.auth.models  # noqa: F401
+import app.knowledge.models  # noqa: F401
+
 # 注册任务（避免 Celery include 与 tasks 内 import 形成循环依赖）
 from app.workers import tasks as _ingest_tasks  # noqa: F401

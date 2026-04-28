@@ -64,9 +64,10 @@ export function KnowledgeBaseCard({
           className="min-w-0 flex-1 text-left"
         >
           <div className="font-medium text-gray-900">{kb.name}</div>
-          <p className="mt-0.5 text-xs text-gray-500">
-            文档数：{kb.document_count} · ID:{" "}
-            <span className="font-mono">{kb.id}</span>
+          <p className="mt-0.5 break-words text-xs text-gray-500">
+            文档数：{kb.document_count}
+            {kb.total_chunks ? ` · ${kb.total_chunks} 片段` : ""} · ID:{" "}
+            <span className="break-all font-mono">{kb.id}</span>
             {kb.embedding_model ? (
               <>
                 {" · embedding："}

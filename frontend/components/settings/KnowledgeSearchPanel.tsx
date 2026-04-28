@@ -1,8 +1,43 @@
 "use client";
 
-import { Search, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Search, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { Select } from "@/components/ui/Select";
 import type { KnowledgeBase, SearchResult } from "@/types/knowledge";
+
+// ─── 关键词高亮 ────────────────────────────────────────────────────────────────
+// split 捕获组会将匹配部分放在奇数索引位，非匹配部分在偶数索引位
+function highlightKeywords(text: string, query: string): React.ReactNode {
+  const keywords = query
+    .split(/\s+/)
+    .filter((k) => k.length > 0)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
+  if (keywords.length === 0) return text;
+
+  const pattern = new RegExp(`(${keywords.join("|")})`, "gi");
+  const parts = text.split(pattern);
+
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <mark
+        key={idx}
+        className="bg-orange-100 text-orange-800 rounded px-0.5"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
+
+// ─── 分数进度条颜色 ────────────────────────────────────────────────────────────
+function scoreBarColor(score: number): string {
+  if (score > 0.7) return "bg-green-500";
+  if (score > 0.4) return "bg-orange-400";
+  return "bg-gray-400";
+}
 
 interface KnowledgeSearchPanelProps {
   kbs: KnowledgeBase[];
@@ -41,8 +76,24 @@ export function KnowledgeSearchPanel({
   const selectedKb = kbs.find((k) => k.id === searchKbId);
   const lastKb = kbs.find((k) => k.id === lastSearchedKbId);
 
+  // 折叠/展开状态，以结果 index 为 key
+  const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
+
+  const toggleExpand = (idx: number) => {
+    setExpandedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setExpandedItems(new Set());
     onSearch();
   };
 
@@ -135,24 +186,75 @@ export function KnowledgeSearchPanel({
             {lastKb ? ` · 来自「${lastKb.name}」` : ""}
           </div>
           <ol className="space-y-3">
-            {searchResults.map((r, i) => (
-              <li
-                key={`${r.source}-${i}`}
-                className="rounded-lg border border-gray-200 bg-gray-50/40 p-3"
-              >
-                <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
-                  <span className="truncate font-mono">
-                    #{i + 1} · {r.source}
-                  </span>
-                  <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 font-mono text-[10px] text-orange-700">
-                    score {r.score.toFixed(4)}
-                  </span>
-                </div>
-                <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-gray-700">
-                  {r.content}
-                </pre>
-              </li>
-            ))}
+            {searchResults.map((r, i) => {
+              const isExpanded = expandedItems.has(i);
+              const normalizedScore = Math.min(r.score, 1);
+              const barWidth = Math.round(normalizedScore * 100);
+
+              return (
+                <li
+                  key={`${r.source}-${i}`}
+                  className="rounded-lg border border-gray-200 bg-gray-50/40 p-3"
+                >
+                  {/* 标题行：来源 + 分数 badge + 进度条 */}
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span className="min-w-0 flex-1 truncate font-mono">
+                      #{i + 1} · {r.source}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {/* 进度条 */}
+                      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-200">
+                        <div
+                          className={`h-full rounded-full transition-all ${scoreBarColor(normalizedScore)}`}
+                          style={{ width: `${barWidth}%` }}
+                        />
+                      </div>
+                      {/* 分数 badge */}
+                      <span className="rounded-full bg-orange-100 px-2 py-0.5 font-mono text-[10px] text-orange-700">
+                        score {r.score.toFixed(4)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 内容区域：折叠 / 展开 */}
+                  <div className="relative mt-2">
+                    <pre
+                      onClick={() => !isExpanded && toggleExpand(i)}
+                      className={`max-w-full whitespace-pre-wrap break-words font-sans text-sm text-gray-700 ${
+                        isExpanded
+                          ? "max-h-[min(24rem,50vh)] overflow-auto"
+                          : "line-clamp-3 cursor-pointer"
+                      }`}
+                    >
+                      {highlightKeywords(r.content, searchQuery)}
+                    </pre>
+                    {/* 折叠渐变遮罩 */}
+                    {!isExpanded && (
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-b from-transparent to-white/80" />
+                    )}
+                  </div>
+
+                  {/* 展开/收起按钮 */}
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(i)}
+                    className="mt-1.5 flex items-center gap-0.5 text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    {isExpanded ? (
+                      <>
+                        <ChevronUp className="h-3.5 w-3.5" />
+                        收起
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-3.5 w-3.5" />
+                        展开
+                      </>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}

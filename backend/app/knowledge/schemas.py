@@ -29,6 +29,10 @@ class KnowledgeBaseResponse(BaseModel):
         description="知识库首次入库时记录的向量维度；老库可能为空",
     )
     metadata: dict = Field(default_factory=dict)
+    total_chunks: int = Field(
+        default=0,
+        description="知识库内所有文档的向量分块总数（document chunk_count 之和）",
+    )
 
 
 class KnowledgeBaseCreateRequest(BaseModel):
@@ -67,6 +71,16 @@ class IngestJobCreateResponse(BaseModel):
 class IngestJobStatusResponse(BaseModel):
     job_id: str
     status: str
+    phase: str | None = Field(
+        default=None,
+        description="当前处理阶段：extracting / chunking / embedding / writing / done",
+    )
+    progress: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="服务端处理进度（0-100），仅 status=running 时有意义",
+    )
     result: dict[str, Any] | None = None
     error: str | None = None
 

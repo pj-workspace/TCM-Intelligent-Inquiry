@@ -122,8 +122,8 @@ export function KnowledgeTab() {
         setUploadKbId={k.setUploadKbId}
         fileInputRef={k.fileInputRef}
         ingestJobs={k.ingestJobs}
-        onPickFile={k.handlePickFile}
-        onFileChange={k.handleFileChange}
+        onFilesSelected={k.handleFilesSelected}
+        onRetry={k.handleRetry}
       />
 
       <KnowledgeSearchPanel
