@@ -16,12 +16,31 @@ class KnowledgeBaseResponse(BaseModel):
     name: str
     description: str
     document_count: int
+    embedding_provider: str | None = Field(
+        default=None,
+        description="知识库首次入库时记录的嵌入厂商，例如 qwen / openai；老库可能为空",
+    )
+    embedding_model: str | None = Field(
+        default=None,
+        description="知识库首次入库时记录的嵌入模型名；老库可能为空",
+    )
+    embedding_dim: int | None = Field(
+        default=None,
+        description="知识库首次入库时记录的向量维度；老库可能为空",
+    )
     metadata: dict = Field(default_factory=dict)
 
 
 class KnowledgeBaseCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, description="知识库名称")
     description: str = Field(default="", description="知识库说明")
+
+
+class KnowledgeBaseUpdateRequest(BaseModel):
+    """部分更新知识库元数据；仅传入字段会被写入。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class KnowledgeBaseListResponse(BaseModel):
@@ -69,3 +88,19 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     results: list[SearchResult]
     query: str
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    """单个已入库文档的元数据视图。"""
+
+    id: str
+    kb_id: str
+    filename: str
+    chunk_count: int
+    file_size: int
+    created_at: str = Field(..., description="ISO8601 时间字符串")
+
+
+class KnowledgeDocumentListResponse(BaseModel):
+    documents: list[KnowledgeDocumentResponse]
+    total: int

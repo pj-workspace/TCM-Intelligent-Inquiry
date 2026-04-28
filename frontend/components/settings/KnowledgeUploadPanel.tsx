@@ -9,7 +9,7 @@ interface KnowledgeUploadPanelProps {
   kbs: KnowledgeBase[];
   uploadKbId: string;
   setUploadKbId: (id: string) => void;
-  fileInputRef: React.RefObject<HTMLInputElement>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
   ingestJobs: IngestJobState[];
   onPickFile: () => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -50,7 +50,7 @@ export function KnowledgeUploadPanel({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+          accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           className="hidden"
           onChange={onFileChange}
         />

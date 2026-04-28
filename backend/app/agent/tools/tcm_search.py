@@ -6,8 +6,10 @@ from app.agent.tools.registry import tool_registry
 from app.core.chat_context import chat_agent_kb_id, chat_user_id
 from app.core.config import get_settings
 from app.core.database import async_session_factory
+from app.core.exceptions import ValidationError
 from app.knowledge.models import KnowledgeBaseRecord
 from app.knowledge.retrieval import retrieve_kb_chunks
+from app.knowledge.vectorstore import VectorStoreUnavailable
 from sqlalchemy import select
 
 
@@ -100,7 +102,14 @@ async def search_tcm_knowledge(
         k = max(1, min(int(top_k), 20))
     except (TypeError, ValueError):
         k = 5
-    pairs = await retrieve_kb_chunks(resolved, q, k)
+    try:
+        pairs = await retrieve_kb_chunks(resolved, q, k)
+    except (VectorStoreUnavailable, ValidationError) as exc:
+        # 工具层不应让 Agent 崩溃；返回提示文本，由模型决定是否换用其他工具
+        return (
+            f"知识库 `{resolved}` 当前不可用（{exc}），"
+            "请稍后重试，或联系管理员检查 Qdrant / 嵌入模型配置。"
+        )
     if not pairs:
         return (
             f"在知识库 `{resolved}` 中未检索到与「{q}」相关的片段；"

@@ -17,6 +17,14 @@ from app.llm.registry import get_embeddings
 logger = get_logger(__name__)
 
 
+class VectorStoreUnavailable(Exception):
+    """Qdrant 不可用或检索/写入失败的统一异常。
+
+    与"集合不存在"语义区分：集合不存在视为"知识库为空"，由调用方返回空结果；
+    其它真实故障（连接失败、协议错误等）以本异常向上抛出，由上层转换为友好提示。
+    """
+
+
 @lru_cache(maxsize=8)
 def _qdrant_client_for_url(qdrant_url: str) -> QdrantClient:
     # 与 docker 内 Qdrant 主版本可能不一致时仅告警，不阻断
@@ -70,13 +78,28 @@ async def upsert_documents(kb_id: str, documents: list[Document]) -> int:
 async def similarity_search(
     kb_id: str, query: str, top_k: int = 5
 ) -> list[tuple[Document, float]]:
-    """语义检索，返回 (Document, score)；score 越小通常表示越相似（取决于距离度量）。"""
+    """语义检索，返回 (Document, score)。
+
+    - collection 不存在时返回 []（视为"知识库为空"，不应抛错打断流程）；
+    - 其它异常统一封装为 :class:`VectorStoreUnavailable` 抛出，由上层决定降级或提示。
+    """
+    name = _collection_name(kb_id)
+    client = _qdrant_client()
+    try:
+        exists = client.collection_exists(collection_name=name)
+    except Exception as exc:
+        logger.warning("qdrant connectivity error kb_id=%s: %s", kb_id, exc)
+        raise VectorStoreUnavailable(f"向量库连接失败：{exc}") from exc
+    if not exists:
+        logger.debug("qdrant collection absent, treat as empty: %s", name)
+        return []
+
     store = _vector_store(kb_id)
     try:
         pairs = await store.asimilarity_search_with_score(query, k=top_k)
     except Exception as exc:
         logger.warning("qdrant search kb_id=%s: %s", kb_id, exc)
-        return []
+        raise VectorStoreUnavailable(f"向量检索失败：{exc}") from exc
     return pairs
 
 
@@ -89,3 +112,28 @@ async def delete_kb_vectors(kb_id: str) -> None:
         return
     client.delete_collection(collection_name=name)
     logger.info("qdrant deleted collection=%s", name)
+
+
+async def delete_document_vectors(kb_id: str, doc_id: str) -> None:
+    """按 `metadata.kb_doc_id` 过滤删除单个文档对应的所有向量分块。
+
+    底层走 Qdrant 的过滤删除（FilterSelector）；若 collection 不存在直接跳过。
+    """
+    name = _collection_name(kb_id)
+    client = _qdrant_client()
+    if not client.collection_exists(collection_name=name):
+        logger.debug("qdrant collection absent, skip doc delete: %s", name)
+        return
+    flt = qmodels.Filter(
+        must=[
+            qmodels.FieldCondition(
+                key="metadata.kb_doc_id",
+                match=qmodels.MatchValue(value=doc_id),
+            )
+        ]
+    )
+    client.delete(
+        collection_name=name,
+        points_selector=qmodels.FilterSelector(filter=flt),
+    )
+    logger.info("qdrant deleted doc vectors kb_id=%s doc_id=%s", kb_id, doc_id)

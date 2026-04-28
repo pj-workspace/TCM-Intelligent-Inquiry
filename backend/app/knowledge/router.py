@@ -25,6 +25,8 @@ from app.knowledge.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseListResponse,
     KnowledgeBaseResponse,
+    KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentListResponse,
     SearchRequest,
     SearchResponse,
 )
@@ -94,6 +96,16 @@ async def get_kb(
     return await svc.get_kb(kb_id, user.id)
 
 
+@router.patch("/{kb_id}", response_model=KnowledgeBaseResponse, summary="更新知识库元数据")
+async def update_kb(
+    kb_id: str,
+    req: KnowledgeBaseUpdateRequest,
+    user: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
+    return await svc.update_kb(kb_id, req, user.id)
+
+
 @router.delete("/{kb_id}", status_code=204, summary="删除知识库")
 async def remove_kb(
     kb_id: str,
@@ -101,6 +113,33 @@ async def remove_kb(
     svc: KnowledgeService = Depends(_svc),
 ):
     await svc.delete_kb(kb_id, user.id)
+
+
+@router.get(
+    "/{kb_id}/documents",
+    response_model=KnowledgeDocumentListResponse,
+    summary="列出知识库内已入库的文档",
+)
+async def list_documents(
+    kb_id: str,
+    user: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
+    return await svc.list_documents(kb_id, user.id)
+
+
+@router.delete(
+    "/{kb_id}/documents/{doc_id}",
+    status_code=204,
+    summary="删除知识库内的单个文档（同步清除 Qdrant 中归属向量）",
+)
+async def remove_document(
+    kb_id: str,
+    doc_id: str,
+    user: Annotated[UserRecord, Depends(require_kb_user)],
+    svc: KnowledgeService = Depends(_svc),
+):
+    await svc.delete_document(kb_id, doc_id, user.id)
 
 
 @router.post("/{kb_id}/ingest", response_model=IngestResponse, summary="上传文档入库（同步）")

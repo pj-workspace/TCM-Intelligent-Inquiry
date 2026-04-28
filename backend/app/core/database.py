@@ -1,14 +1,20 @@
 """异步 SQLAlchemy 引擎与会话工厂。
 
 表结构在首次启动时通过 metadata.create_all 创建；生产环境建议改用 Alembic 迁移。
+对已存在的旧表，`metadata.create_all` 不会自动 ALTER 加列，因此 `init_db` 在创建
+之后会执行少量 PostgreSQL 专用的 `ADD COLUMN IF NOT EXISTS` 兜底。
 """
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -43,10 +49,32 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+# 知识库新增的嵌入指纹列：dev 模式下需对老库做轻量补列（PostgreSQL 9.6+）
+_KB_AUTO_MIGRATE_DDL: tuple[str, ...] = (
+    "ALTER TABLE knowledge_bases "
+    "ADD COLUMN IF NOT EXISTS embedding_provider VARCHAR(50)",
+    "ALTER TABLE knowledge_bases "
+    "ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(120)",
+    "ALTER TABLE knowledge_bases "
+    "ADD COLUMN IF NOT EXISTS embedding_dim INTEGER",
+)
+
+
+async def _auto_migrate_kb_columns() -> None:
+    """对 `knowledge_bases` 表补齐嵌入指纹列；仅 PostgreSQL 生效（IF NOT EXISTS 语法依赖 PG）。"""
+    s = get_settings()
+    if "postgres" not in (s.database_url or "").lower():
+        return
+    async with engine.begin() as conn:
+        for stmt in _KB_AUTO_MIGRATE_DDL:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                logger.warning("auto-migrate skipped: %s — %s", stmt, exc)
+
+
 async def init_db() -> None:
     """创建缺失的表（仅当配置 database_auto_create_tables 为 True）。"""
-    from app.core.config import get_settings
-
     if not get_settings().database_auto_create_tables:
         return
     # 确保模型已注册到 metadata
@@ -59,3 +87,5 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    await _auto_migrate_kb_columns()
