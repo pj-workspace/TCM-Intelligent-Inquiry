@@ -34,6 +34,18 @@ class ChatRequest(BaseModel):
         description="为 True 时需带 conversation_id：删除该会话最后一条用户消息之后的 thinking/assistant，"
         "不重复写入用户消息，用于「重新生成」上一轮助手回复。",
     )
+    deep_think: bool = Field(
+        default=False,
+        description="为 True 时在系统提示中追加「深度思考」指令：逐步推理；若模型支持思考通道则展示推理过程。",
+    )
+    web_search_enabled: bool = Field(
+        default=False,
+        description="为 True 时在系统提示中追加联网检索（searx_web_search）策略说明。",
+    )
+    web_search_mode: Literal["force", "auto"] = Field(
+        default="force",
+        description="在 web_search_enabled 时生效：force=必须调用联网搜索；auto=由模型判断是否需要搜网。",
+    )
 
 
 class ConversationItem(BaseModel):

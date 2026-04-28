@@ -256,8 +256,8 @@ export function BrainstormPanel({
   }, [isOpen]);
 
   return (
-    <div className="flex w-full max-w-3xl justify-start px-4 pt-1.5 pb-2 md:mx-auto md:px-0">
-      <div className="max-w-[85%] w-full">
+    <div className="flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl justify-start px-4 pt-1.5 pb-2 sm:px-5 md:mx-auto md:px-6 lg:px-8">
+      <div className="w-full max-w-full">
         <button
           type="button"
           onClick={onToggle}

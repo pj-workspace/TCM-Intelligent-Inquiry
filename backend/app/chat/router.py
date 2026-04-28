@@ -46,6 +46,9 @@ async def chat(
             user,
             req.anon_session_secret,
             req.regenerate_last_reply,
+            deep_think=req.deep_think,
+            web_search_enabled=req.web_search_enabled,
+            web_search_mode=req.web_search_mode,
         ),
         media_type="text/event-stream",
     )

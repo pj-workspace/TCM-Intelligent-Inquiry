@@ -216,14 +216,14 @@ export function MessageBubble({
     return (
       <div
         className={clsx(
-          "flex w-full max-w-3xl mx-auto py-4 px-4 md:px-0",
+          "flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto py-4 px-4 sm:px-5 md:px-6 lg:px-8",
           "justify-end"
         )}
       >
-        <div className="flex flex-row-reverse items-start gap-2 group max-w-[85%]">
+        <div className="flex min-w-0 max-w-[88%] flex-row-reverse items-start gap-2 group sm:max-w-[min(76%,34rem)] md:max-w-[min(70%,35rem)]">
           <div
             className={clsx(
-              "text-[15px] leading-relaxed",
+              "text-[15px] leading-relaxed break-words [overflow-wrap:anywhere]",
               "bg-[#f4f4f4] text-[#1a1a1a] rounded-2xl rounded-tr-sm px-5 py-3.5"
             )}
           >
@@ -262,9 +262,9 @@ export function MessageBubble({
   }
 
   return (
-    <div className={clsx("flex w-full max-w-3xl mx-auto px-4 md:px-0 justify-start", noTopPad ? "pt-0 pb-4" : "py-4")}>
-      <div className="flex flex-col gap-2 max-w-[85%] items-start w-full">
-        <div className="text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full">
+    <div className={clsx("flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 sm:px-5 md:px-6 lg:px-8 justify-start", noTopPad ? "pt-0 pb-4" : "py-4")}>
+      <div className="flex min-w-0 w-full max-w-full flex-col items-start gap-2">
+        <div className="text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full min-w-0 md:max-w-[68ch] lg:max-w-[80ch] xl:max-w-[96ch]">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={assistantMarkdownComponents}

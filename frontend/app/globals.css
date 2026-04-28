@@ -38,10 +38,15 @@
 /* Custom styles for AI output */
 .ai-content {
   @apply font-serif text-[1.05rem] leading-relaxed tracking-wide;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ai-content p {
   @apply mb-4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .ai-content strong {
@@ -102,11 +107,18 @@
 }
 
 .ai-content code {
-  @apply font-mono text-sm bg-muted px-1.5 py-0.5 rounded-md;
+  @apply font-mono text-sm rounded-md;
+  background-color: color-mix(in srgb, var(--muted) 72%, transparent);
+  padding: 0.1em 0.28em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .ai-content pre {
   @apply bg-[#1e1e1e] text-white p-4 rounded-lg overflow-x-auto my-4 font-mono text-sm;
+  max-width: 100%;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -119,6 +131,7 @@
 
 .ai-content pre code {
   @apply bg-transparent p-0 text-white;
+  white-space: pre-wrap;
 }
 
 /* 骨架屏：文字条的高光扫过动效 */

@@ -6,7 +6,9 @@ import time
 import uuid
 import asyncio
 from collections.abc import AsyncIterator, Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+
+from app.agent.executor import build_agent_graph_for_chat_request
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy import delete, select
@@ -238,9 +240,11 @@ async def stream_chat(
     user: "UserRecord | None",
     anon_session_secret: str | None = None,
     regenerate_last_reply: bool = False,
+    *,
+    deep_think: bool = False,
+    web_search_enabled: bool = False,
+    web_search_mode: Literal["force", "auto"] = "force",
 ) -> AsyncIterator[str]:
-    from app.agent.executor import build_agent_graph
-
     user_id = user.id if user else None
     msg_in = message.strip()
     if not msg_in:
@@ -370,7 +374,12 @@ async def stream_chat(
                     agent_kb_id = str(arow.default_kb_id).strip() or None
         kb_ctx_token = chat_agent_kb_id.set(agent_kb_id)
 
-        graph = await build_agent_graph(effective_agent_id)
+        graph = await build_agent_graph_for_chat_request(
+            effective_agent_id,
+            deep_think=deep_think,
+            web_search_enabled=web_search_enabled,
+            web_search_mode=web_search_mode,
+        )
 
         assistant_parts: list[str] = []
         thinking_buf: list[str] = []

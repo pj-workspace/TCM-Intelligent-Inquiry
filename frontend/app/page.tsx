@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/chat/Sidebar";
+import { ConversationSearchModal } from "@/components/chat/ConversationSearchModal";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE } from "@/lib/api";
 import { MessageBubble, markdownToPlainText } from "@/components/chat/MessageBubble";
@@ -13,8 +14,9 @@ import {
 } from "@/components/chat/BrainstormPanel";
 import { ClaudeStar } from "@/components/chat/ClaudeStar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download, ArrowDown } from "lucide-react";
+import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download, ArrowDown, Brain, Globe, Check, PanelLeftOpen, PanelLeftClose } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
 type ChatMessage = {
   id: string;
@@ -205,13 +207,19 @@ export default function Home() {
   
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [serverConversations, setServerConversations] = useState<
-    { id: string; title: string }[]
+    { id: string; title: string; created_at?: string }[]
   >([]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const { token, loading: authLoading, logout } = useAuth();
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [deepThinkEnabled, setDeepThinkEnabled] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchMode, setWebSearchMode] = useState<"force" | "auto">("force");
 
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const headerMenuRef = useRef<HTMLDivElement>(null);
@@ -289,10 +297,10 @@ export default function Home() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return;
-    const data = (await res.json()) as { id: string; title: string }[];
+    const data = (await res.json()) as { id: string; title: string; created_at?: string }[];
     if (!Array.isArray(data)) return;
     setServerConversations(
-      data.map((x) => ({ id: x.id, title: x.title?.trim() || "未命名" }))
+      data.map((x) => ({ id: x.id, title: x.title?.trim() || "未命名", created_at: x.created_at }))
     );
   }, [token]);
 
@@ -533,6 +541,9 @@ export default function Home() {
           conversation_id: conversationId,
           regenerate_last_reply: opts?.regenerateLastReply ?? false,
           agent_id: localStorage.getItem("tcm_default_agent_id") ?? undefined,
+          deep_think: deepThinkEnabled,
+          web_search_enabled: webSearchEnabled,
+          web_search_mode: webSearchMode,
         }),
       });
 
@@ -581,7 +592,7 @@ export default function Home() {
                   localStorage.setItem("tcm_conversation_id", data.conversationId);
                   setServerConversations(prev => {
                     if (prev.some(c => c.id === data.conversationId)) return prev;
-                    return [{ id: data.conversationId, title: "" }, ...prev];
+                    return [{ id: data.conversationId, title: "", created_at: new Date().toISOString() }, ...prev];
                   });
                 }
                 if (
@@ -790,7 +801,7 @@ export default function Home() {
                   setServerConversations((prev) => {
                     const idx = prev.findIndex((c) => c.id === cid);
                     if (idx === -1) {
-                      return [{ id: cid, title: nextTitle }, ...prev];
+                      return [{ id: cid, title: nextTitle, created_at: new Date().toISOString() }, ...prev];
                     }
                     return prev.map((c) =>
                       c.id === cid ? { ...c, title: nextTitle } : c
@@ -977,12 +988,23 @@ export default function Home() {
         onDelete={openDeleteDialog}
         streamBusy={genState !== "idle"}
         isGeneratingTitle={isGeneratingTitle}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((v) => !v)}
+        onOpenSearch={() => setSearchOpen(true)}
+      />
+      <ConversationSearchModal
+        open={searchOpen}
+        conversations={token ? serverConversations : []}
+        onClose={() => setSearchOpen(false)}
+        onSelect={(id) => { handleSelectConversation(id); setSearchOpen(false); }}
+        onNewChat={() => { handleNewChat(); setSearchOpen(false); }}
       />
 
       <main className="flex-1 flex flex-col relative min-w-0">
         {/* 统一的顶部 Header */}
         <header className="flex-shrink-0 h-14 flex items-center justify-between px-4 md:px-6 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm z-10">
-          <div className="flex items-center gap-2 max-w-[60%] min-w-0 flex-1 md:flex-initial">
+          <div className="flex items-center gap-1 min-w-0 flex-1 md:flex-initial">
+            {/* 移动端品牌名 */}
             <div className="font-semibold text-sm shrink-0 md:hidden">TCM AI</div>
             {showMobileTitleSkeleton && (
               <div
@@ -993,8 +1015,34 @@ export default function Home() {
                 <div className="skeleton-text-shimmer h-4 w-32 rounded-md" />
               </div>
             )}
+
+            {/* 侧栏收起时：展开 + 新建 图标组（仅 md+） */}
+            {sidebarCollapsed && (
+              <div className="hidden md:flex items-center gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title="展开侧栏"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                >
+                  <PanelLeftOpen className="w-[1.05rem] h-[1.05rem]" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNewChat}
+                  title="新建会话"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                >
+                  <Plus className="w-[1.05rem] h-[1.05rem]" />
+                </button>
+                {/* 分割线 */}
+                <div className="h-4 w-px bg-gray-200 mx-1 shrink-0" />
+              </div>
+            )}
+
+            {/* 会话标题（md+） */}
             {hasStarted && conversationId && (
-               <div className="hidden md:block font-medium text-sm text-gray-800 truncate min-h-[1.25rem]">
+               <div className="hidden md:block font-medium text-sm text-gray-800 truncate min-h-[1.25rem] max-w-[28rem]">
                  {isEditingTitle ? (
                    <input 
                      autoFocus
@@ -1005,15 +1053,10 @@ export default function Home() {
                      onKeyDown={e => { if (e.key === 'Enter') handleSaveTitle(); else if (e.key === 'Escape') setIsEditingTitle(false); }}
                    />
                  ) : isGeneratingTitle ? (
-                   <span className="block text-transparent select-none" aria-hidden>
-                     &nbsp;
-                   </span>
+                   <span className="block text-transparent select-none" aria-hidden>&nbsp;</span>
                  ) : (
                    <span
-                     key={
-                       serverConversations.find((c) => c.id === conversationId)
-                         ?.title || "会话记录"
-                     }
+                     key={serverConversations.find((c) => c.id === conversationId)?.title || "会话记录"}
                      className="block truncate font-medium sidebar-conv-title-sweep"
                    >
                      {serverConversations.find(c => c.id === conversationId)?.title || "会话记录"}
@@ -1195,7 +1238,7 @@ export default function Home() {
                         animate={{ opacity: 1, height: "auto", scale: 1 }}
                         exit={{ opacity: 0, height: 0, scale: 0.5, transition: { duration: 0 } }}
                         transition={{ duration: 0.15, ease: "easeOut" }}
-                        className="w-full max-w-3xl mx-auto px-4 md:px-0 flex justify-start overflow-hidden"
+                        className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 sm:px-5 md:px-6 lg:px-8 flex justify-start overflow-hidden"
                         style={{ transformOrigin: "left center" }}
                       >
                         <div className="py-3">
@@ -1256,7 +1299,7 @@ export default function Home() {
               )}
             </AnimatePresence>
 
-            <div className="w-full max-w-3xl relative">
+            <div className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl relative">
               <motion.div 
                 layout
                 transition={springTransition}
@@ -1267,22 +1310,137 @@ export default function Home() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="描述您的症状，或询问中医知识..."
+                  placeholder="有问题，尽管问，Shift+Enter 换行"
                   className="no-scrollbar w-full max-h-[200px] min-h-[60px] overflow-y-auto py-4 px-4 bg-transparent resize-none outline-none text-[16px] text-gray-800 placeholder:text-gray-400"
                   rows={1}
                 />
                 
-                <motion.div layout="position" className="flex items-center justify-between px-3 pb-3 pt-1">
-                  <button className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-                    <Plus className="w-5 h-5" />
-                  </button>
-                  
-                  <div className="flex items-center gap-2">
-                    <button className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                <motion.div layout="position" className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3 pt-1">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => setDeepThinkEnabled((v) => !v)}
+                      disabled={genState !== "idle"}
+                      title="开启后系统提示将要求模型逐步推理；若接口支持，思考过程将流式展示"
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all duration-150 disabled:opacity-50 ${
+                        deepThinkEnabled
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      <Brain className="h-3.5 w-3.5 shrink-0" />
+                      深度思考
+                    </button>
+                    <div
+                      className={`inline-flex items-center rounded-full border transition-all duration-150 ${
+                        genState !== "idle" ? "pointer-events-none opacity-50" : ""
+                      } ${
+                        webSearchEnabled
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                        <button
+                          type="button"
+                          disabled={genState !== "idle"}
+                          onClick={() => setWebSearchEnabled((v) => !v)}
+                          title={webSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
+                          className="flex items-center gap-1.5 rounded-l-full py-1.5 pl-3 pr-1 text-xs font-medium transition-colors"
+                        >
+                          <Globe className="h-3.5 w-3.5 shrink-0" />
+                          联网搜索
+                        </button>
+                      <DropdownMenu.Root modal={false}>
+                        <DropdownMenu.Trigger asChild>
+                          <button
+                            type="button"
+                            disabled={genState !== "idle"}
+                            aria-label="选择联网搜索模式"
+                            title="选择联网搜索模式"
+                          className="group flex cursor-pointer items-center rounded-r-full py-1 pl-0.5 pr-1 disabled:cursor-not-allowed"
+                          >
+                            <span
+                              className={`flex h-6 w-6 items-center justify-center rounded-full transition-transform duration-150 group-hover:scale-110 group-data-[state=open]:scale-110 ${
+                                webSearchEnabled
+                                  ? "group-hover:text-emerald-800 group-data-[state=open]:text-emerald-800"
+                                  : "group-hover:text-gray-800 group-data-[state=open]:text-gray-800"
+                              }`}
+                              aria-hidden
+                            >
+                              <ChevronDown
+                                className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-out group-data-[state=open]:rotate-180"
+                                strokeWidth={2.25}
+                              />
+                            </span>
+                          </button>
+                        </DropdownMenu.Trigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                          side="top"
+                          align="end"
+                          sideOffset={6}
+                          className="z-[100] w-fit min-w-[10.5rem] rounded-lg border border-gray-200 bg-white py-1 shadow-md outline-none"
+                        >
+                          <DropdownMenu.Label className="px-3 pb-0.5 pt-1.5 text-[11px] font-medium text-gray-400">
+                            联网搜索模式
+                          </DropdownMenu.Label>
+                          <DropdownMenu.Item
+                            className="mx-1 grid cursor-pointer grid-cols-[auto_1rem] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none data-[highlighted]:bg-gray-50"
+                            onSelect={() => {
+                              setWebSearchEnabled(true);
+                              setWebSearchMode("auto");
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-900">自动</div>
+                              <div className="text-[11px] leading-tight text-gray-400">自动判断是否联网</div>
+                            </div>
+                            {webSearchEnabled && webSearchMode === "auto" ? (
+                              <Check className="h-3.5 w-3.5 shrink-0 text-gray-700" strokeWidth={2.5} />
+                            ) : (
+                              <span className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            )}
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            className="mx-1 grid cursor-pointer grid-cols-[auto_1rem] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none data-[highlighted]:bg-gray-50"
+                            onSelect={() => {
+                              setWebSearchEnabled(true);
+                              setWebSearchMode("force");
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-900">手动</div>
+                              <div className="text-[11px] leading-tight text-gray-400">手动控制联网状态</div>
+                            </div>
+                            {webSearchEnabled && webSearchMode === "force" ? (
+                              <Check className="h-3.5 w-3.5 shrink-0 text-gray-700" strokeWidth={2.5} />
+                            ) : (
+                              <span className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            )}
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="附件（待接入）"
+                    >
+                      <Plus className="w-5 h-5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                    >
                       TCM Pro 1.0
                       <ChevronDown className="w-3.5 h-3.5" />
                     </button>
-                    
+
                     <button
                       type="button"
                       onClick={() => void handleSend()}
@@ -1350,16 +1508,15 @@ export default function Home() {
               </AnimatePresence>
               
               <AnimatePresence>
-                {hasStarted && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3, duration: 0.4 }}
-                    className="text-center mt-3 text-xs text-gray-400 font-medium"
-                  >
-                    AI 可能会产生误导性信息，请结合实际情况判断。
-                  </motion.div>
-                )}
+                <motion.div
+                  key="disclaimer"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="text-center mt-3 text-xs text-gray-400 font-medium px-2"
+                >
+                  AI 可能会产生误导性信息，请结合实际情况判断。
+                </motion.div>
               </AnimatePresence>
             </div>
           </motion.div>

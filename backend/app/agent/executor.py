@@ -6,6 +6,7 @@
 
 import hashlib
 from collections import OrderedDict
+from typing import Literal
 
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import create_react_agent
@@ -37,6 +38,41 @@ _RAW_DEFAULT_SYSTEM_PROMPT = """\
 """
 
 _DEFAULT_SYSTEM_PROMPT = append_tcm_safety_to_system_prompt(_RAW_DEFAULT_SYSTEM_PROMPT)
+
+_DEEP_THINK_SUFFIX = """\
+【深度思考模式】
+- 在给出最终回答前，请先充分进行逐步推理：澄清用户意图、相关中医理论要点、是否需要工具及调用顺序。
+- 推理过程应严谨、分步；若当前模型支持将推理与最终回答分离输出，请利用该能力展示思考过程。
+- 最终回答仍需简洁可读，并符合中医咨询合规要求。"""
+
+_WEB_SEARCH_FORCE_SUFFIX = """\
+【联网检索·必搜】
+- 本轮用户已开启「联网搜索」且要求必须检索：你须调用 searx_web_search，构造与用户问题相关的检索词，获取网页摘要后再组织答案。
+- 至少完成一次有意的联网尝试：若工具报错、超时或结果为空，须在答复中如实说明，并基于已有知识做最佳努力说明（勿捏造网页内容）。
+- 涉及政策法规、新闻时效、现代研究进展等问题时尤应检索核对。"""
+
+_WEB_SEARCH_AUTO_SUFFIX = """\
+【联网检索·自动】
+- 用户已允许使用联网搜索：仅当回答依赖近期事实、法规政策、新闻动态，或你不确定且可通过公开网页核实的内容时，调用 searx_web_search。
+- 若问题属于典籍、教材级中医知识且无核实必要，可直接作答，不必强行搜网。
+- 调用检索后请归纳要点；信息源自网页摘要时请交代来源性质。"""
+
+
+def _dynamic_prompt_suffix(
+    deep_think: bool,
+    web_search_enabled: bool,
+    web_search_mode: Literal["auto", "force"],
+) -> str:
+    parts: list[str] = []
+    if deep_think:
+        parts.append(_DEEP_THINK_SUFFIX)
+    if web_search_enabled:
+        parts.append(
+            _WEB_SEARCH_FORCE_SUFFIX
+            if web_search_mode == "force"
+            else _WEB_SEARCH_AUTO_SUFFIX
+        )
+    return "\n\n".join(parts)
 
 
 def _load_all_tools():
@@ -150,3 +186,68 @@ async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
         while len(_named_agent_graphs) > _MAX_NAMED_AGENT_GRAPHS:
             _named_agent_graphs.popitem(last=False)
         return graph
+
+
+async def _build_ephemeral_agent_graph(agent_id: str | None, suffix: str) -> CompiledStateGraph:
+    """不缓存；用于本轮带有深度思考 / 联网策略等动态系统提示后缀。"""
+    ensure_tools_loaded()
+    llm = get_chat_model()
+    extra = suffix.strip()
+    if not agent_id:
+        tools = _load_all_tools()
+        raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+        prompt = append_tcm_safety_to_system_prompt(raw)
+        logger.info("创建临时 ReAct Agent（动态提示），工具: %s", [t.name for t in tools])
+        return create_react_agent(llm, tools, prompt=prompt)
+
+    from app.agent.models import AgentRecord
+
+    async with async_session_factory() as session:
+        row = await session.get(AgentRecord, agent_id)
+        if row is None:
+            tools = _load_all_tools()
+            raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+            prompt = append_tcm_safety_to_system_prompt(raw)
+            logger.warning(
+                "Agent id=%s 不存在，使用默认配置 + 动态后缀；工具: %s",
+                agent_id,
+                [t.name for t in tools],
+            )
+            return create_react_agent(llm, tools, prompt=prompt)
+
+        names = row.tool_names or []
+        if names:
+            tools = tool_registry.get(names)
+            if len(tools) != len(names):
+                found = {t.name for t in tools}
+                missing = [n for n in names if n not in found]
+                logger.warning("Agent 工具部分缺失，已忽略: %s", missing)
+        else:
+            tools = tool_registry.all()
+        if not tools:
+            tools = tool_registry.all()
+
+        base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
+        raw = base + ("\n\n" + extra if extra else "")
+        prompt = append_tcm_safety_to_system_prompt(raw)
+        logger.info(
+            "创建临时 Agent id=%s name=%s tools=%s（动态提示）",
+            row.id,
+            row.name,
+            [t.name for t in tools],
+        )
+        return create_react_agent(llm, tools, prompt=prompt)
+
+
+async def build_agent_graph_for_chat_request(
+    agent_id: str | None,
+    *,
+    deep_think: bool = False,
+    web_search_enabled: bool = False,
+    web_search_mode: Literal["auto", "force"] = "force",
+) -> CompiledStateGraph:
+    """按本轮选项拼接系统提示；无选项时走缓存的 build_agent_graph。"""
+    suffix = _dynamic_prompt_suffix(deep_think, web_search_enabled, web_search_mode)
+    if not suffix:
+        return await build_agent_graph(agent_id)
+    return await _build_ephemeral_agent_graph(agent_id, suffix)
