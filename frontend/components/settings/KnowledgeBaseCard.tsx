@@ -1,85 +1,44 @@
 "use client";
 
-import {
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  Loader2,
-  Pencil,
-  Trash2,
-  X,
-} from "lucide-react";
-import { formatFileSize } from "@/lib/format";
-import type { KnowledgeBase, KnowledgeDocument } from "@/types/knowledge";
+import { Pencil, Trash2, Database } from "lucide-react";
+import type { KnowledgeBase } from "@/types/knowledge";
 
 interface KnowledgeBaseCardProps {
   kb: KnowledgeBase;
-  expanded: boolean;
-  documents: KnowledgeDocument[] | undefined;
-  loadingDocs: boolean;
-  deletingDocId: string | null;
-  onToggleExpand: () => void;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onRequestDeleteDoc: (doc: KnowledgeDocument) => void;
-}
-
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("zh-CN");
-  } catch {
-    return iso;
-  }
 }
 
 export function KnowledgeBaseCard({
   kb,
-  expanded,
-  documents,
-  loadingDocs,
-  deletingDocId,
-  onToggleExpand,
+  onOpen,
   onEdit,
   onDelete,
-  onRequestDeleteDoc,
 }: KnowledgeBaseCardProps) {
   return (
-    <div className="rounded-xl border border-[#e5e5e5] bg-white shadow-sm">
-      <div className="flex items-start gap-3 p-4">
+    <div className="group relative flex flex-col rounded-xl border border-[#e5e5e5] bg-white p-5 shadow-sm transition-all hover:border-orange-300 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
         <button
           type="button"
-          onClick={onToggleExpand}
-          className="-ml-1 mt-0.5 shrink-0 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-          aria-label={expanded ? "收起文档列表" : "展开文档列表"}
+          onClick={onOpen}
+          className="flex flex-1 items-start gap-3 text-left focus:outline-none"
         >
-          {expanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          <div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600">
+            <Database className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h4 className="font-medium text-gray-900 group-hover:text-orange-600 transition-colors">
+              {kb.name}
+            </h4>
+            <p className="mt-1 break-words text-xs text-gray-500">
+              {kb.document_count} 篇文档
+              {kb.total_chunks ? ` · ${kb.total_chunks} 片段` : ""}
+            </p>
+          </div>
         </button>
-        <button
-          type="button"
-          onClick={onToggleExpand}
-          className="min-w-0 flex-1 text-left"
-        >
-          <div className="font-medium text-gray-900">{kb.name}</div>
-          <p className="mt-0.5 break-words text-xs text-gray-500">
-            文档数：{kb.document_count}
-            {kb.total_chunks ? ` · ${kb.total_chunks} 片段` : ""} · ID:{" "}
-            <span className="break-all font-mono">{kb.id}</span>
-            {kb.embedding_model ? (
-              <>
-                {" · embedding："}
-                <span className="font-mono">{kb.embedding_model}</span>
-              </>
-            ) : null}
-          </p>
-          {kb.description ? (
-            <p className="mt-2 text-sm text-gray-600">{kb.description}</p>
-          ) : null}
-        </button>
-        <div className="flex shrink-0 items-center gap-1">
+        
+        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <button
             type="button"
             title="编辑"
@@ -98,57 +57,19 @@ export function KnowledgeBaseCard({
           </button>
         </div>
       </div>
-
-      {expanded && (
-        <div className="border-t border-gray-100 px-4 pb-4 pt-3">
-          {loadingDocs ? (
-            <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> 加载文档列表…
-            </div>
-          ) : !documents || documents.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center text-sm text-gray-400">
-              暂无已入库文档
-            </div>
-          ) : (
-            <ul className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-100">
-              {documents.map((doc) => {
-                const isDeleting = deletingDocId === doc.id;
-                return (
-                  <li
-                    key={doc.id}
-                    className="flex items-center gap-3 px-3 py-2.5 text-sm"
-                  >
-                    <FileText className="h-4 w-4 shrink-0 text-gray-400" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-gray-800" title={doc.filename}>
-                        {doc.filename}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
-                        <span>{doc.chunk_count} 片段</span>
-                        <span>{formatFileSize(doc.file_size)}</span>
-                        <span>{formatTime(doc.created_at)}</span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      title="删除该文档"
-                      disabled={isDeleting}
-                      onClick={() => onRequestDeleteDoc(doc)}
-                      className="shrink-0 rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                    >
-                      {isDeleting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <X className="h-4 w-4" />
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+      
+      {kb.description ? (
+        <p className="mt-3 line-clamp-2 text-sm text-gray-600">
+          {kb.description}
+        </p>
+      ) : null}
+      
+      {kb.embedding_model ? (
+        <div className="mt-4 mt-auto pt-3 border-t border-gray-50 flex items-center justify-between text-xs text-gray-400">
+          <span className="font-mono truncate">{kb.embedding_model}</span>
+          <span className="shrink-0 font-mono text-[10px]">{kb.id.slice(0,8)}</span>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

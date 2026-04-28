@@ -24,9 +24,7 @@ function filterFiles(files: File[]): { valid: File[]; invalid: File[] } {
 }
 
 interface KnowledgeUploadPanelProps {
-  kbs: KnowledgeBase[];
-  uploadKbId: string;
-  setUploadKbId: (id: string) => void;
+  kbId: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   ingestJobs: IngestJobState[];
   onFilesSelected: (files: File[]) => void;
@@ -34,9 +32,7 @@ interface KnowledgeUploadPanelProps {
 }
 
 export function KnowledgeUploadPanel({
-  kbs,
-  uploadKbId,
-  setUploadKbId,
+  kbId,
   fileInputRef,
   ingestJobs,
   onFilesSelected,
@@ -84,16 +80,16 @@ export function KnowledgeUploadPanel({
     e.stopPropagation();
     dragCounterRef.current = 0;
     setIsDragging(false);
-    if (!uploadKbId) {
-      toast.warning("请先选择要上传到的知识库");
+    if (!kbId) {
+      toast.warning("知识库无效");
       return;
     }
     handleFiles(e.dataTransfer.files);
   };
 
   const handleClick = () => {
-    if (!uploadKbId) {
-      toast.warning("请先选择要上传到的知识库");
+    if (!kbId) {
+      toast.warning("知识库无效");
       return;
     }
     fileInputRef.current?.click();
@@ -107,27 +103,12 @@ export function KnowledgeUploadPanel({
   };
 
   return (
-    <div className="rounded-xl border border-[#e5e5e5] bg-white p-5 shadow-sm">
-      <h3 className="text-sm font-medium text-gray-900">上传文档</h3>
-      <p className="mt-1 text-xs text-gray-500">
-        选择知识库后上传文件；大文件将异步入库，下方可查看进度。
-      </p>
-
-      <div className="mt-3 min-w-[200px]">
-        <label className="text-xs text-gray-500">目标知识库</label>
-        <Select
-          className="mt-1"
-          value={uploadKbId}
-          onValueChange={setUploadKbId}
-          placeholder="请选择知识库"
-          options={[
-            { value: "", label: "请选择…" },
-            ...kbs.map((k) => ({
-              value: k.id,
-              label: `${k.name}（${k.document_count} 篇）`,
-            })),
-          ]}
-        />
+    <div className="flex flex-col h-full">
+      <div className="mb-4">
+        <h3 className="text-sm font-medium text-gray-900">上传文档</h3>
+        <p className="mt-1 text-xs text-gray-500">
+          大文件将异步入库，下方可查看处理进度。
+        </p>
       </div>
 
       <input

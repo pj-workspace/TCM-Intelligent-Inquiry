@@ -1,17 +1,32 @@
 "use client";
 
+import { useState } from "react";
 import { Database, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EditKnowledgeBaseDialog } from "@/components/ui/EditKnowledgeBaseDialog";
 import { useKnowledge } from "@/hooks/useKnowledge";
-import { KnowledgeUploadPanel } from "./KnowledgeUploadPanel";
-import { KnowledgeSearchPanel } from "./KnowledgeSearchPanel";
 import { KnowledgeBaseCard } from "./KnowledgeBaseCard";
+import { KnowledgeDrawer } from "./KnowledgeDrawer";
 
 export function KnowledgeTab() {
   const { token } = useAuth();
   const k = useKnowledge(token);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeKbId, setActiveKbId] = useState<string | null>(null);
+
+  const activeKb = k.kbs.find(kb => kb.id === activeKbId) || null;
+
+  const handleOpenDrawer = (id: string) => {
+    setActiveKbId(id);
+    k.setUploadKbId(id);
+    k.setSearchKbId(id);
+    // ensure documents are fetched if not already
+    if (!k.documentsCache.has(id)) {
+      k.toggleExpand(id); // Using the existing hook logic to fetch documents, even if it sets internal expanded state
+    }
+    setDrawerOpen(true);
+  };
 
   if (k.loading) {
     return (
@@ -116,31 +131,6 @@ export function KnowledgeTab() {
         </div>
       </form>
 
-      <KnowledgeUploadPanel
-        kbs={k.kbs}
-        uploadKbId={k.uploadKbId}
-        setUploadKbId={k.setUploadKbId}
-        fileInputRef={k.fileInputRef}
-        ingestJobs={k.ingestJobs}
-        onFilesSelected={k.handleFilesSelected}
-        onRetry={k.handleRetry}
-      />
-
-      <KnowledgeSearchPanel
-        kbs={k.kbs}
-        searchKbId={k.searchKbId}
-        setSearchKbId={k.setSearchKbId}
-        searchQuery={k.searchQuery}
-        setSearchQuery={k.setSearchQuery}
-        searchTopK={k.searchTopK}
-        setSearchTopK={k.setSearchTopK}
-        searchResults={k.searchResults}
-        searching={k.searching}
-        hasSearched={k.hasSearched}
-        lastSearchedKbId={k.lastSearchedKbId}
-        onSearch={() => k.searchKb(k.searchKbId, k.searchQuery, k.searchTopK)}
-      />
-
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-gray-900">我的知识库</h3>
         {k.kbs.length === 0 ? (
@@ -150,26 +140,41 @@ export function KnowledgeTab() {
             <p className="mt-1 text-xs">在上方创建后即可上传文档</p>
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {k.kbs.map((kb) => (
               <KnowledgeBaseCard
                 key={kb.id}
                 kb={kb}
-                expanded={k.expandedKbId === kb.id}
-                documents={k.documentsCache.get(kb.id)}
-                loadingDocs={k.docLoading.get(kb.id) ?? false}
-                deletingDocId={k.deletingDocId}
-                onToggleExpand={() => k.toggleExpand(kb.id)}
+                onOpen={() => handleOpenDrawer(kb.id)}
                 onEdit={() => k.setEditingKb(kb)}
                 onDelete={() => k.setDeleteId(kb.id)}
-                onRequestDeleteDoc={(doc) =>
-                  k.setPendingDeleteDoc({ kbId: kb.id, doc })
-                }
               />
             ))}
           </div>
         )}
       </div>
+
+      <KnowledgeDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        kb={activeKb}
+        documents={activeKb ? k.documentsCache.get(activeKb.id) : undefined}
+        loadingDocs={activeKb ? (k.docLoading.get(activeKb.id) ?? false) : false}
+        deletingDocId={k.deletingDocId}
+        onRequestDeleteDoc={(doc) => activeKb && k.setPendingDeleteDoc({ kbId: activeKb.id, doc })}
+        fileInputRef={k.fileInputRef}
+        ingestJobs={k.ingestJobs}
+        onFilesSelected={k.handleFilesSelected}
+        onRetry={k.handleRetry}
+        searchQuery={k.searchQuery}
+        setSearchQuery={k.setSearchQuery}
+        searchTopK={k.searchTopK}
+        setSearchTopK={k.setSearchTopK}
+        searchResults={k.searchResults}
+        searching={k.searching}
+        hasSearched={k.hasSearched}
+        onSearch={() => activeKb && k.searchKb(activeKb.id, k.searchQuery, k.searchTopK)}
+      />
     </div>
   );
 }
