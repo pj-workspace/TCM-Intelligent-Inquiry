@@ -41,13 +41,6 @@ class Settings(BaseSettings):
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         description="兼容模式 Base URL",
     )
-    qwen_enable_thinking: bool = Field(
-        default=False,
-        description=(
-            "llm_provider=qwen 时是否在请求体中附带 enable_thinking（DashScope 兼容接口 extra_body）；"
-            "仅部分模型支持（如 qwen-flash），开启后流式响应可出现 thinking，后端映射为 SSE thinking-delta"
-        ),
-    )
     # 检索重排序（DashScope gte-rerank，与向量同一 API Key）
     rerank_enabled: bool = Field(default=True, description="是否在向量召回后做重排序")
     dashscope_rerank_model: str = Field(

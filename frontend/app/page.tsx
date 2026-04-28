@@ -14,7 +14,7 @@ import {
 } from "@/components/chat/BrainstormPanel";
 import { ClaudeStar } from "@/components/chat/ClaudeStar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Plus, Mic, Send, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download, ArrowDown, Brain, Globe, Check, PanelLeftOpen, PanelLeftClose } from "lucide-react";
+import { Plus, Send, Square, ChevronDown, PenLine, BookOpen, Leaf, Sun, LogOut, MoreVertical, Edit2, Trash2, Download, ArrowDown, Brain, Globe, Check, PanelLeftOpen, PanelLeftClose } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 
@@ -25,6 +25,8 @@ type ChatMessage = {
   content: string;
   /** 助手消息：来自 SSE meta.chatModel */
   modelName?: string;
+  /** 助手消息：用户点击终止后标记为 true */
+  interrupted?: boolean;
 };
 
 type ThinkingStep = Extract<BrainstormStep, { type: "thinking" }>;
@@ -61,12 +63,6 @@ function toolIoToPreview(v: unknown): string | undefined {
   }
 }
 
-function isToolOutputFailure(output?: string): boolean {
-  if (!output) return false;
-  return /无法|失败|错误|异常|拒绝|未配置|不能为空|需要登录|没有可用|未返回任何结果|not configured|error|failed|exception/i.test(
-    output
-  );
-}
 
 function sumThinkingDurations(steps: BrainstormStep[]): number | undefined {
   const total = steps.reduce((sum, step) => {
@@ -125,6 +121,7 @@ function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
       const payload = JSON.parse(msg.content) as {
         name?: string;
         runId?: string;
+        status?: string;
         outputPreview?: string;
         input?: unknown;
       };
@@ -132,7 +129,7 @@ function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
         id: msg.id,
         type: "tool",
         toolName: typeof payload.name === "string" && payload.name ? payload.name : "tool",
-        status: isToolOutputFailure(payload.outputPreview) ? "error" : "success",
+        status: payload.status === "error" ? "error" : "success",
         runId: typeof payload.runId === "string" ? payload.runId : undefined,
         inputPreview: toolIoToPreview(payload.input),
         outputPreview:
@@ -200,6 +197,7 @@ export default function Home() {
   const lastMainScrollTopRef = useRef(0);
   /** 当前流式请求在首个 text-delta 前由 meta 写入，用于助手消息展示模型名 */
   const pendingChatModelRef = useRef<string | undefined>(undefined);
+  const abortControllerRef = useRef<AbortController | null>(null);
   /** 流式思考 step 开始时间，用于单段时长结算 */
   const thinkingStepStartedAt = useRef<Record<string, number>>({});
   /** 整个头脑风暴 trace 的开始时间，用于总耗时结算 */
@@ -508,6 +506,8 @@ export default function Home() {
     if (!token) return;
 
     pendingChatModelRef.current = undefined;
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     if (appendUserMessage) {
       const userMsgId = Date.now().toString();
@@ -545,6 +545,7 @@ export default function Home() {
           web_search_enabled: webSearchEnabled,
           web_search_mode: webSearchMode,
         }),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -571,6 +572,7 @@ export default function Home() {
       };
 
       while (true) {
+        if (abortController.signal.aborted) break;
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -735,9 +737,10 @@ export default function Home() {
                       );
                     }
                     if (idx === -1) return msg;
-                    const nextStatus = isToolOutputFailure(outputPreviewFromEvent)
-                      ? "error"
-                      : "success";
+                    const nextStatus =
+                      (data.status as string | undefined) === "error"
+                        ? "error"
+                        : "success";
                     return {
                       ...msg,
                       steps: msg.steps.map((step, i) =>
@@ -833,6 +836,40 @@ export default function Home() {
       await refreshServerConversations();
       setGenState('idle');
     } catch (error) {
+      // 用户主动终止：不显示错误，仅标记最后一条助手消息为已中断
+      if (error instanceof Error && error.name === 'AbortError') {
+        finalizeThinkingStep(currentTraceId, openThinkingStepId);
+        if (currentTraceId) {
+          finalizeTrace(currentTraceId, false);
+        }
+        setMessages((prev) => {
+          const lastAi = [...prev].reverse().find(
+            (m) => m.type === "message" && m.role === "assistant"
+          );
+          if (lastAi) {
+            // 已有助手正文：标记为已中断
+            return prev.map((m) =>
+              m.id === lastAi.id && m.type === "message" && m.role === "assistant"
+                ? { ...m, interrupted: true }
+                : m
+            );
+          } else {
+            // 仅在思考/工具调用阶段被终止，尚无正文：补一条空助手消息承载提示
+            return [
+              ...prev,
+              {
+                id: Date.now().toString() + "-interrupted",
+                role: "assistant" as const,
+                type: "message" as const,
+                content: "",
+                interrupted: true,
+              },
+            ];
+          }
+        });
+        setGenState('idle');
+        return;
+      }
       console.error('Chat error:', error);
       finalizeThinkingStep(currentTraceId, openThinkingStepId);
       if (currentTraceId) {
@@ -843,6 +880,7 @@ export default function Home() {
       setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", type: "message", content: "**网络错误**：无法连接到服务器，请确保后端服务已启动。" }]);
       setGenState('idle');
     } finally {
+      abortControllerRef.current = null;
       setIsGeneratingTitle(false);
     }
   };
@@ -865,6 +903,10 @@ export default function Home() {
     setHasStarted(true);
     autoFollowMainRef.current = true;
     await runChatStream(userText, true);
+  };
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort();
   };
 
   const handleRegenerateAssistant = (assistantMsgId: string) => {
@@ -1071,7 +1113,7 @@ export default function Home() {
                <div className="relative" ref={headerMenuRef}>
                  <button 
                    onClick={() => setHeaderMenuOpen(!headerMenuOpen)}
-                   className="p-1.5 rounded-md hover:bg-gray-100 text-gray-600 transition-colors"
+                   className="p-1.5 rounded-md hover:bg-gray-100 hover:text-gray-900 text-gray-600 active:scale-95 transition-colors"
                  >
                    <MoreVertical className="w-5 h-5" />
                  </button>
@@ -1083,13 +1125,13 @@ export default function Home() {
                          setEditTitleValue(serverConversations.find(c => c.id === conversationId)?.title || "");
                          setHeaderMenuOpen(false);
                        }}
-                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100/80"
                      >
                        <Edit2 className="w-4 h-4" /> 编辑标题
                      </button>
                      <button 
                        onClick={handleExportHistory}
-                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100/80"
                      >
                        <Download className="w-4 h-4" /> 导出会话
                      </button>
@@ -1099,7 +1141,7 @@ export default function Home() {
                          setHeaderMenuOpen(false);
                          openDeleteDialog(conversationId);
                        }}
-                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100/60"
                      >
                        <Trash2 className="w-4 h-4" /> 删除会话
                      </button>
@@ -1109,7 +1151,7 @@ export default function Home() {
             )}
 
             {/* 移动端新建会话按钮 */}
-            <button type="button" onClick={handleNewChat} className="p-2 md:hidden text-gray-600 hover:bg-gray-100 rounded-md">
+            <button type="button" onClick={handleNewChat} className="p-2 md:hidden text-gray-600 hover:bg-gray-100 hover:text-gray-800 active:scale-95 rounded-md transition-colors">
               <Plus className="w-5 h-5" />
             </button>
 
@@ -1120,7 +1162,7 @@ export default function Home() {
               <div className="relative group">
                 <button
                   type="button"
-                  className="flex items-center justify-center w-8 h-8 md:w-9 md:h-9 rounded-full bg-white border border-[#e5e5e5] shadow-sm hover:bg-gray-50 transition-colors"
+                  className="flex items-center justify-center w-8 h-8 md:w-9 md:h-9 rounded-full bg-white border border-[#e5e5e5] shadow-sm hover:bg-gray-50 hover:border-gray-300 active:scale-95 transition-colors"
                   aria-label="账户"
                 >
                   <span className="w-6 h-6 md:w-7 md:h-7 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-bold">
@@ -1131,7 +1173,7 @@ export default function Home() {
                   <div className="bg-white rounded-lg shadow-lg border border-[#e5e5e5] py-1">
                     <button
                       onClick={logout}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100/50 transition-colors"
                     >
                       <LogOut className="w-4 h-4" />
                       退出登录
@@ -1181,6 +1223,7 @@ export default function Home() {
                             content={msg.content!}
                             modelName={msg.modelName}
                             noTopPad={afterTrace && msg.role === "assistant"}
+                            interrupted={msg.interrupted}
                             assistantActionsDisabled={genState !== "idle"}
                             onAssistantRegenerate={
                               msg.role === "assistant" &&
@@ -1266,7 +1309,7 @@ export default function Home() {
                   autoFollowMainRef.current = true;
                   scrollToBottom(true);
                 }}
-                className="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#e5e5e5] bg-white/92 px-3.5 py-2 text-sm text-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.08)] backdrop-blur bottom-32 md:bottom-36 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                className="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#e5e5e5] bg-white/92 px-3.5 py-2 text-sm text-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.08)] backdrop-blur bottom-32 md:bottom-36 hover:bg-gray-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
               >
                 <ArrowDown className="h-4 w-4" />
                 <span>回到底部</span>
@@ -1324,7 +1367,7 @@ export default function Home() {
                       title="开启后系统提示将要求模型逐步推理；若接口支持，思考过程将流式展示"
                       className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all duration-150 disabled:opacity-50 ${
                         deepThinkEnabled
-                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                           : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"
                       }`}
                     >
@@ -1336,7 +1379,7 @@ export default function Home() {
                         genState !== "idle" ? "pointer-events-none opacity-50" : ""
                       } ${
                         webSearchEnabled
-                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                           : "border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100"
                       }`}
                     >
@@ -1345,7 +1388,7 @@ export default function Home() {
                           disabled={genState !== "idle"}
                           onClick={() => setWebSearchEnabled((v) => !v)}
                           title={webSearchEnabled ? "关闭联网搜索" : "开启联网搜索"}
-                          className="flex items-center gap-1.5 rounded-l-full py-1.5 pl-3 pr-1 text-xs font-medium transition-colors"
+                          className="flex items-center gap-1.5 rounded-l-full py-1.5 pl-3 pr-1 text-xs font-medium transition-colors hover:bg-black/[0.06]"
                         >
                           <Globe className="h-3.5 w-3.5 shrink-0" />
                           联网搜索
@@ -1357,10 +1400,10 @@ export default function Home() {
                             disabled={genState !== "idle"}
                             aria-label="选择联网搜索模式"
                             title="选择联网搜索模式"
-                          className="group flex cursor-pointer items-center rounded-r-full py-1 pl-0.5 pr-1 disabled:cursor-not-allowed"
+                          className="group flex cursor-pointer items-center rounded-r-full py-1.5 pl-0.5 pr-2 hover:bg-black/5 disabled:cursor-not-allowed"
                           >
                             <span
-                              className={`flex h-6 w-6 items-center justify-center rounded-full transition-transform duration-150 group-hover:scale-110 group-data-[state=open]:scale-110 ${
+                              className={`flex items-center justify-center transition-transform duration-150 group-hover:scale-110 group-data-[state=open]:scale-110 ${
                                 webSearchEnabled
                                   ? "group-hover:text-emerald-800 group-data-[state=open]:text-emerald-800"
                                   : "group-hover:text-gray-800 group-data-[state=open]:text-gray-800"
@@ -1385,7 +1428,7 @@ export default function Home() {
                             联网搜索模式
                           </DropdownMenu.Label>
                           <DropdownMenu.Item
-                            className="mx-1 grid cursor-pointer grid-cols-[auto_1rem] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none data-[highlighted]:bg-gray-50"
+                            className="mx-1 grid cursor-pointer grid-cols-[auto_1rem] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors data-[highlighted]:bg-gray-50"
                             onSelect={() => {
                               setWebSearchEnabled(true);
                               setWebSearchMode("auto");
@@ -1402,7 +1445,7 @@ export default function Home() {
                             )}
                           </DropdownMenu.Item>
                           <DropdownMenu.Item
-                            className="mx-1 grid cursor-pointer grid-cols-[auto_1rem] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none data-[highlighted]:bg-gray-50"
+                            className="mx-1 grid cursor-pointer grid-cols-[auto_1rem] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors data-[highlighted]:bg-gray-50"
                             onSelect={() => {
                               setWebSearchEnabled(true);
                               setWebSearchMode("force");
@@ -1435,24 +1478,38 @@ export default function Home() {
 
                     <button
                       type="button"
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                      disabled
+                      title="模型切换即将推出"
+                      aria-disabled="true"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-gray-500 rounded-lg opacity-60 disabled:hover:bg-transparent disabled:hover:text-gray-500"
                     >
                       TCM Pro 1.0
                       <ChevronDown className="w-3.5 h-3.5" />
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => void handleSend()}
-                      disabled={genState !== "idle"}
-                      className={`p-1.5 rounded-lg transition-all duration-200 flex items-center justify-center ${
-                        input.trim() && genState === "idle"
-                          ? "bg-black text-white hover:bg-gray-800 scale-105"
-                          : "bg-transparent text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                      }`}
-                    >
-                      {input.trim() ? <Send className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                    </button>
+                    {genState !== "idle" ? (
+                      <button
+                        type="button"
+                        onClick={handleStop}
+                        title="终止输出"
+                        className="p-1.5 rounded-lg transition-all duration-200 flex items-center justify-center bg-red-500 text-white hover:bg-red-600 active:scale-95"
+                      >
+                        <Square className="w-4 h-4 fill-current" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void handleSend()}
+                        disabled={genState !== "idle"}
+                        className={`p-1.5 rounded-lg transition-all duration-200 flex items-center justify-center ${
+                          input.trim()
+                            ? "bg-black text-white hover:bg-gray-800 scale-105"
+                            : "bg-transparent text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                        }`}
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               </motion.div>

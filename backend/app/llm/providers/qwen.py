@@ -64,19 +64,22 @@ class DashScopeChatOpenAI(ChatOpenAI):
         return gen
 
 
-def build_qwen_chat() -> ChatOpenAI:
+def build_qwen_chat(enable_thinking: bool = False) -> ChatOpenAI:
     s = get_settings()
     key = (s.dashscope_api_key or "").strip()
     if not key:
         raise ValueError("llm_provider=qwen 时请配置 DASHSCOPE_API_KEY")
     # DashScope 兼容 OpenAI 接口：深度思考需 extra_body（与官方 SDK chat.completions.create 一致）
+    # enable_thinking 优先级：调用方显式传 True（用户点击深度思考）> .env QWEN_ENABLE_THINKING 全局开关
     kwargs: dict = {
         "model": s.qwen_chat_model,
         "api_key": key,
         "base_url": s.dashscope_base_url,
         "temperature": 0.2,
     }
-    if s.qwen_enable_thinking:
+    # enable_thinking 由调用方显式传入（按钮 or 全局缺省）；不在此处读取 s.qwen_enable_thinking，
+    # 避免全局开关覆盖按钮关闭的情况。
+    if enable_thinking:
         kwargs["extra_body"] = {"enable_thinking": True}
     return DashScopeChatOpenAI(**kwargs)
 

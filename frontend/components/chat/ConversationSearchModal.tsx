@@ -118,7 +118,7 @@ export function ConversationSearchModal({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+            className="shrink-0 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>

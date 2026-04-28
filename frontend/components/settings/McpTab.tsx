@@ -333,7 +333,7 @@ export function McpTab() {
                 <div className="bg-[#fafaf8] px-5 py-3">
                   <button
                     onClick={() => toggleTools(server.id)}
-                    className="flex w-full items-center justify-between text-sm font-medium text-gray-700 hover:text-gray-900"
+                    className="flex w-full items-center justify-between rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                   >
                     <span>已发现 {server.tool_names.length} 个工具</span>
                     <ChevronDown

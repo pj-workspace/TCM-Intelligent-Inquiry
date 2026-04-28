@@ -52,9 +52,9 @@ export default function SettingsPage() {
           <div className="space-y-1">
             <button
               onClick={() => setActiveTab("builtin")}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
                 activeTab === "builtin"
-                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200 hover:bg-orange-50/40"
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -63,9 +63,9 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={() => setActiveTab("mcp")}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
                 activeTab === "mcp"
-                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200 hover:bg-orange-50/40"
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -74,9 +74,9 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={() => setActiveTab("knowledge")}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
                 activeTab === "knowledge"
-                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200 hover:bg-orange-50/40"
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -85,9 +85,9 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={() => setActiveTab("agents")}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
                 activeTab === "agents"
-                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200 hover:bg-orange-50/40"
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >

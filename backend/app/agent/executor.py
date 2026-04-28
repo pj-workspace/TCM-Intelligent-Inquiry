@@ -32,12 +32,14 @@ _RAW_DEFAULT_SYSTEM_PROMPT = """\
 - 若需要文献支撑，请先调用 search_tcm_knowledge 工具检索知识库。
 - 若已知方剂名，请调用 formula_lookup 查询组成与主治。
 - 若用户以症状、证型求助，可调用 recommend_formulas 从本地方剂库做学习参考（不可替代诊疗）。
-- 若需要公网最新网页摘要（非知识库），可调用 searx_web_search（依赖已部署的 SearXNG）。
 - 名称以 mcp_ 开头的工具来自已注册的 MCP 服务，按需调用；参数使用 arguments 字典传入。
-- 在工具结果的基础上综合推理，再给出最终答案。\
+- 在工具结果的基础上综合推理，再给出最终答案。
+- 除非用户明确开启联网搜索，否则禁止调用 searx_web_search。\
 """
 
 _DEFAULT_SYSTEM_PROMPT = append_tcm_safety_to_system_prompt(_RAW_DEFAULT_SYSTEM_PROMPT)
+
+_WEB_SEARCH_TOOL_NAME = "searx_web_search"
 
 _DEEP_THINK_SUFFIX = """\
 【深度思考模式】
@@ -75,9 +77,13 @@ def _dynamic_prompt_suffix(
     return "\n\n".join(parts)
 
 
-def _load_all_tools():
+def _load_all_tools(*, web_search_enabled: bool = True):
+    """加载工具列表；web_search_enabled=False 时剔除联网搜索工具，让模型无法调用。"""
     ensure_tools_loaded()
-    return tool_registry.all()
+    tools = tool_registry.all()
+    if not web_search_enabled:
+        tools = [t for t in tools if t.name != _WEB_SEARCH_TOOL_NAME]
+    return tools
 
 
 def _default_graph_fingerprint() -> str:
@@ -116,7 +122,8 @@ def get_default_graph() -> CompiledStateGraph:
     if cached is not None:
         return cached
     llm = get_chat_model()
-    tools = _load_all_tools()
+    # 默认图不开放联网搜索工具——必须由用户显式开启才会加入工具列表
+    tools = _load_all_tools(web_search_enabled=False)
     logger.info("创建默认 ReAct Agent，工具: %s", [t.name for t in tools])
     graph = create_react_agent(llm, tools, prompt=_DEFAULT_SYSTEM_PROMPT)
     _default_graph_by_fp[fp] = graph
@@ -188,16 +195,31 @@ async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
         return graph
 
 
-async def _build_ephemeral_agent_graph(agent_id: str | None, suffix: str) -> CompiledStateGraph:
-    """不缓存；用于本轮带有深度思考 / 联网策略等动态系统提示后缀。"""
+async def _build_ephemeral_agent_graph(
+    agent_id: str | None,
+    suffix: str,
+    *,
+    deep_think: bool = False,
+    web_search_enabled: bool = False,
+) -> CompiledStateGraph:
+    """不缓存；用于本轮带有深度思考 / 联网策略等动态系统提示后缀。
+
+    deep_think=True 时对支持思考通道的模型（如 Qwen DashScope）注入 enable_thinking。
+    web_search_enabled=False 时从工具列表中移除 searx_web_search，确保模型无法调用。
+    """
     ensure_tools_loaded()
-    llm = get_chat_model()
+    llm = get_chat_model(enable_thinking=deep_think)
     extra = suffix.strip()
     if not agent_id:
-        tools = _load_all_tools()
+        tools = _load_all_tools(web_search_enabled=web_search_enabled)
         raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
         prompt = append_tcm_safety_to_system_prompt(raw)
-        logger.info("创建临时 ReAct Agent（动态提示），工具: %s", [t.name for t in tools])
+        logger.info(
+            "创建临时 ReAct Agent（动态提示，enable_thinking=%s，web_search=%s），工具: %s",
+            deep_think,
+            web_search_enabled,
+            [t.name for t in tools],
+        )
         return create_react_agent(llm, tools, prompt=prompt)
 
     from app.agent.models import AgentRecord
@@ -205,7 +227,7 @@ async def _build_ephemeral_agent_graph(agent_id: str | None, suffix: str) -> Com
     async with async_session_factory() as session:
         row = await session.get(AgentRecord, agent_id)
         if row is None:
-            tools = _load_all_tools()
+            tools = _load_all_tools(web_search_enabled=web_search_enabled)
             raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
             prompt = append_tcm_safety_to_system_prompt(raw)
             logger.warning(
@@ -226,15 +248,20 @@ async def _build_ephemeral_agent_graph(agent_id: str | None, suffix: str) -> Com
             tools = tool_registry.all()
         if not tools:
             tools = tool_registry.all()
+        # 无论 AgentRecord 工具列表如何，联网工具仍受用户开关约束
+        if not web_search_enabled:
+            tools = [t for t in tools if t.name != _WEB_SEARCH_TOOL_NAME]
 
         base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
         raw = base + ("\n\n" + extra if extra else "")
         prompt = append_tcm_safety_to_system_prompt(raw)
         logger.info(
-            "创建临时 Agent id=%s name=%s tools=%s（动态提示）",
+            "创建临时 Agent id=%s name=%s tools=%s（动态提示，enable_thinking=%s，web_search=%s）",
             row.id,
             row.name,
             [t.name for t in tools],
+            deep_think,
+            web_search_enabled,
         )
         return create_react_agent(llm, tools, prompt=prompt)
 
@@ -246,8 +273,18 @@ async def build_agent_graph_for_chat_request(
     web_search_enabled: bool = False,
     web_search_mode: Literal["auto", "force"] = "force",
 ) -> CompiledStateGraph:
-    """按本轮选项拼接系统提示；无选项时走缓存的 build_agent_graph。"""
+    """按本轮选项拼接系统提示；无选项时走缓存的 build_agent_graph。
+
+    深度思考 / 联网搜索完全由前端按钮控制（deep_think / web_search_enabled），
+    不再依赖全局配置覆盖，逻辑更清晰。
+    """
     suffix = _dynamic_prompt_suffix(deep_think, web_search_enabled, web_search_mode)
-    if not suffix:
+    if not suffix and not deep_think:
+        # 无动态选项，但仍需确保默认图剔除了联网工具
         return await build_agent_graph(agent_id)
-    return await _build_ephemeral_agent_graph(agent_id, suffix)
+    return await _build_ephemeral_agent_graph(
+        agent_id,
+        suffix,
+        deep_think=deep_think,
+        web_search_enabled=web_search_enabled,
+    )

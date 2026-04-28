@@ -6,14 +6,14 @@ from langchain_openai import ChatOpenAI
 from app.core.config import get_settings
 
 
-def build_chat_model() -> BaseChatModel:
+def build_chat_model(enable_thinking: bool = False) -> BaseChatModel:
     s = get_settings()
     p = (s.llm_provider or "qwen").strip().lower()
 
     if p == "qwen":
         from app.llm.providers.qwen import build_qwen_chat
 
-        return build_qwen_chat()
+        return build_qwen_chat(enable_thinking=enable_thinking)
 
     if p == "openai":
         key = (s.openai_api_key or "").strip()
@@ -33,6 +33,14 @@ def build_chat_model() -> BaseChatModel:
         key = (s.anthropic_api_key or "").strip()
         if not key:
             raise ValueError("llm_provider=anthropic 时请配置 ANTHROPIC_API_KEY")
+        if enable_thinking:
+            # Claude extended thinking 要求 temperature=1，budget_tokens 建议 ≥ 1024
+            return ChatAnthropic(
+                model=s.anthropic_chat_model,
+                api_key=key,
+                temperature=1,
+                thinking={"type": "enabled", "budget_tokens": 8000},
+            )
         return ChatAnthropic(
             model=s.anthropic_chat_model,
             api_key=key,
@@ -56,8 +64,10 @@ def build_chat_model() -> BaseChatModel:
         if not key:
             raise ValueError("llm_provider=deepseek 时请配置 DEEPSEEK_API_KEY")
         base = (s.deepseek_base_url or "").strip() or "https://api.deepseek.com/v1"
+        # deepseek-reasoner 是独立的推理模型，深度思考时自动切换
+        model = "deepseek-reasoner" if enable_thinking else s.deepseek_chat_model
         return ChatOpenAI(
-            model=s.deepseek_chat_model,
+            model=model,
             api_key=key,
             base_url=base.rstrip("/"),
             temperature=0.2,

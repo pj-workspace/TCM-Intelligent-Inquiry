@@ -54,8 +54,8 @@ export function AuthForm({ onAuthenticated, compact }: AuthFormProps) {
           }}
           className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
             mode === "login"
-              ? "bg-white shadow-sm text-gray-900"
-              : "text-gray-500 hover:text-gray-700"
+              ? "bg-white shadow-sm text-gray-900 hover:bg-gray-50/90"
+              : "text-gray-500 hover:bg-white/70 hover:text-gray-700"
           }`}
         >
           登录
@@ -68,8 +68,8 @@ export function AuthForm({ onAuthenticated, compact }: AuthFormProps) {
           }}
           className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${
             mode === "register"
-              ? "bg-white shadow-sm text-gray-900"
-              : "text-gray-500 hover:text-gray-700"
+              ? "bg-white shadow-sm text-gray-900 hover:bg-gray-50/90"
+              : "text-gray-500 hover:bg-white/70 hover:text-gray-700"
           }`}
         >
           注册

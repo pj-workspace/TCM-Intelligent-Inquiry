@@ -129,6 +129,8 @@ interface MessageBubbleProps {
   /** 用户消息：将内容填入输入框 */
   onUserEdit?: (text: string) => void;
   noTopPad?: boolean;
+  /** 助手消息：用户主动终止输出后为 true */
+  interrupted?: boolean;
 }
 
 export function MessageBubble({
@@ -139,6 +141,7 @@ export function MessageBubble({
   onAssistantRegenerate,
   onUserEdit,
   noTopPad,
+  interrupted,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const [menuOpen, setMenuOpen] = useState(false);
@@ -269,7 +272,9 @@ export function MessageBubble({
             remarkPlugins={[remarkGfm]}
             components={assistantMarkdownComponents}
           >
-            {preprocessAssistantMarkdown(content)}
+            {preprocessAssistantMarkdown(
+              content + (interrupted ? "\n\n> *输出已被终止*" : "")
+            )}
           </ReactMarkdown>
         </div>
 
@@ -337,7 +342,7 @@ export function MessageBubble({
                 <button
                   type="button"
                   role="menuitem"
-                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-gray-700 hover:bg-gray-50"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100/80"
                   onClick={() => {
                     setMenuOpen(false);
                     exportAssistantAsPdf("TCM AI 回复", content);

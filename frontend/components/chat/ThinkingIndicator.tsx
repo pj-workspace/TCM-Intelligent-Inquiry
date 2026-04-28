@@ -34,7 +34,7 @@ export function ThinkingIndicator({
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 text-[13px] font-medium text-gray-500 hover:text-gray-700 transition-colors w-fit min-w-0 group -ml-1"
+          className="flex items-center gap-2 rounded-md px-1 py-0.5 text-[13px] font-medium text-gray-500 hover:bg-gray-100/80 hover:text-gray-700 transition-colors w-fit min-w-0 group -ml-1"
         >
           <motion.div
             animate={{ rotate: isOpen ? 0 : -90 }}

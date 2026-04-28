@@ -55,7 +55,7 @@ export function Sidebar({
             type="button"
             onClick={onToggle}
             title="收起侧栏"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 active:scale-95 transition-colors"
           >
             <PanelLeftClose className="w-[1.05rem] h-[1.05rem]" />
           </button>
@@ -63,7 +63,7 @@ export function Sidebar({
             type="button"
             onClick={onNewChat}
             title="新建会话"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 active:scale-95 transition-colors"
           >
             <Plus className="w-[1.05rem] h-[1.05rem]" />
           </button>
@@ -71,7 +71,7 @@ export function Sidebar({
             type="button"
             onClick={onOpenSearch}
             title="搜索对话"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-200/70 hover:text-gray-700 active:scale-95 transition-colors"
           >
             <Search className="w-[1.05rem] h-[1.05rem]" />
           </button>

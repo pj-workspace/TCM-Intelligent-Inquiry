@@ -253,7 +253,7 @@ export function AgentsTab() {
             <button
               type="button"
               onClick={handleCancelEdit}
-              className="text-gray-400 hover:text-gray-700"
+              className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
             >
               <X className="h-5 w-5" />
             </button>

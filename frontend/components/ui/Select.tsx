@@ -63,7 +63,7 @@ export function Select({
         id={id}
         className={clsx(
           "group flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-900 outline-none transition",
-          "hover:border-gray-400",
+          "hover:border-gray-400 hover:bg-gray-50/90",
           "focus:border-orange-400 focus:ring-1 focus:ring-orange-400",
           "data-[state=open]:border-orange-400 data-[state=open]:ring-1 data-[state=open]:ring-orange-400",
           "disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500",
@@ -95,7 +95,7 @@ export function Select({
                   key={itemValue}
                   value={itemValue}
                   className={clsx(
-                    "relative flex cursor-pointer select-none items-center rounded-sm py-2 pl-8 pr-3 text-sm text-gray-900 outline-none",
+                    "relative flex cursor-pointer select-none items-center rounded-sm py-2 pl-8 pr-3 text-sm text-gray-900 outline-none transition-colors",
                     "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
                     "data-[highlighted]:bg-orange-50 data-[highlighted]:text-gray-900"
                   )}

@@ -13,11 +13,14 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from app.core.config import get_settings
 
 
-def get_chat_model() -> BaseChatModel:
-    """按当前配置构造对话模型（无进程级缓存，改 .env 后下一轮请求生效）。"""
+def get_chat_model(enable_thinking: bool = False) -> BaseChatModel:
+    """按当前配置构造对话模型（无进程级缓存，改 .env 后下一轮请求生效）。
+
+    enable_thinking: True 时对支持思考通道的模型（如 Qwen）注入 extra_body enable_thinking。
+    """
     from app.llm.chat_factory import build_chat_model
 
-    return build_chat_model()
+    return build_chat_model(enable_thinking=enable_thinking)
 
 
 def get_embeddings() -> Embeddings:

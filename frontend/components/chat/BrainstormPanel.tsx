@@ -66,12 +66,6 @@ type WebResultItem = {
   summary?: string;
 };
 
-function isToolOutputFailure(output?: string): boolean {
-  if (!output) return false;
-  return /无法|失败|错误|异常|拒绝|未配置|不能为空|需要登录|没有可用|未返回任何结果|not configured|error|failed|exception/i.test(
-    output
-  );
-}
 
 function toolActionLabel(toolName: string): string {
   if (toolName === "searx_web_search") return "联网搜索";
@@ -157,8 +151,8 @@ export function BrainstormPanel({
   const traceHeadline = (() => {
     if (!isStreaming) {
       return durationSec != null
-        ? `深度思考结束 · ${formatDurationSec(durationSec)}`
-        : "深度思考结束";
+        ? `头脑风暴结束 · ${formatDurationSec(durationSec)}`
+        : "头脑风暴结束";
     }
     for (let i = steps.length - 1; i >= 0; i--) {
       const step = steps[i];
@@ -166,7 +160,7 @@ export function BrainstormPanel({
         return runningToolLabel(step.toolName);
       }
     }
-    return "深度思考中...";
+    return "头脑风暴中...";
   })();
 
   const updateBrainstormScrollState = useCallback(() => {
@@ -313,7 +307,7 @@ export function BrainstormPanel({
                     if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) return;
                     e.stopPropagation();
                   }}
-                  className="brainstorm-scroll-area no-scrollbar max-h-[min(28rem,58vh)] overflow-y-auto overscroll-contain px-4 pb-4 pr-3 [scrollbar-width:none] [-ms-overflow-style:none]"
+                  className="brainstorm-scroll-area no-scrollbar max-h-[min(28rem,58vh)] overflow-y-auto px-4 pb-4 pr-3 [scrollbar-width:none] [-ms-overflow-style:none]"
                 >
                   {/* 步骤列表 */}
                   <div className="relative flex flex-col pl-5">
@@ -346,9 +340,7 @@ export function BrainstormPanel({
                       }
 
                       /* 工具行：默认一行，成功后可展开看规整结果；失败不暴露后台错误 */
-                      const failed =
-                        step.status === "error" ||
-                        isToolOutputFailure(step.outputPreview);
+                      const failed = step.status === "error";
                       const webResults =
                         step.toolName === "searx_web_search" && !failed
                           ? parseWebResults(step.outputPreview)
@@ -434,7 +426,7 @@ export function BrainstormPanel({
                                 transition={{ duration: 0.22, ease: "easeInOut" }}
                                 className="overflow-hidden"
                               >
-                                <div className="mt-1.5 max-h-64 overflow-y-auto overscroll-contain pl-1 pr-2 text-[13px] leading-relaxed text-gray-500">
+                                <div className="mt-1.5 max-h-64 overflow-y-auto pl-1 pr-2 text-[13px] leading-relaxed text-gray-500">
                                   {webResults.length > 0 ? (
                                     <ol className="space-y-1.5">
                                       {webResults.map((item, itemIdx) => (

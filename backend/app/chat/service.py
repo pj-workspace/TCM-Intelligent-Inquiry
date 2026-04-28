@@ -485,6 +485,10 @@ async def stream_chat(
                 name = event.get("name") or ""
                 out = data.get("output")
                 preview = _serialize_tool_output(out)
+                # 从 ToolMessage.status 读取工具真实执行状态，避免前端用正则猜测
+                tool_status: str = "success"
+                if isinstance(out, ToolMessage):
+                    tool_status = out.status or "success"
                 run_key = str(run_id) if run_id is not None else None
                 start_meta: dict[str, Any] | None = None
                 if run_key is not None and run_key in tool_pending_by_run:
@@ -496,6 +500,7 @@ async def stream_chat(
                 tr: dict[str, Any] = {
                     "type": "tool-result",
                     "name": tr_name,
+                    "status": tool_status,
                 }
                 if run_id is not None:
                     tr["runId"] = run_id
