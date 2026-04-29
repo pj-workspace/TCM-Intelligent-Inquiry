@@ -8,16 +8,29 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { API_BASE, TOKEN_KEY, parseApiError } from "@/lib/api";
+import { API_BASE, TOKEN_KEY, apiJsonHeaders, parseApiError } from "@/lib/api";
 
-export type AuthUser = { id: string; username: string };
+export type AuthUser = {
+  id: string;
+  username: string;
+  email: string | null;
+  email_verified: boolean;
+};
 
 type AuthContextValue = {
   token: string | null;
   user: AuthUser | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  login: (usernameOrEmail: string, password: string) => Promise<void>;
+  /** 已向该邮箱发送登录验证码后的无密码登录 */
+  loginWithEmailCode: (email: string, code: string) => Promise<void>;
+  register: (
+    username: string,
+    password: string,
+    email: string,
+    emailCode: string,
+  ) => Promise<void>;
+  loginWithToken: (accessToken: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -30,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchMe = useCallback(async (accessToken: string) => {
     const res = await fetch(`${API_BASE}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: apiJsonHeaders(accessToken),
     });
     if (!res.ok) {
       localStorage.removeItem(TOKEN_KEY);
@@ -38,11 +51,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       return;
     }
-    const data = (await res.json()) as { id: string; username: string };
-    setUser({ id: data.id, username: data.username });
+    const data = (await res.json()) as {
+      id: string;
+      username: string;
+      email?: string | null;
+      email_verified?: boolean;
+    };
+    setUser({
+      id: data.id,
+      username: data.username,
+      email: data.email ?? null,
+      email_verified: data.email_verified ?? false,
+    });
   }, []);
 
-  /** 在首帧绘制前同步恢复 token，避免先出现「未登录」再跳成已登录的闪烁 */
   useLayoutEffect(() => {
     let cancelled = false;
     const t = localStorage.getItem(TOKEN_KEY);
@@ -60,11 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchMe]);
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (usernameOrEmail: string, password: string) => {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: usernameOrEmail, password }),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
       const data = (await res.json()) as {
@@ -78,12 +100,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [fetchMe]
   );
 
+  const loginWithEmailCode = useCallback(
+    async (email: string, code: string) => {
+      const res = await fetch(`${API_BASE}/api/auth/login-email-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
+      });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = (await res.json()) as {
+        access_token: string;
+        token_type?: string;
+      };
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      setToken(data.access_token);
+      await fetchMe(data.access_token);
+    },
+    [fetchMe]
+  );
+
+  const loginWithToken = useCallback(
+    async (accessToken: string) => {
+      localStorage.setItem(TOKEN_KEY, accessToken);
+      setToken(accessToken);
+      await fetchMe(accessToken);
+    },
+    [fetchMe]
+  );
+
   const register = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string, email: string, emailCode: string) => {
+      const body = {
+        username,
+        password,
+        email: email.trim(),
+        email_code: emailCode.trim(),
+      };
       const res = await fetch(`${API_BASE}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await parseApiError(res));
       await login(username, password);
@@ -99,7 +155,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ token, user, loading, login, register, logout }}
+      value={{
+        token,
+        user,
+        loading,
+        login,
+        loginWithEmailCode,
+        register,
+        loginWithToken,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

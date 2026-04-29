@@ -136,9 +136,11 @@ async def discover_tools(
         return await asyncio.wait_for(_attempt(), timeout=total_timeout)
     except asyncio.TimeoutError:
         logger.warning("MCP discover_tools 超时(%ds) url=%s", total_timeout, server_url)
+        # 已等待整段超时，不再做 HTTP 降级探测，避免再卡十余秒并刷屏
+        return []
     except Exception as exc:
         logger.warning("MCP discover_tools 失败 url=%s: %s", server_url, exc)
-    # 退化：仅 HTTP 探测，避免把普通站点误标为可用工具
+    # 退化：仅 HTTP 探测，避免把普通站点误标为可用工具（超时路径不上此处）
     if await probe_server_reachable(server_url, headers=headers):
         logger.info("MCP 协议握手失败但 HTTP 可达: %s", server_url)
     return []

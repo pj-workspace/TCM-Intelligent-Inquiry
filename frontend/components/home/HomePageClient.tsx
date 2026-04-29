@@ -3,14 +3,17 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowDown } from "lucide-react";
-import { Sidebar } from "@/components/chat/Sidebar";
-import { ConversationSearchModal } from "@/components/chat/ConversationSearchModal";
-import { MessageBubble, markdownToPlainText } from "@/components/chat/MessageBubble";
-import { BrainstormPanel } from "@/components/chat/BrainstormPanel";
-import { ClaudeStar } from "@/components/chat/ClaudeStar";
+import {
+  BrainstormPanel,
+  ChatHeader,
+  ChatInputBar,
+  ClaudeStar,
+  ConversationSearchModal,
+  MessageBubble,
+  Sidebar,
+  markdownToPlainText,
+} from "@/components/chat";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { ChatHeader } from "@/components/chat/ChatHeader";
-import { ChatInputBar } from "@/components/chat/ChatInputBar";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE } from "@/lib/api";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";

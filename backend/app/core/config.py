@@ -132,6 +132,34 @@ class Settings(BaseSettings):
     )
     jwt_expire_minutes: int = Field(default=10080, description="Token 有效期（分钟），默认 7 天")
 
+    # ── OAuth（GitHub / Gitee）与前端回跳 ───────────────────────────────────────
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        description="SPA 前端根 URL（OAuth 302、cookies 同源）",
+    )
+    github_client_id: str = Field(default="", description="GitHub OAuth Client ID")
+    github_client_secret: str = Field(default="", description="GitHub OAuth Client Secret")
+    github_redirect_uri: str = Field(
+        default="http://localhost:8000/api/auth/oauth/github/callback",
+        description="须与 GitHub OAuth App Authorization callback URL 完全一致（开发与文档常用 localhost，勿与 127.0.0.1 混用）",
+    )
+    gitee_client_id: str = Field(default="", description="Gitee OAuth Client ID")
+    gitee_client_secret: str = Field(default="", description="Gitee OAuth Client Secret")
+    gitee_redirect_uri: str = Field(
+        default="http://localhost:8000/api/auth/oauth/gitee/callback",
+        description="须与 Gitee 应用回调地址完全一致（开发与文档常用 localhost）",
+    )
+
+    # ── 邮件 SMTP（验证码发信）；未配置 mail_host 时在开发环境仍可仅写 Redis + 日志 ─
+    mail_host: str = Field(default="", description="SMTP 主机，空则不落真实投递")
+    mail_port: int = Field(default=465)
+    mail_username: str = Field(default="")
+    mail_code: str = Field(default="", description="SMTP 授权码")
+    mail_skip_send: bool = Field(
+        default=False,
+        description="为 True 时跳过 SMTP，仅写入 Redis（联调）",
+    )
+
     # ── 数据库初始化：生产环境建议 false，仅使用 Alembic 迁移 ─────────────────
     database_auto_create_tables: bool = Field(
         default=True,
@@ -172,6 +200,12 @@ class Settings(BaseSettings):
         default=300,
         ge=0,
         description="已启用 MCP 的周期发现/健康探测间隔（秒），0 关闭",
+    )
+    mcp_probe_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="周期探测时对多个 MCP 并发 discover_tools 的上限，减轻慢节点串行叠加阻塞",
     )
 
     # ── SearXNG（自托管元搜索，docker compose 服务 searxng 默认映射 8888）────

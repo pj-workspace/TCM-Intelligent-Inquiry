@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import { toast } from "sonner";
 import type { McpServer } from "@/types/mcp";
-import type { McpFormData } from "@/components/settings/McpAddForm";
+import type { McpFormData } from "@/components/settings/mcp/McpAddForm";
 
 export function useMcp(token: string | null) {
   const [servers, setServers] = useState<McpServer[]>([]);

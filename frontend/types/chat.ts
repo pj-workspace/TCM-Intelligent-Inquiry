@@ -1,4 +1,4 @@
-import type { BrainstormStep } from "@/components/chat/BrainstormPanel";
+import type { BrainstormStep } from "@/types/brainstorm";
 
 export type ChatMessage = {
   id: string;

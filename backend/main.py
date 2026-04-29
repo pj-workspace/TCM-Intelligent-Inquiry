@@ -100,6 +100,7 @@ async def add_utf8_charset(request, call_next):
 # ── 路由注册（每个域的 router 在此聚合）──────────────────────────────────────
 from app.agent.router import router as agent_router
 from app.auth.router import router as auth_router
+from app.auth.oauth.router import router as oauth_router
 from app.chat.router import router as chat_router
 from app.knowledge.router import router as knowledge_router
 from app.mcp.router import router as mcp_router
@@ -109,6 +110,7 @@ app.include_router(agent_router)
 app.include_router(knowledge_router)
 app.include_router(mcp_router)
 app.include_router(auth_router)
+app.include_router(oauth_router, prefix="/api/auth/oauth")
 
 
 # ── 健康检查 ──────────────────────────────────────────────────────────────────

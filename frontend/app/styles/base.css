@@ -15,11 +15,43 @@
     --border-color: #27272a;
   }
 
+  /**
+   * 全站隐藏滚动条（含侧边栏、主内容区、弹窗内列表等），避免轨道露边影响观感；
+   * 仍可用滚轮、触控板与触摸滑动滚动。
+   */
+  html {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
   body {
     background-color: var(--bg);
     color: var(--fg);
     @apply font-sans;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
+  body::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
 
   /** 可点击按钮：手型 + 悬浮/按下时颜色与缩放等有平滑过渡 */
   button {

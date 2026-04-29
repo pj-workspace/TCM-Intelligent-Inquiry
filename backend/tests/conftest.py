@@ -5,6 +5,8 @@ import uuid
 import pytest
 from starlette.testclient import TestClient
 
+from tests.register_helpers import prime_register_otp
+
 
 @pytest.fixture(autouse=True)
 def _disable_mcp_background_probe(monkeypatch):
@@ -30,9 +32,16 @@ def unique_username() -> str:
 def auth_headers(client, unique_username) -> dict[str, str]:
     """已登录用户的 Authorization 头（用于需 JWT 的接口）。"""
     pw = "secret123456"
+    email = f"{unique_username}@test.local"
+    prime_register_otp(email)
     r = client.post(
         "/api/auth/register",
-        json={"username": unique_username, "password": pw},
+        json={
+            "username": unique_username,
+            "password": pw,
+            "email": email,
+            "email_code": "887766",
+        },
     )
     assert r.status_code == 200
     r2 = client.post(

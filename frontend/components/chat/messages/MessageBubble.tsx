@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { markdownToPlainText } from "@/lib/markdown-utils";
-import { UserBubble } from "@/components/chat/UserBubble";
-import { AssistantBubble } from "@/components/chat/AssistantBubble";
+import { UserBubble } from "./UserBubble";
+import { AssistantBubble } from "./AssistantBubble";
 
 export { markdownToPlainText };
 

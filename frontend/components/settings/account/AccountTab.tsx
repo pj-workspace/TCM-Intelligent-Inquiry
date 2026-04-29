@@ -1,0 +1,858 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import {
+  Shield,
+  KeyRound,
+  Link2,
+  Mail,
+  AlertCircle,
+  CheckCircle2,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/auth-context";
+import { useCooldownTimer } from "@/hooks/useCooldownTimer";
+import { API_BASE, apiJsonHeaders, parseApiError } from "@/lib/api";
+
+type Binding = {
+  provider: string;
+  external_nickname: string | null;
+  external_avatar: string | null;
+  created_at: string | null;
+};
+
+function GiteeLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.592-.593h-4.15a.592.592 0 0 1-.592-.592v-1.482a.593.593 0 0 1 .593-.592h6.815c.327 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.926a.593.593 0 0 1-.593-.593V9.778a4.444 4.444 0 0 1 4.445-4.444h8.296Z"
+      />
+    </svg>
+  );
+}
+
+function GitHubLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+      />
+    </svg>
+  );
+}
+
+function ProviderAvatar({ avatarUrl, provider }: { avatarUrl: string | null | undefined; provider: string }) {
+  const p = provider.toLowerCase();
+  const url = avatarUrl?.trim();
+  const isHttp = url && /^https?:\/\//i.test(url);
+  if (isHttp && url) {
+    return (
+      // OAuth 外链头像域名各异，不适用 next/image 固定 remotePatterns
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt=""
+        referrerPolicy="no-referrer"
+        className="h-full w-full object-cover"
+      />
+    );
+  }
+  if (p === "github") {
+    return <GitHubLogo className="h-7 w-7 shrink-0 text-[#181717]" />;
+  }
+  if (p === "gitee") {
+    return <GiteeLogo className="h-7 w-7 shrink-0 text-[#C71D23]" />;
+  }
+  return <Shield className="h-7 w-7 shrink-0 text-stone-500" aria-hidden />;
+}
+
+function initials(name: string) {
+  const t = name.trim().slice(0, 2);
+  return (t || "U").toUpperCase();
+}
+
+function providerDisplayName(provider: string) {
+  const p = provider.toLowerCase();
+  if (p === "github") return "GitHub";
+  if (p === "gitee") return "Gitee";
+  return provider;
+}
+
+/** 第一步：仅校验新旧密码字段（不涉及邮箱验证码）。 */
+function getChangePwCredentialError(oldP: string, newP: string, newPwAgain: string): string | null {
+  if (!oldP || oldP.trim().length === 0) return "请填写当前密码";
+  if (newP.length < 6) return "新密码至少 6 位";
+  if (newP === oldP) return "新密码不能与当前密码相同";
+  if (newPwAgain.length === 0) return "请再次输入新密码以确认";
+  if (newP !== newPwAgain) return "两次输入的新密码不一致";
+  return null;
+}
+
+/** 第二步提交：校验验证码 + 与第一步相同的密码字段。 */
+function getChangePwFormError(
+  cp: string,
+  oldP: string,
+  newP: string,
+  newPwAgain: string,
+): string | null {
+  const code = cp.trim();
+  if (!code) return "请填写验证码";
+  if (!/^[0-9]{6}$/.test(code)) return "验证码须为 6 位数字";
+  if (!oldP || oldP.trim().length === 0) return "请填写当前密码";
+  if (newP.length < 6) return "新密码至少 6 位";
+  if (newP === oldP) return "新密码不能与当前密码相同";
+  if (newPwAgain.length === 0) return "请再次输入新密码以确认";
+  if (newP !== newPwAgain) return "两次输入的新密码不一致";
+  return null;
+}
+
+function SectionShell({
+  title,
+  description,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  description?: string;
+  icon: LucideIcon;
+  children: ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+      <header className="flex items-start gap-4 border-b border-[#f2f0ec] bg-gradient-to-br from-orange-50/60 via-white to-transparent px-6 py-5">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-100 to-orange-50 text-orange-700 shadow-inner ring-1 ring-orange-100/80">
+          <Icon className="h-5 w-5" strokeWidth={2} />
+        </div>
+        <div className="min-w-0 pt-0.5">
+          <h2 className="text-[15px] font-semibold tracking-tight text-[#1c1917]">{title}</h2>
+          {description ? (
+            <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-gray-600">{description}</p>
+          ) : null}
+        </div>
+      </header>
+      <div className="px-6 py-6">{children}</div>
+    </section>
+  );
+}
+
+export function AccountTab() {
+  const { token, user } = useAuth();
+  const [bindings, setBindings] = useState<Binding[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [unbindCode, setUnbindCode] = useState<Record<string, string>>({});
+  const changePwCd = useCooldownTimer();
+  const unbindCd = useCooldownTimer();
+
+  const [cpCode, setCpCode] = useState("");
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPwConfirm, setNewPwConfirm] = useState("");
+
+  const [pwdSubmitAttempted, setPwdSubmitAttempted] = useState(false);
+
+  const [credentialAttempted, setCredentialAttempted] = useState(false);
+
+  /** credentials：先校验旧密码+新密码；email：再通过邮箱验证码完成修改 */
+  type ChangePwPhase = "credentials" | "email";
+  const [changePwPhase, setChangePwPhase] = useState<ChangePwPhase>("credentials");
+  /** 服务端校验当前密码的请求中（第一步「下一步」） */
+  const [checkPwBusy, setCheckPwBusy] = useState(false);
+
+  /** 请求进行中，禁止重复点击发码或提交（与后端往返期间） */
+  const [pwSendBusy, setPwSendBusy] = useState(false);
+  const [pwSubmitBusy, setPwSubmitBusy] = useState(false);
+  const [unbindSendingFor, setUnbindSendingFor] = useState<string | null>(null);
+  const [unbindVerifyingFor, setUnbindVerifyingFor] = useState<string | null>(null);
+
+  const credentialOnlyError = useMemo(
+    () => getChangePwCredentialError(oldPw, newPw, newPwConfirm),
+    [oldPw, newPw, newPwConfirm],
+  );
+
+  const changePwFormError = useMemo(
+    () => getChangePwFormError(cpCode, oldPw, newPw, newPwConfirm),
+    [cpCode, oldPw, newPw, newPwConfirm],
+  );
+
+  /** 修改密码表单字段变更：隐藏两步各自的提交提示 */
+  useEffect(() => {
+    setCredentialAttempted(false);
+  }, [oldPw, newPw, newPwConfirm]);
+
+  useEffect(() => {
+    setPwdSubmitAttempted(false);
+  }, [cpCode]);
+
+  const [unbindModalProvider, setUnbindModalProvider] = useState<string | null>(null);
+  const [changePwModalOpen, setChangePwModalOpen] = useState(false);
+
+  const openUnbindModal = useCallback((provider: string) => {
+    setUnbindModalProvider(provider);
+    setUnbindCode((o) => ({ ...o, [provider]: "" }));
+  }, []);
+
+  const closeUnbindModal = useCallback(() => {
+    setUnbindModalProvider(null);
+  }, []);
+
+  const closeChangePwModal = useCallback(() => {
+    setChangePwModalOpen(false);
+    setChangePwPhase("credentials");
+    setCpCode("");
+    setOldPw("");
+    setNewPw("");
+    setNewPwConfirm("");
+    setPwdSubmitAttempted(false);
+    setCredentialAttempted(false);
+  }, []);
+
+  const openChangePwModal = useCallback(() => {
+    setChangePwPhase("credentials");
+    setCpCode("");
+    setOldPw("");
+    setNewPw("");
+    setNewPwConfirm("");
+    setPwdSubmitAttempted(false);
+    setCredentialAttempted(false);
+    setChangePwModalOpen(true);
+  }, []);
+
+  /** Escape 关闭弹窗（进行中时忽略，避免半程关闭） */
+  useEffect(() => {
+    const block =
+      (unbindModalProvider && (unbindVerifyingFor || unbindSendingFor)) ||
+      (changePwModalOpen && (pwSubmitBusy || pwSendBusy || checkPwBusy));
+    if ((!unbindModalProvider && !changePwModalOpen) || block) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (changePwModalOpen) closeChangePwModal();
+        else closeUnbindModal();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    unbindModalProvider,
+    changePwModalOpen,
+    unbindVerifyingFor,
+    unbindSendingFor,
+    pwSubmitBusy,
+    pwSendBusy,
+    checkPwBusy,
+    closeUnbindModal,
+    closeChangePwModal,
+  ]);
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setLoadErr(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/oauth/bindings`, {
+        headers: apiJsonHeaders(token),
+      });
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data = await res.json();
+      setBindings(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const notifyErr = (msg: string) => toast.error(msg);
+
+  const sendUnbindCodeFor = async (provider: string) => {
+    if (!token || !user?.email) {
+      toast.error("请先绑定邮箱后再解绑第三方");
+      return;
+    }
+    if (unbindCd.left > 0) return;
+    if (unbindSendingFor === provider || unbindVerifyingFor === provider) return;
+    setUnbindSendingFor(provider);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/auth/oauth/${provider}/unbind/code/send`,
+        { method: "POST", headers: apiJsonHeaders(token) }
+      );
+      if (!res.ok) notifyErr(await parseApiError(res));
+      else {
+        toast.success("验证码已发送");
+        unbindCd.start(60);
+      }
+    } finally {
+      setUnbindSendingFor(null);
+    }
+  };
+
+  const verifyUnbind = async (provider: string) => {
+    if (!token) return;
+    if (unbindVerifyingFor === provider || unbindSendingFor === provider) return;
+    const code = unbindCode[provider]?.trim();
+    if (!code) {
+      notifyErr("请输入验证码");
+      return;
+    }
+    if (!/^[0-9]{6}$/.test(code)) {
+      notifyErr("验证码须为 6 位数字");
+      return;
+    }
+    setUnbindVerifyingFor(provider);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/auth/oauth/${provider}/unbind/verify`,
+        {
+          method: "POST",
+          headers: apiJsonHeaders(token),
+          body: JSON.stringify({ code }),
+        }
+      );
+      if (!res.ok) notifyErr(await parseApiError(res));
+      else {
+        toast.success("已解除绑定");
+        setUnbindCode((o) => ({ ...o, [provider]: "" }));
+        setUnbindModalProvider(null);
+        await load();
+      }
+    } finally {
+      setUnbindVerifyingFor(null);
+    }
+  };
+
+  const sendChangePwCode = async () => {
+    if (!token) return;
+    if (!user?.email) {
+      toast.error("请先绑定邮箱");
+      return;
+    }
+    if (changePwCd.left > 0) return;
+    if (pwSendBusy || pwSubmitBusy) return;
+    setPwSendBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/code/send-change-password`, {
+        method: "POST",
+        headers: apiJsonHeaders(token),
+      });
+      if (!res.ok) notifyErr(await parseApiError(res));
+      else {
+        toast.success("验证码已发送");
+        changePwCd.start(60);
+      }
+    } finally {
+      setPwSendBusy(false);
+    }
+  };
+
+  /** 第一步：本地校验新密码一致后请求服务端校验当前密码，通过后进入邮箱验证并发码 */
+  const submitCredentialStep = async () => {
+    if (!token) return;
+    setCredentialAttempted(true);
+    const ce = getChangePwCredentialError(oldPw, newPw, newPwConfirm);
+    if (ce) return;
+    if (checkPwBusy || pwSendBusy || pwSubmitBusy) return;
+    setCheckPwBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/check-password`, {
+        method: "POST",
+        headers: apiJsonHeaders(token),
+        body: JSON.stringify({ password: oldPw }),
+      });
+      if (!res.ok) {
+        notifyErr(await parseApiError(res));
+        return;
+      }
+      setChangePwPhase("email");
+      setCpCode("");
+      await sendChangePwCode();
+    } finally {
+      setCheckPwBusy(false);
+    }
+  };
+
+  const backToCredentialStep = () => {
+    setChangePwPhase("credentials");
+    setCpCode("");
+    setPwdSubmitAttempted(false);
+  };
+
+  const submitChangePw = async () => {
+    if (!token) return;
+    if (changePwPhase !== "email") return;
+    const err = getChangePwFormError(cpCode, oldPw, newPw, newPwConfirm);
+    if (err) {
+      setPwdSubmitAttempted(true);
+      return;
+    }
+    if (pwSubmitBusy || pwSendBusy) return;
+    setPwSubmitBusy(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/change-password`, {
+        method: "POST",
+        headers: apiJsonHeaders(token),
+        body: JSON.stringify({
+          code: cpCode.trim(),
+          old_password: oldPw,
+          new_password: newPw,
+        }),
+      });
+      if (!res.ok) notifyErr(await parseApiError(res));
+      else {
+        toast.success("密码已更新，请妥善保管");
+        closeChangePwModal();
+      }
+    } finally {
+      setPwSubmitBusy(false);
+    }
+  };
+
+  const emailBadge = user?.email ? (
+    user.email_verified ? (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/80">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        已验证
+      </span>
+    ) : (
+      <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200/70">
+        待验证
+      </span>
+    )
+  ) : null;
+
+  return (
+    <div className="space-y-8 pb-12">
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold tracking-tight text-[#1c1917]">账号与安全</h1>
+      </header>
+
+      {loadErr && (
+        <div className="flex gap-3 rounded-xl border border-red-100 bg-red-50/90 px-4 py-3 text-sm text-red-800 shadow-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{loadErr}</p>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+        <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 text-lg font-semibold text-white shadow-md ring-2 ring-orange-100">
+              {user?.username ? initials(user.username) : "—"}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-semibold text-[#1c1917]">{user?.username ?? "—"}</p>
+              {user?.email ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Mail className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                  <span className="truncate text-[13px] text-gray-800">{user.email}</span>
+                  {emailBadge}
+                </div>
+              ) : (
+                <p className="mt-3 inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-amber-50/95 px-3 py-2 text-xs leading-snug text-amber-950 ring-1 ring-amber-200/80">
+                  <span className="font-medium">未绑定邮箱</span>
+                  <span className="text-amber-900/85">
+                    无法在设置页重置密码或解绑第三方，请先到登录页绑定。
+                  </span>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <SectionShell icon={Link2} title="第三方账号绑定">
+        {loading ? (
+          <div className="animate-pulse space-y-4">
+            <div className="h-14 rounded-xl bg-[#f5f5f4]" />
+            <div className="h-14 rounded-xl bg-[#f5f5f4]" />
+          </div>
+        ) : bindings.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[#e7e5e4] bg-[#fafaf9] px-4 py-8 text-center">
+            <Shield className="mx-auto mb-3 h-8 w-8 text-[#d6d3d1]" aria-hidden />
+            <p className="text-[13px] font-medium text-gray-700">尚未绑定第三方账号</p>
+          </div>
+        ) : (
+          <ul className="space-y-4">
+            {bindings.map((b) => {
+              const canUnbind = Boolean(user?.email);
+              const name = providerDisplayName(b.provider);
+              return (
+                <li
+                  key={b.provider}
+                  className="rounded-xl border border-[#eae8e3] bg-[#fafaf9]/80 shadow-sm ring-1 ring-black/[0.02]"
+                >
+                  <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-[#ededed]">
+                        <ProviderAvatar avatarUrl={b.external_avatar} provider={b.provider} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-baseline gap-2 gap-y-1">
+                          <span className="rounded-md bg-[#fafaf9] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[#78716c] ring-1 ring-[#eae8e3]">
+                            {name}
+                          </span>
+                          {b.external_nickname ? (
+                            <span className="truncate text-sm font-medium text-[#292524]">{b.external_nickname}</span>
+                          ) : null}
+                        </div>
+                        {b.created_at ? (
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            绑定于 {new Date(b.created_at).toLocaleDateString("zh-CN")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex w-full shrink-0 justify-end sm:w-auto">
+                      {!canUnbind ? (
+                        <span className="rounded-lg bg-amber-50 px-3 py-2 text-center text-[12px] font-medium text-amber-900 ring-1 ring-amber-200/80 lg:text-left">
+                          请先绑定邮箱后再解除绑定
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-xl border border-[#eae8e3] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#292524] shadow-sm ring-1 ring-black/[0.03] transition-colors hover:bg-[#fafaf9] sm:self-auto"
+                          onClick={() => openUnbindModal(b.provider)}
+                        >
+                          解除绑定
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SectionShell>
+
+      <SectionShell icon={KeyRound} title="修改密码">
+        {!user?.email ? (
+          <div className="rounded-xl border border-amber-200/80 bg-amber-50/90 px-4 py-5 text-[13px] text-amber-950">
+            <div className="flex gap-2">
+              <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                未绑定邮箱时无法在此修改密码，请先在登录页完成邮箱绑定或 OAuth 补全。
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-xl space-y-4">
+            <p className="text-[13px] leading-relaxed text-gray-600">
+              先填写当前密码与新密码，验证通过后再收取邮箱验证码完成修改。
+            </p>
+            <button
+              type="button"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-[#1a1a1a] px-5 py-3 text-[14px] font-semibold text-white shadow-sm transition-colors hover:bg-neutral-900 sm:w-auto sm:min-w-[10rem]"
+              onClick={() => openChangePwModal()}
+            >
+              修改密码
+            </button>
+          </div>
+        )}
+      </SectionShell>
+
+      {changePwModalOpen && user?.email ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="change-pw-modal-title"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (pwSubmitBusy || pwSendBusy || checkPwBusy) return;
+            closeChangePwModal();
+          }}
+        >
+          <div
+            className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-3 top-3 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none"
+              disabled={pwSubmitBusy || pwSendBusy || checkPwBusy}
+              onClick={() => closeChangePwModal()}
+              aria-label="关闭"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="border-b border-[#f2f0ec] bg-gradient-to-br from-orange-50/60 via-white to-transparent px-6 pb-5 pt-6">
+              <h2 id="change-pw-modal-title" className="pr-10 text-lg font-semibold text-[#1c1917]">
+                修改密码
+              </h2>
+              <p className="mt-1 text-[13px] text-gray-600">
+                {changePwPhase === "credentials" ? (
+                  <>
+                    <span className="font-medium text-[#78716c]">步骤 1/2：</span>
+                    验证当前密码并设置新密码。
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium text-[#78716c]">步骤 2/2：</span>
+                    输入绑定邮箱收到的 6 位验证码以完成修改（可在此重发）。
+                  </>
+                )}
+              </p>
+            </div>
+            {changePwPhase === "credentials" ? (
+              <form
+                className="flex flex-col gap-4 p-6"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submitCredentialStep();
+                }}
+              >
+                <div className="space-y-4">
+                  <div>
+                    <label
+                      htmlFor="cp-old-modal"
+                      className="block text-[11px] font-medium uppercase tracking-wide text-gray-500"
+                    >
+                      当前密码
+                    </label>
+                    <input
+                      id="cp-old-modal"
+                      type="password"
+                      autoComplete="current-password"
+                      className={`mt-1.5 w-full rounded-xl border bg-[#fdfdfc] px-3 py-2.5 text-[14px] shadow-inner outline-none focus:bg-white ${oldPw.length === 0 && newPw.length > 0 ? "border-amber-200" : "border-[#e7e5e4]"} focus:border-gray-400`}
+                      value={oldPw}
+                      onChange={(e) => setOldPw(e.target.value)}
+                      placeholder="当前登录密码"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="cp-new-modal" className="block text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                      新密码
+                    </label>
+                    <input
+                      id="cp-new-modal"
+                      type="password"
+                      autoComplete="new-password"
+                      className={`mt-1.5 w-full rounded-xl border bg-[#fdfdfc] px-3 py-2.5 text-[14px] shadow-inner outline-none focus:bg-white ${newPw.length > 0 && newPw.length < 6 ? "border-amber-300" : "border-[#e7e5e4]"} focus:border-gray-400`}
+                      value={newPw}
+                      minLength={6}
+                      onChange={(e) => setNewPw(e.target.value)}
+                      placeholder="至少 6 位"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="cp-new2-modal" className="block text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                      确认新密码
+                    </label>
+                    <input
+                      id="cp-new2-modal"
+                      type="password"
+                      autoComplete="new-password"
+                      className={`mt-1.5 w-full rounded-xl border bg-[#fdfdfc] px-3 py-2.5 text-[14px] shadow-inner outline-none focus:bg-white ${newPwConfirm.length > 0 && newPwConfirm !== newPw ? "border-amber-400" : "border-[#e7e5e4]"} focus:border-gray-400`}
+                      value={newPwConfirm}
+                      minLength={6}
+                      onChange={(e) => setNewPwConfirm(e.target.value)}
+                      placeholder="再次输入新密码"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={checkPwBusy || pwSendBusy || pwSubmitBusy}
+                  className="w-full rounded-xl bg-[#1a1a1a] py-3 text-[14px] font-semibold text-white shadow-sm hover:bg-neutral-900 disabled:pointer-events-none disabled:opacity-60"
+                >
+                  {checkPwBusy ? "验证中…" : "下一步：发送邮箱验证码"}
+                </button>
+                {credentialAttempted && credentialOnlyError ? (
+                  <p className="text-left text-[12px] text-amber-800/95" role="status">
+                    {credentialOnlyError}
+                  </p>
+                ) : null}
+              </form>
+            ) : (
+              <form
+                className="flex flex-col gap-4 p-6"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submitChangePw();
+                }}
+              >
+                <button
+                  type="button"
+                  disabled={pwSubmitBusy || pwSendBusy || checkPwBusy}
+                  className="self-start rounded-lg px-2 py-1 text-[13px] font-medium text-orange-800/95 hover:bg-orange-50/90 hover:underline disabled:pointer-events-none disabled:opacity-50"
+                  onClick={() => backToCredentialStep()}
+                >
+                  ← 上一步修改密码
+                </button>
+                <div>
+                  <label
+                    htmlFor="cp-code-modal"
+                    className="block text-[11px] font-medium uppercase tracking-wide text-gray-500"
+                  >
+                    邮箱验证码
+                  </label>
+                  <div
+                    className={`relative mt-1.5 min-h-[44px] overflow-hidden rounded-xl border bg-[#fdfdfc] pl-3 transition focus-within:border-gray-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/15 ${
+                      cpCode.length > 0 && cpCode.length < 6 ? "border-amber-300" : "border-[#e7e5e4]"
+                    }`}
+                  >
+                    <input
+                      id="cp-code-modal"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      aria-invalid={cpCode.length > 0 && cpCode.length !== 6}
+                      className="h-[42px] w-full border-0 bg-transparent py-2 pl-0 pr-[8.75rem] text-[14px] outline-none placeholder:text-gray-400"
+                      value={cpCode}
+                      onChange={(e) => setCpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="6 位数字"
+                      maxLength={6}
+                    />
+                    <button
+                      type="button"
+                      disabled={changePwCd.left > 0 || pwSendBusy || pwSubmitBusy || checkPwBusy}
+                      onClick={() => void sendChangePwCode()}
+                      className="absolute right-1.5 top-1/2 max-w-[min(10rem,calc(100%-8px))] -translate-y-1/2 truncate rounded-full border border-orange-200/95 bg-gradient-to-b from-orange-50 to-orange-100/85 px-3.5 py-1.5 text-[12px] font-semibold text-orange-950 shadow-sm hover:from-orange-100 hover:to-orange-100/90 disabled:pointer-events-none disabled:opacity-50"
+                      title={changePwCd.left > 0 ? `${changePwCd.left} 秒后可发送` : undefined}
+                    >
+                      {pwSendBusy
+                        ? "发送中…"
+                        : changePwCd.left > 0
+                          ? `${changePwCd.left}s 后可发`
+                          : "重发验证码"}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={pwSubmitBusy || pwSendBusy || checkPwBusy}
+                  className="w-full rounded-xl bg-[#1a1a1a] py-3 text-[14px] font-semibold text-white shadow-sm hover:bg-neutral-900 disabled:pointer-events-none disabled:opacity-60"
+                >
+                  {pwSubmitBusy ? "提交中…" : "确认修改密码"}
+                </button>
+                {pwdSubmitAttempted && changePwFormError ? (
+                  <p className="text-left text-[12px] text-amber-800/95" role="status">
+                    {changePwFormError}
+                  </p>
+                ) : null}
+              </form>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {unbindModalProvider ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unbind-modal-title"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (
+              unbindVerifyingFor === unbindModalProvider ||
+              unbindSendingFor === unbindModalProvider
+            ) {
+              return;
+            }
+            closeUnbindModal();
+          }}
+        >
+          <div
+            className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none"
+              disabled={
+                unbindVerifyingFor === unbindModalProvider || unbindSendingFor === unbindModalProvider
+              }
+              onClick={() => closeUnbindModal()}
+              aria-label="关闭"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="border-b border-[#f2f0ec] bg-gradient-to-br from-orange-50/60 via-white to-transparent px-6 pb-5 pt-6">
+              <h2 id="unbind-modal-title" className="pr-10 text-lg font-semibold text-[#1c1917]">
+                解除「{providerDisplayName(unbindModalProvider)}」绑定
+              </h2>
+              <p className="mt-2 text-[13px] leading-relaxed text-gray-600">
+                将向「{user?.email ?? "—"}」发送验证码。解绑后仍可使用用户名/邮箱和密码登录。
+              </p>
+            </div>
+            <div className="space-y-5 p-6">
+              <div
+                className={`relative min-h-[44px] overflow-hidden rounded-xl border bg-[#fdfdfc] pl-3 transition focus-within:border-gray-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-orange-500/15 ${
+                  (unbindCode[unbindModalProvider]?.length ?? 0) > 0 &&
+                  (unbindCode[unbindModalProvider]?.length ?? 0) < 6
+                    ? "border-amber-300"
+                    : "border-[#e7e5e4]"
+                }`}
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="请输入 6 位验证码"
+                  className="h-[42px] w-full border-0 bg-transparent py-2 pl-0 pr-[9.5rem] text-[14px] tracking-wide outline-none placeholder:text-gray-400 sm:pr-[10.5rem]"
+                  value={unbindCode[unbindModalProvider] ?? ""}
+                  maxLength={8}
+                  onChange={(e) =>
+                    setUnbindCode((o) => ({
+                      ...o,
+                      [unbindModalProvider]: e.target.value.replace(/\D/g, "").slice(0, 8),
+                    }))
+                  }
+                />
+                <button
+                  type="button"
+                  disabled={
+                    unbindCd.left > 0 ||
+                    unbindSendingFor === unbindModalProvider ||
+                    unbindVerifyingFor === unbindModalProvider
+                  }
+                  className="absolute right-1.5 top-1/2 max-w-[calc(100%-12px)] -translate-y-1/2 truncate rounded-full border border-orange-200/95 bg-gradient-to-b from-orange-50 to-orange-100/85 px-3 py-1.5 text-[11px] font-semibold text-orange-950 shadow-sm hover:from-orange-100 hover:to-orange-100/90 disabled:pointer-events-none disabled:opacity-50 sm:text-[12px]"
+                  title={unbindCd.left > 0 ? `${unbindCd.left} 秒后可发送` : "发送解绑验证码到邮箱"}
+                  onClick={() => void sendUnbindCodeFor(unbindModalProvider)}
+                >
+                  {unbindSendingFor === unbindModalProvider
+                    ? "发送中…"
+                    : unbindCd.left > 0
+                      ? `${unbindCd.left}s 后可发`
+                      : "发送验证码"}
+                </button>
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  disabled={
+                    unbindVerifyingFor === unbindModalProvider ||
+                    unbindSendingFor === unbindModalProvider
+                  }
+                  className="rounded-xl border border-[#e7e5e4] px-4 py-2.5 text-[13px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  onClick={() => closeUnbindModal()}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={unbindVerifyingFor === unbindModalProvider || unbindSendingFor === unbindModalProvider}
+                  className="rounded-xl bg-[#1a1a1a] px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-gray-900 disabled:pointer-events-none disabled:opacity-50"
+                  onClick={() => void verifyUnbind(unbindModalProvider)}
+                >
+                  {unbindVerifyingFor === unbindModalProvider ? "解绑中…" : "确认解绑"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

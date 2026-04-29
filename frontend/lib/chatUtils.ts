@@ -5,7 +5,7 @@ import type {
   TraceMessage,
   ToolStep,
 } from "@/types/chat";
-import type { BrainstormStep } from "@/components/chat/BrainstormPanel";
+import type { BrainstormStep } from "@/types/brainstorm";
 
 /** 将 SSE / 历史记录中的工具入参转为可展示字符串 */
 export function toolIoToPreview(v: unknown): string | undefined {

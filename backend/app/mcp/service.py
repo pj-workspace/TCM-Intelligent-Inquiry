@@ -1,11 +1,13 @@
 """MCP 服务管理：注册、发现工具、动态挂载到 Agent 工具集（持久化 PostgreSQL）。"""
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.mcp.client import discover_tools
@@ -161,27 +163,33 @@ async def probe_enabled_mcp_servers(session: AsyncSession) -> None:
     )
     rows = r.scalars().all()
     now = datetime.now(timezone.utc)
-    for row in rows:
-        try:
-            safe_url = assert_mcp_url_allowed(row.url)
-            row.url = safe_url
-            hdrs = _row_headers(row) or None
-            tool_names = await discover_tools(safe_url, headers=hdrs)
-            row.tool_names = tool_names
-            row.last_probe_at = now
-            row.last_probe_error = None
-            register_mcp_tools_for_server(
-                row.id,
-                row.name,
-                safe_url,
-                tool_names,
-                headers=hdrs,
-            )
-            logger.info("MCP 周期探测 id=%s tools=%s", row.id, tool_names)
-        except Exception as exc:
-            row.last_probe_at = now
-            row.last_probe_error = str(exc)[:2000]
-            logger.warning("MCP 周期探测失败 id=%s: %s", row.id, exc)
+    concurrency = get_settings().mcp_probe_concurrency
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _probe_row(row: McpServerRecord) -> None:
+        async with sem:
+            try:
+                safe_url = assert_mcp_url_allowed(row.url)
+                row.url = safe_url
+                hdrs = _row_headers(row) or None
+                tool_names = await discover_tools(safe_url, headers=hdrs)
+                row.tool_names = tool_names
+                row.last_probe_at = now
+                row.last_probe_error = None
+                register_mcp_tools_for_server(
+                    row.id,
+                    row.name,
+                    safe_url,
+                    tool_names,
+                    headers=hdrs,
+                )
+                logger.info("MCP 周期探测 id=%s tools=%s", row.id, tool_names)
+            except Exception as exc:
+                row.last_probe_at = now
+                row.last_probe_error = str(exc)[:2000]
+                logger.warning("MCP 周期探测失败 id=%s: %s", row.id, exc)
+
+    await asyncio.gather(*(_probe_row(row) for row in rows))
 
 
 async def restore_mcp_tool_registrations(session: AsyncSession) -> None:

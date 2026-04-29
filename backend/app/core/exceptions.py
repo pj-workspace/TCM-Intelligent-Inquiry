@@ -40,6 +40,11 @@ class ForbiddenError(AppError):
     code = "FORBIDDEN"
 
 
+class ConflictError(AppError):
+    status_code = 409
+    code = "CONFLICT"
+
+
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,

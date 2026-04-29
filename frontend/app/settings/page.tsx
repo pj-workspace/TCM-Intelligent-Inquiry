@@ -1,4 +1,4 @@
-import { SettingsPageClient } from "@/components/settings/SettingsPageClient";
+import { SettingsPageClient } from "@/components/settings";
 
 export default async function SettingsPage({
   params,

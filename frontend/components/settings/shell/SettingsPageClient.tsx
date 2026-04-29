@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
-import { ArrowLeft, Box, Plug, Bot, Database } from "lucide-react";
-import { BuiltinToolsTab } from "@/components/settings/BuiltinToolsTab";
-import { McpTab } from "@/components/settings/McpTab";
-import { AgentsTab } from "@/components/settings/AgentsTab";
-import { KnowledgeTab } from "@/components/settings/KnowledgeTab";
+import { ArrowLeft, Box, Plug, Bot, Database, User } from "lucide-react";
+import { BuiltinToolsTab } from "@/components/settings/builtin/BuiltinToolsTab";
+import { McpTab } from "@/components/settings/mcp/McpTab";
+import { AgentsTab } from "@/components/settings/agents/AgentsTab";
+import { KnowledgeTab } from "@/components/settings/knowledge/KnowledgeTab";
+import { AccountTab } from "@/components/settings/account/AccountTab";
 
-type TabId = "builtin" | "mcp" | "knowledge" | "agents";
+type TabId = "builtin" | "mcp" | "knowledge" | "agents" | "account";
 
 export function SettingsPageClient() {
   const { loading, token } = useAuth();
@@ -95,6 +96,17 @@ export function SettingsPageClient() {
               <Bot className="h-4 w-4" />
               Agent 管理
             </button>
+            <button
+              onClick={() => setActiveTab("account")}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
+                activeTab === "account"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200 hover:bg-orange-50/40"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <User className="h-4 w-4" />
+              账号与安全
+            </button>
           </div>
         </nav>
 
@@ -105,6 +117,7 @@ export function SettingsPageClient() {
             {activeTab === "mcp" && <McpTab />}
             {activeTab === "knowledge" && <KnowledgeTab />}
             {activeTab === "agents" && <AgentsTab />}
+            {activeTab === "account" && <AccountTab />}
           </div>
         </main>
       </div>

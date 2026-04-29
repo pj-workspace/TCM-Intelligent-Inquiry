@@ -8,7 +8,7 @@ import { ChevronDown } from "lucide-react";
 import type { BrainstormPanelProps } from "@/types/brainstorm";
 import { formatDurationSec, runningToolLabel } from "@/lib/brainstorm-utils";
 import { useBrainstormScroll } from "@/hooks/useBrainstormScroll";
-import { BrainstormStepItem } from "@/components/chat/BrainstormStepItem";
+import { BrainstormStepItem } from "./BrainstormStepItem";
 
 export type { BrainstormStep } from "@/types/brainstorm";
 

@@ -4,6 +4,8 @@ import uuid
 
 import pytest
 
+from tests.register_helpers import prime_register_otp
+
 
 @pytest.mark.integration
 def test_create_list_get_kb(client, auth_headers):
@@ -62,9 +64,16 @@ def test_kb_not_accessible_to_other_user(client, unique_username):
     u1 = f"{unique_username}_a"
     u2 = f"{unique_username}_b"
     for u in (u1, u2):
+        em = f"{u}@test.local"
+        prime_register_otp(em)
         assert client.post(
             "/api/auth/register",
-            json={"username": u, "password": pw},
+            json={
+                "username": u,
+                "password": pw,
+                "email": em,
+                "email_code": "887766",
+            },
         ).status_code == 200
     t1 = client.post(
         "/api/auth/login",
