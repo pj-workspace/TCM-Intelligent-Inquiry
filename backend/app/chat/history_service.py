@@ -23,6 +23,7 @@ async def list_my_conversations(
             title=x.title or "",
             agent_id=x.agent_id,
             created_at=x.created_at,
+            group_id=x.group_id,
         )
         for x in rows
     ]

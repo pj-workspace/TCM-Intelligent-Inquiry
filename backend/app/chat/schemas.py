@@ -46,6 +46,10 @@ class ChatRequest(BaseModel):
         default="force",
         description="在 web_search_enabled 时生效：force=必须调用联网搜索；auto=由模型判断是否需要搜网。",
     )
+    group_id: str | None = Field(
+        default=None,
+        description="仅在新建会话（未传 conversation_id）时生效：将把会话归入该分组，须为当前用户的分组 ID。",
+    )
 
 
 class ConversationItem(BaseModel):
@@ -53,6 +57,26 @@ class ConversationItem(BaseModel):
     title: str
     agent_id: str | None = None
     created_at: datetime
+    group_id: str | None = None
+
+
+class ConversationGroupItem(BaseModel):
+    id: str
+    name: str
+    sort_order: int
+    created_at: datetime
+
+
+class ConversationGroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
+class ConversationGroupRename(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+
+
+class ConversationGroupAssign(BaseModel):
+    group_id: str | None = Field(None, description="不传或 null 表示移出分组")
 
 
 class MessageItem(BaseModel):

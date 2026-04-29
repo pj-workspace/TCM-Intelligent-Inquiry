@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, apiHeaders, apiJsonHeaders } from "@/lib/api";
 import {
   toolIoToPreview,
   groupMessagesIntoTraces,
@@ -17,7 +17,10 @@ import type {
   GenerationState,
   ServerConversation,
   ToolStep,
+  ConversationFolder,
 } from "@/types/chat";
+
+const PINNED_IDS_KEY = "tcm_pinned_conversation_ids";
 
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
 
@@ -26,8 +29,11 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function useChat(opts: {
   autoFollowMainRef: React.MutableRefObject<boolean>;
   onNewChatScrollReset: () => void;
+  /** 侧栏选中文件夹且将新建会话时，传入该分组 ID */
+  getPreferredGroupForNewConversation?: () => string | null;
 }) {
-  const { autoFollowMainRef, onNewChatScrollReset } = opts;
+  const { autoFollowMainRef, onNewChatScrollReset, getPreferredGroupForNewConversation } =
+    opts;
   const router = useRouter();
   const { token, loading: authLoading } = useAuth();
 
@@ -39,8 +45,24 @@ export function useChat(opts: {
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const [bulkDeletePending, setBulkDeletePending] = useState(false);
+  const [movePendingId, setMovePendingId] = useState<string | null>(null);
+  const [conversationFolders, setConversationFolders] = useState<ConversationFolder[]>([]);
+  const [pinnedIds, setPinnedIdsState] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem(PINNED_IDS_KEY);
+      if (!raw) return [];
+      const p = JSON.parse(raw) as unknown;
+      return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  });
 
   const pendingChatModelRef = useRef<string | undefined>(undefined);
+  const pendingNewConversationGroupRef = useRef<string | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
   const thinkingStepStartedAt = useRef<Record<string, number>>({});
   const traceStartedAt = useRef<Record<string, number>>({});
@@ -60,17 +82,47 @@ export function useChat(opts: {
   }, [messages]);
 
   // ── Server-side conversation list ──────────────────────────────────────────
-  const refreshServerConversations = useCallback(async () => {
-    if (!token) return;
-    const res = await fetch(`${API_BASE}/api/chat/conversations`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return;
-    const data = (await res.json()) as { id: string; title: string; created_at?: string }[];
-    if (!Array.isArray(data)) return;
-    setServerConversations(
-      data.map((x) => ({ id: x.id, title: x.title?.trim() || "未命名", created_at: x.created_at }))
-    );
+  const refreshServerConversations = useCallback(async (): Promise<ServerConversation[] | null> => {
+    if (!token) return null;
+    const h = apiHeaders(token);
+    try {
+      const [cr, gr] = await Promise.all([
+        fetch(`${API_BASE}/api/chat/conversations`, { headers: h }),
+        fetch(`${API_BASE}/api/chat/groups`, { headers: h }),
+      ]);
+      let listOut: ServerConversation[] | null = null;
+      if (cr.ok) {
+        const data = (await cr.json()) as {
+          id: string;
+          title: string;
+          created_at?: string;
+          group_id?: string | null;
+        }[];
+        if (Array.isArray(data)) {
+          listOut = data.map((x) => ({
+            id: x.id,
+            title: x.title?.trim() || "未命名",
+            created_at: x.created_at,
+            group_id: x.group_id ?? null,
+          }));
+          setServerConversations(listOut);
+        }
+      }
+      if (gr.ok) {
+        const gd = (await gr.json()) as ConversationFolder[];
+        if (Array.isArray(gd)) setConversationFolders(gd);
+      }
+      return listOut;
+    } catch (err) {
+      /** 后端未启动、离线、CORS 等：`fetch` 会抛 TypeError，避免未处理 rejection 和红栈 */
+      if (process.env.NODE_ENV === "development") {
+        console.warn(
+          "[useChat] refreshServerConversations: 无法连接 API（请检查后端是否在本机端口运行，`NEXT_PUBLIC_API_BASE_URL` 是否正确）:",
+          err
+        );
+      }
+      return null;
+    }
   }, [token]);
 
   const loadMessagesWithToken = useCallback(async (convId: string, accessToken: string) => {
@@ -158,6 +210,9 @@ export function useChat(opts: {
       let hasAssistantMsg = false;
 
       try {
+        const preferredGid =
+          !conversationId ? getPreferredGroupForNewConversation?.() ?? null : null;
+        pendingNewConversationGroupRef.current = preferredGid;
         const response = await fetch(`${API_BASE}/api/chat`, {
           method: "POST",
           headers: {
@@ -172,6 +227,7 @@ export function useChat(opts: {
             deep_think: deepThinkEnabled,
             web_search_enabled: webSearchEnabled,
             web_search_mode: webSearchMode,
+            ...(preferredGid ? { group_id: preferredGid } : {}),
           }),
           signal: abortController.signal,
         });
@@ -218,7 +274,12 @@ export function useChat(opts: {
                   setServerConversations((prev) => {
                     if (prev.some((c) => c.id === data.conversationId)) return prev;
                     return [
-                      { id: data.conversationId, title: "", created_at: new Date().toISOString() },
+                      {
+                        id: data.conversationId,
+                        title: "",
+                        created_at: new Date().toISOString(),
+                        group_id: pendingNewConversationGroupRef.current,
+                      },
                       ...prev,
                     ];
                   });
@@ -408,7 +469,12 @@ export function useChat(opts: {
                     const idx = prev.findIndex((c) => c.id === cid);
                     if (idx === -1) {
                       return [
-                        { id: cid, title: nextTitle, created_at: new Date().toISOString() },
+                        {
+                          id: cid,
+                          title: nextTitle,
+                          created_at: new Date().toISOString(),
+                          group_id: pendingNewConversationGroupRef.current,
+                        },
                         ...prev,
                       ];
                     }
@@ -494,7 +560,6 @@ export function useChat(opts: {
         setIsGeneratingTitle(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       token,
       conversationId,
@@ -505,6 +570,7 @@ export function useChat(opts: {
       finalizeThinkingStep,
       finalizeTrace,
       refreshServerConversations,
+      getPreferredGroupForNewConversation,
     ]
   );
 
@@ -624,6 +690,15 @@ export function useChat(opts: {
       });
       if (!res.ok) throw new Error("Failed to delete conversation");
       setServerConversations((prev) => prev.filter((c) => c.id !== id));
+      setPinnedIdsState((prev) => {
+        const next = prev.filter((x) => x !== id);
+        try {
+          localStorage.setItem(PINNED_IDS_KEY, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
       if (conversationId === id) handleNewChat();
       setDeleteTargetId(null);
     } catch (e) {
@@ -632,6 +707,115 @@ export function useChat(opts: {
       setDeletePending(false);
     }
   }, [token, deleteTargetId, conversationId, handleNewChat]);
+
+  const moveConversationToGroup = useCallback(
+    async (convId: string, groupId: string | null) => {
+      if (!token) return;
+      setMovePendingId(convId);
+      try {
+        const res = await fetch(`${API_BASE}/api/chat/conversations/${convId}/group`, {
+          method: "PUT",
+          headers: apiJsonHeaders(token),
+          body: JSON.stringify({ group_id: groupId }),
+        });
+        if (!res.ok) return;
+        setServerConversations((prev) =>
+          prev.map((c) => (c.id === convId ? { ...c, group_id: groupId } : c))
+        );
+        await refreshServerConversations();
+      } finally {
+        setMovePendingId(null);
+      }
+    },
+    [token, refreshServerConversations]
+  );
+
+  const createFolder = useCallback(
+    async (name: string) => {
+      if (!token?.trim()) return null;
+      const res = await fetch(`${API_BASE}/api/chat/groups`, {
+        method: "POST",
+        headers: apiJsonHeaders(token),
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (!res.ok) return null;
+      const row = (await res.json()) as ConversationFolder;
+      await refreshServerConversations();
+      return row;
+    },
+    [token, refreshServerConversations]
+  );
+
+  const renameFolder = useCallback(
+    async (groupId: string, name: string) => {
+      if (!token) return;
+      const res = await fetch(`${API_BASE}/api/chat/groups/${groupId}`, {
+        method: "PATCH",
+        headers: apiJsonHeaders(token),
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (res.ok) await refreshServerConversations();
+    },
+    [token, refreshServerConversations]
+  );
+
+  const deleteFolder = useCallback(
+    async (groupId: string) => {
+      if (!token) return;
+      const res = await fetch(`${API_BASE}/api/chat/groups/${groupId}`, {
+        method: "DELETE",
+        headers: apiHeaders(token),
+      });
+      if (res.ok) await refreshServerConversations();
+    },
+    [token, refreshServerConversations]
+  );
+
+  const togglePinConversation = useCallback((id: string) => {
+    setPinnedIdsState((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : [id, ...prev.filter((x) => x !== id)];
+      try {
+        localStorage.setItem(PINNED_IDS_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  const deleteConversationsBulk = useCallback(
+    async (ids: string[]) => {
+      if (!token || ids.length === 0) return;
+      setBulkDeletePending(true);
+      try {
+        const h = apiHeaders(token);
+        for (const id of ids) {
+          await fetch(`${API_BASE}/api/chat/conversations/${id}`, {
+            method: "DELETE",
+            headers: h,
+          });
+        }
+        setServerConversations((prev) => prev.filter((c) => !ids.includes(c.id)));
+        setPinnedIdsState((prev) => {
+          const next = prev.filter((x) => !ids.includes(x));
+          try {
+            localStorage.setItem(PINNED_IDS_KEY, JSON.stringify(next));
+          } catch {
+            /* ignore */
+          }
+          return next;
+        });
+        if (conversationId && ids.includes(conversationId)) handleNewChat();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setBulkDeletePending(false);
+      }
+    },
+    [token, conversationId, handleNewChat]
+  );
 
   // ── Auth effects ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -645,46 +829,49 @@ export function useChat(opts: {
     }
   }, []);
 
-  /** 已登录：拉服务端会话列表并恢复上次打开的会话 */
+  /** 已登录：拉侧边栏数据并恢复上次打开的会话 */
   useEffect(() => {
     if (authLoading || !token) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/chat/conversations`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { id: string; title: string }[];
-        const mapped = Array.isArray(data)
-          ? data.map((x) => ({ id: x.id, title: x.title?.trim() || "未命名" }))
-          : [];
+        const mapped = await refreshServerConversations();
         if (cancelled) return;
-        setServerConversations(mapped);
         const savedId = localStorage.getItem("tcm_conversation_id");
-        if (!savedId || !mapped.some((c) => c.id === savedId)) return;
+        if (!savedId || !mapped?.some((c) => c.id === savedId)) return;
         setConversationId(savedId);
         setHasStarted(true);
-        const mr = await fetch(`${API_BASE}/api/chat/conversations/${savedId}/messages`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        let mr: Response;
+        try {
+          mr = await fetch(`${API_BASE}/api/chat/conversations/${savedId}/messages`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (err) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn("[useChat] restore session messages fetch failed:", err);
+          }
+          return;
+        }
         if (!mr.ok || cancelled) return;
         const msgs = (await mr.json()) as ApiMessageRow[];
         if (!Array.isArray(msgs) || cancelled) return;
         setMessages(groupMessagesIntoTraces(msgs.map(mapApiRowToMessage)));
       } catch (e) {
-        console.error(e);
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[useChat] init session:", e);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [authLoading, token]);
+  }, [authLoading, token, refreshServerConversations]);
 
   /** 未登录：清空服务端会话缓存与本地残留匿名状态 */
   useEffect(() => {
     if (authLoading || token) return;
     setServerConversations([]);
+    setConversationFolders([]);
     localStorage.removeItem("tcm_conversation_id");
     localStorage.removeItem("tcm_anon_secret");
     setConversationId(null);
@@ -708,6 +895,10 @@ export function useChat(opts: {
     lastAssistantMessageId,
     deleteTargetId,
     deletePending,
+    bulkDeletePending,
+    movePendingId,
+    conversationFolders,
+    pinnedIds,
     // feature toggles
     deepThinkEnabled,
     setDeepThinkEnabled,
@@ -725,5 +916,11 @@ export function useChat(opts: {
     openDeleteDialog,
     closeDeleteDialog,
     confirmDeleteConversation,
+    moveConversationToGroup,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    togglePinConversation,
+    deleteConversationsBulk,
   };
 }

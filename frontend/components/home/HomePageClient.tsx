@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowDown } from "lucide-react";
 import {
@@ -9,15 +9,19 @@ import {
   ChatInputBar,
   ClaudeStar,
   ConversationSearchModal,
+  GroupWorkspace,
   MessageBubble,
   Sidebar,
 } from "@/components/chat";
+import type { SidebarFilter } from "@/components/chat/sidebar/Sidebar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE } from "@/lib/api";
+import { downloadConversationMarkdown } from "@/lib/conversation-export";
 import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtils";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
+import type { ServerConversation } from "@/types/chat";
 
 const messageTransition = { type: "spring" as const, stiffness: 200, damping: 28, mass: 0.6 };
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
@@ -30,6 +34,23 @@ export function HomePageClient() {
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+
+  const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>("__ungrouped__");
+  const [sidebarBatchMode, setSidebarBatchMode] = useState(false);
+  const [sidebarSelectedIds, setSidebarSelectedIds] = useState<Set<string>>(() => new Set());
+
+  const [renameConvModal, setRenameConvModal] = useState<{ id: string; draft: string } | null>(
+    null
+  );
+  const [newGroupModalOpen, setNewGroupModalOpen] = useState(false);
+  const [newGroupNameDraft, setNewGroupNameDraft] = useState("");
+  const [renameFolderModal, setRenameFolderModal] = useState<{ id: string; draft: string } | null>(
+    null
+  );
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [deleteFolderConfirm, setDeleteFolderConfirm] = useState<{ id: string; name: string } | null>(
+    null
+  );
 
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -44,9 +65,15 @@ export function HomePageClient() {
     resetScrollState,
   } = useScrollBehavior(false);
 
+  const getPreferredGroupForNewConversation = useCallback((): string | null => {
+    if (sidebarFilter === "__ungrouped__") return null;
+    return sidebarFilter;
+  }, [sidebarFilter]);
+
   const chat = useChat({
     autoFollowMainRef,
     onNewChatScrollReset: resetScrollState,
+    getPreferredGroupForNewConversation,
   });
 
   const {
@@ -56,10 +83,14 @@ export function HomePageClient() {
     genState,
     conversationId,
     serverConversations,
+    conversationFolders,
+    pinnedIds,
     isGeneratingTitle,
     lastAssistantMessageId,
     deleteTargetId,
     deletePending,
+    bulkDeletePending,
+    movePendingId,
     deepThinkEnabled,
     setDeepThinkEnabled,
     webSearchEnabled,
@@ -73,7 +104,207 @@ export function HomePageClient() {
     openDeleteDialog,
     closeDeleteDialog,
     confirmDeleteConversation,
+    refreshServerConversations,
+    moveConversationToGroup,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    togglePinConversation,
+    deleteConversationsBulk,
   } = chat;
+
+  const scopedConversations = useMemo(() => {
+    if (!token) return [];
+    return serverConversations.filter((c) => {
+      if (sidebarFilter === "__ungrouped__") return !c.group_id;
+      return c.group_id === sidebarFilter;
+    });
+  }, [token, serverConversations, sidebarFilter]);
+
+  /** 侧栏「聊天」区始终只列出未分组会话；分组会话仅在分组工作台内展示 */
+  const displayedSidebarConversations = useMemo(() => {
+    if (!token) return [];
+    const ungrouped = serverConversations.filter((c) => !c.group_id);
+    const pinIdsOrdered = pinnedIds.filter((pid) =>
+      ungrouped.some((c) => c.id === pid)
+    );
+    const pinSet = new Set(pinIdsOrdered);
+    const pinnedOrdered: ServerConversation[] = pinIdsOrdered
+      .map((id) => ungrouped.find((c) => c.id === id))
+      .filter((c): c is ServerConversation => c != null);
+    const rest = ungrouped.filter((c) => !pinSet.has(c.id));
+    return [...pinnedOrdered, ...rest];
+  }, [token, serverConversations, pinnedIds]);
+
+  const conversationGroupTrail = useMemo(() => {
+    if (!conversationId || !token) return null;
+    const c = serverConversations.find((x) => x.id === conversationId);
+    if (!c?.group_id) return null;
+    const gn =
+      conversationFolders.find((f) => f.id === c.group_id)?.name?.trim() || "分组";
+    return { groupName: gn };
+  }, [conversationId, token, serverConversations, conversationFolders]);
+
+  const viewingGroupLanding = useMemo(() => {
+    if (!token || sidebarFilter === "__ungrouped__") return false;
+    if (!conversationId) return true;
+    const conv = serverConversations.find((c) => c.id === conversationId);
+    return conv?.group_id !== sidebarFilter;
+  }, [token, sidebarFilter, conversationId, serverConversations]);
+
+  const selectedGroupFolderName =
+    conversationFolders.find((f) => f.id === sidebarFilter)?.name?.trim() || "分组";
+
+  const activeConvInSidebarGroup =
+    !!conversationId &&
+    sidebarFilter !== "__ungrouped__" &&
+    serverConversations.find((c) => c.id === conversationId)?.group_id === sidebarFilter;
+
+  const showBackToGroupWorkspace = Boolean(token) && activeConvInSidebarGroup;
+
+  const selectConversationSyncSidebar = useCallback(
+    async (id: string) => {
+      await handleSelectConversation(id);
+      const list = await refreshServerConversations();
+      const row = list?.find((c) => c.id === id);
+      if (row?.group_id) setSidebarFilter(row.group_id);
+      else setSidebarFilter("__ungrouped__");
+    },
+    [handleSelectConversation, refreshServerConversations]
+  );
+
+  /**
+   * 再次点击同一分组文件夹：关掉当前会话，回到该分组管理页；
+   * 切换到其它文件夹或「未分组」仍只更新筛选。
+   */
+  const handleSidebarFilterChange = useCallback(
+    (f: SidebarFilter) => {
+      if (f !== "__ungrouped__" && f === sidebarFilter && conversationId) {
+        handleNewChat();
+        return;
+      }
+      setSidebarFilter(f);
+    },
+    [sidebarFilter, conversationId, handleNewChat]
+  );
+
+  /** 顶部「返回分组」：与再次点侧栏文件夹相同 */
+  const handleBackToGroupWorkspace = useCallback(() => {
+    handleNewChat();
+  }, [handleNewChat]);
+
+  /** 切换到某分组视图时：若当前打开的是其他分组的会话，则清空并开始该分组工作台 */
+  useEffect(() => {
+    if (sidebarFilter === "__ungrouped__") return;
+    const cid = conversationId;
+    if (!cid) return;
+    const conv = serverConversations.find((c) => c.id === cid);
+    if (!conv || conv.group_id !== sidebarFilter) {
+      handleNewChat();
+    }
+  }, [sidebarFilter, conversationId, serverConversations, handleNewChat]);
+
+  const handleClearSidebarSelection = useCallback(() => {
+    setSidebarSelectedIds(new Set());
+  }, []);
+
+  const handleToggleSidebarBatchMode = useCallback(() => {
+    setSidebarBatchMode((prev) => {
+      if (prev) {
+        setSidebarSelectedIds(new Set());
+        return false;
+      }
+      return true;
+    });
+  }, []);
+
+  const handleToggleSidebarSelect = useCallback((id: string) => {
+    setSidebarSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }, []);
+
+  const handleSelectAllDisplayed = useCallback(() => {
+    setSidebarSelectedIds(new Set(displayedSidebarConversations.map((c) => c.id)));
+  }, [displayedSidebarConversations]);
+
+  const runBulkDelete = useCallback(async () => {
+    const ids = Array.from(sidebarSelectedIds);
+    if (ids.length === 0) {
+      setBulkDeleteConfirmOpen(false);
+      return;
+    }
+    await deleteConversationsBulk(ids);
+    setBulkDeleteConfirmOpen(false);
+    setSidebarSelectedIds(new Set());
+    setSidebarBatchMode(false);
+  }, [sidebarSelectedIds, deleteConversationsBulk]);
+
+  const handleSaveSidebarRename = useCallback(async () => {
+    const m = renameConvModal;
+    if (!m || !token || !m.draft.trim()) {
+      setRenameConvModal(null);
+      return;
+    }
+    try {
+      await fetch(`${API_BASE}/api/chat/conversations/${m.id}/title`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ title: m.draft.trim() }),
+      });
+      await refreshServerConversations();
+    } catch (e) {
+      console.error(e);
+    }
+    setRenameConvModal(null);
+  }, [renameConvModal, token, refreshServerConversations]);
+
+  const submitNewGroup = useCallback(async () => {
+    if (!newGroupNameDraft.trim()) {
+      setNewGroupModalOpen(false);
+      return;
+    }
+    const row = await createFolder(newGroupNameDraft);
+    setNewGroupModalOpen(false);
+    setNewGroupNameDraft("");
+    if (row) setSidebarFilter(row.id);
+  }, [newGroupNameDraft, createFolder]);
+
+  const submitRenameFolder = useCallback(async () => {
+    const m = renameFolderModal;
+    if (!m?.draft.trim()) {
+      setRenameFolderModal(null);
+      return;
+    }
+    await renameFolder(m.id, m.draft);
+    setRenameFolderModal(null);
+  }, [renameFolderModal, renameFolder]);
+
+  const confirmDeleteFolder = useCallback(async () => {
+    const t = deleteFolderConfirm;
+    if (!t) return;
+    await deleteFolder(t.id);
+    if (sidebarFilter === t.id) setSidebarFilter("__ungrouped__");
+    setDeleteFolderConfirm(null);
+  }, [deleteFolderConfirm, deleteFolder, sidebarFilter]);
+
+  const handleExportSidebarConversation = useCallback(
+    async (id: string, title: string) => {
+      if (!token) return;
+      try {
+        await downloadConversationMarkdown(token, id, title);
+      } catch (e) {
+        console.error(e);
+      }
+    },
+    [token]
+  );
 
   // 监听 messages / genState 变化，自动跟随滚动
   useEffect(() => {
@@ -82,11 +313,12 @@ export function HomePageClient() {
     scrollToBottom(false);
   }, [messages, genState, hasStarted, scrollToBottom, autoFollowMainRef]);
 
-  // 从 sessionStorage 恢复未发送的草稿
+  // 从 sessionStorage 恢复未发送的草稿（首屏回填一次）
   useEffect(() => {
     try {
       const draft = sessionStorage.getItem(PENDING_CHAT_DRAFT_KEY);
       if (draft != null && draft !== "") {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- 首屏回填草稿
         setInput(draft);
         sessionStorage.removeItem(PENDING_CHAT_DRAFT_KEY);
       }
@@ -97,6 +329,7 @@ export function HomePageClient() {
 
   // 切换会话时退出标题编辑
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 随 conversationId 同步编辑态
     setIsEditingTitle(false);
   }, [conversationId]);
 
@@ -154,7 +387,7 @@ export function HomePageClient() {
         },
         body: JSON.stringify({ title: editTitleValue.trim() }),
       });
-      await chat.refreshServerConversations();
+      await refreshServerConversations();
     } catch (e) {
       console.error(e);
     }
@@ -164,6 +397,7 @@ export function HomePageClient() {
   /** 侧栏在 md 以下隐藏，移动端用顶栏骨架表示「会话标题加载中」 */
   const showMobileTitleSkeleton =
     Boolean(token) &&
+    !viewingGroupLanding &&
     hasStarted &&
     genState !== "idle" &&
     (!conversationId ||
@@ -183,17 +417,231 @@ export function HomePageClient() {
         onCancel={closeDeleteDialog}
       />
 
+      <ConfirmDialog
+        open={bulkDeleteConfirmOpen}
+        title="批量删除"
+        description={`确定删除已选中的 ${sidebarSelectedIds.size} 条会话？删除后无法恢复。`}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        pending={bulkDeletePending}
+        onConfirm={() => void runBulkDelete()}
+        onCancel={() => {
+          if (bulkDeletePending) return;
+          setBulkDeleteConfirmOpen(false);
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteFolderConfirm !== null}
+        title="删除分组"
+        description={
+          deleteFolderConfirm
+            ? `确定删除分组「${deleteFolderConfirm.name}」？会话将移回未分组。`
+            : ""
+        }
+        confirmLabel="删除"
+        cancelLabel="取消"
+        danger
+        pending={false}
+        onConfirm={() => void confirmDeleteFolder()}
+        onCancel={() => setDeleteFolderConfirm(null)}
+      />
+
+      {/* 侧栏「编辑会话名称」 */}
+      <AnimatePresence>
+        {renameConvModal && (
+          <motion.div
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setRenameConvModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-md rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-gray-900">编辑会话名称</h2>
+              <input
+                autoFocus
+                className="mt-4 w-full rounded-xl border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-200"
+                value={renameConvModal.draft}
+                onChange={(e) =>
+                  setRenameConvModal((m) => (m ? { ...m, draft: e.target.value } : m))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleSaveSidebarRename();
+                  if (e.key === "Escape") setRenameConvModal(null);
+                }}
+              />
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-[#e5e5e5] px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={() => setRenameConvModal(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl bg-[#1a1a1a] px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                  onClick={() => void handleSaveSidebarRename()}
+                >
+                  保存
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 新建分组 */}
+      <AnimatePresence>
+        {newGroupModalOpen && (
+          <motion.div
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setNewGroupModalOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-md rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-gray-900">新建分组</h2>
+              <input
+                autoFocus
+                className="mt-4 w-full rounded-xl border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-200"
+                placeholder="分组名称"
+                value={newGroupNameDraft}
+                onChange={(e) => setNewGroupNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitNewGroup();
+                  if (e.key === "Escape") setNewGroupModalOpen(false);
+                }}
+              />
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-[#e5e5e5] px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={() => setNewGroupModalOpen(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl bg-[#1a1a1a] px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                  onClick={() => void submitNewGroup()}
+                >
+                  创建
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 重命名分组 */}
+      <AnimatePresence>
+        {renameFolderModal && (
+          <motion.div
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setRenameFolderModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-md rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-gray-900">重命名分组</h2>
+              <input
+                autoFocus
+                className="mt-4 w-full rounded-xl border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-200"
+                value={renameFolderModal.draft}
+                onChange={(e) =>
+                  setRenameFolderModal((m) => (m ? { ...m, draft: e.target.value } : m))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void submitRenameFolder();
+                  if (e.key === "Escape") setRenameFolderModal(null);
+                }}
+              />
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl border border-[#e5e5e5] px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={() => setRenameFolderModal(null)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl bg-[#1a1a1a] px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                  onClick={() => void submitRenameFolder()}
+                >
+                  保存
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Sidebar
-        conversations={token ? serverConversations : []}
+        folders={conversationFolders}
+        conversationsFull={token ? serverConversations : []}
+        displayedConversations={displayedSidebarConversations}
         activeId={conversationId}
+        sidebarFilter={sidebarFilter}
+        onSidebarFilterChange={handleSidebarFilterChange}
         onNewChat={handleNewChat}
-        onSelect={handleSelectConversation}
+        onSelect={selectConversationSyncSidebar}
         onDelete={openDeleteDialog}
+        onRenameRequest={(id, currentTitle) =>
+          setRenameConvModal({ id, draft: currentTitle || "" })
+        }
+        onExportConversation={handleExportSidebarConversation}
+        onTogglePin={togglePinConversation}
+        onMoveToGroup={moveConversationToGroup}
+        onCreateFolder={() => {
+          setNewGroupNameDraft("");
+          setNewGroupModalOpen(true);
+        }}
+        onRenameFolder={(groupId, currentName) =>
+          setRenameFolderModal({ id: groupId, draft: currentName })
+        }
+        onDeleteFolder={(groupId) => {
+          const name = conversationFolders.find((f) => f.id === groupId)?.name ?? "分组";
+          setDeleteFolderConfirm({ id: groupId, name });
+        }}
+        pinnedIds={pinnedIds}
+        batchMode={sidebarBatchMode}
+        onToggleBatchMode={handleToggleSidebarBatchMode}
+        selectedIds={sidebarSelectedIds}
+        onToggleSelect={handleToggleSidebarSelect}
+        onSelectAllDisplayed={handleSelectAllDisplayed}
+        onClearBatchSelection={handleClearSidebarSelection}
+        onBulkDelete={() => setBulkDeleteConfirmOpen(true)}
+        bulkDeletePending={bulkDeletePending}
         streamBusy={genState !== "idle"}
         isGeneratingTitle={isGeneratingTitle}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed((v) => !v)}
         onOpenSearch={() => setSearchOpen(true)}
+        movePendingId={movePendingId}
       />
 
       <ConversationSearchModal
@@ -201,7 +649,7 @@ export function HomePageClient() {
         conversations={token ? serverConversations : []}
         onClose={() => setSearchOpen(false)}
         onSelect={(id) => {
-          void handleSelectConversation(id);
+          void selectConversationSyncSidebar(id);
           setSearchOpen(false);
         }}
         onNewChat={() => {
@@ -214,6 +662,7 @@ export function HomePageClient() {
         <ChatHeader
           token={token}
           authLoading={authLoading}
+          groupWorkspaceTitle={viewingGroupLanding ? selectedGroupFolderName : null}
           hasStarted={hasStarted}
           conversationId={conversationId}
           serverConversations={serverConversations}
@@ -224,6 +673,15 @@ export function HomePageClient() {
           headerMenuOpen={headerMenuOpen}
           headerMenuRef={headerMenuRef}
           showMobileTitleSkeleton={showMobileTitleSkeleton}
+          showBackToGroupWorkspace={Boolean(
+            showBackToGroupWorkspace && !conversationGroupTrail
+          )}
+          onBackToGroupWorkspace={handleBackToGroupWorkspace}
+          conversationGroupTrail={
+            conversationGroupTrail
+              ? { ...conversationGroupTrail, onGroupClick: handleBackToGroupWorkspace }
+              : null
+          }
           onToggleSidebar={() => setSidebarCollapsed(false)}
           onNewChat={handleNewChat}
           onSetHeaderMenuOpen={setHeaderMenuOpen}
@@ -248,14 +706,16 @@ export function HomePageClient() {
           onLogout={logout}
         />
 
-        <div className="flex-1 flex flex-col relative overflow-hidden">
-          <div
-            ref={scrollViewportRef}
-            onScroll={updateScrollState}
-            className="chat-scroll-area no-scrollbar flex-1 overflow-y-auto"
-          >
-            <AnimatePresence>
-              {hasStarted && (
+        <div className="flex flex-1 flex-col relative min-h-0 overflow-hidden">
+          {!viewingGroupLanding ? (
+            <>
+              <div
+                ref={scrollViewportRef}
+                onScroll={updateScrollState}
+                className="chat-scroll-area no-scrollbar flex-1 overflow-y-auto"
+              >
+                <AnimatePresence>
+                  {hasStarted && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -355,7 +815,7 @@ export function HomePageClient() {
           </div>
 
           <AnimatePresence>
-            {showScrollToBottom && hasStarted && (
+            {showScrollToBottom && hasStarted && !viewingGroupLanding && (
               <motion.button
                 type="button"
                 initial={{ opacity: 0, y: 10, scale: 0.92 }}
@@ -373,10 +833,18 @@ export function HomePageClient() {
               </motion.button>
             )}
           </AnimatePresence>
+            </>
+          ) : (
+            <GroupWorkspace
+              groupName={selectedGroupFolderName}
+              conversationsInGroup={scopedConversations}
+              onOpenConversation={(id) => void selectConversationSyncSidebar(id)}
+            />
+          )}
 
           <ChatInputBar
             input={input}
-            hasStarted={hasStarted}
+            hasStarted={hasStarted || viewingGroupLanding}
             genState={genState}
             deepThinkEnabled={deepThinkEnabled}
             webSearchEnabled={webSearchEnabled}
@@ -392,6 +860,9 @@ export function HomePageClient() {
               setWebSearchEnabled(true);
               setWebSearchMode(mode);
             }}
+            placeholder={
+              viewingGroupLanding ? "在这里提问，新建对话" : undefined
+            }
           />
         </div>
       </main>

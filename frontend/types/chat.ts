@@ -40,4 +40,14 @@ export type ServerConversation = {
   id: string;
   title: string;
   created_at?: string;
+  /** 服务端分组 id；无则会话在「聊天」未分组 */
+  group_id?: string | null;
+};
+
+/** 服务端返回的会话文件夹 */
+export type ConversationFolder = {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at?: string;
 };

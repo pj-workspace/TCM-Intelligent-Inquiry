@@ -1,12 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { Plus, Edit2, Trash2, Download, MoreVertical, LogOut, PanelLeftOpen } from "lucide-react";
+import { AppLogo } from "@/components/brand/AppLogo";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Download,
+  MoreVertical,
+  LogOut,
+  PanelLeftOpen,
+  FolderOpen,
+  ArrowLeft,
+} from "lucide-react";
 import type { ServerConversation } from "@/types/chat";
 
 type ChatHeaderProps = {
   token: string | null;
   authLoading: boolean;
+  /** 分组工作台：顶部显示文件夹标题，不传 conversation 菜单 */
+  groupWorkspaceTitle?: string | null;
   hasStarted: boolean;
   conversationId: string | null;
   serverConversations: ServerConversation[];
@@ -27,11 +40,20 @@ type ChatHeaderProps = {
   onEditTitleBlur: () => void;
   onEditTitleKeyDown: (e: React.KeyboardEvent) => void;
   onLogout: () => void;
+  /** 当前会话属于选中侧栏分组时显示，返回分组管理工作台（有分组面包屑时不再显示） */
+  showBackToGroupWorkspace?: boolean;
+  onBackToGroupWorkspace?: () => void;
+  /** 会话在分组内时：顶栏「分组名 / 标题」，点击分组名回到分组工作台 */
+  conversationGroupTrail?: {
+    groupName: string;
+    onGroupClick: () => void;
+  } | null;
 };
 
 export function ChatHeader({
   token,
   authLoading,
+  groupWorkspaceTitle,
   hasStarted,
   conversationId,
   serverConversations,
@@ -52,16 +74,75 @@ export function ChatHeader({
   onEditTitleBlur,
   onEditTitleKeyDown,
   onLogout,
+  showBackToGroupWorkspace,
+  onBackToGroupWorkspace,
+  conversationGroupTrail,
 }: ChatHeaderProps) {
   const currentTitle = serverConversations.find((c) => c.id === conversationId)?.title;
+  const showGroupBanner = !!groupWorkspaceTitle?.trim();
+  const showConvBreadcrumb = Boolean(
+    conversationGroupTrail && hasStarted && conversationId
+  );
 
   return (
     <header className="flex-shrink-0 h-14 flex items-center justify-between px-4 md:px-6 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm z-10">
       <div className="flex items-center gap-1 min-w-0 flex-1 md:flex-initial">
-        {/* 移动端品牌名 */}
-        <div className="font-semibold text-sm shrink-0 md:hidden">TCM AI</div>
+        {/* 移动端：分组内会话显示「分组/标题」面包屑 */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 shrink-0 md:hidden">
+          <AppLogo size={28} className="shrink-0 rounded-md ring-1 ring-black/[0.06]" />
+          {showConvBreadcrumb && conversationGroupTrail ? (
+            <nav
+              className="flex min-w-0 flex-1 items-center gap-1 text-xs font-medium leading-snug text-gray-800"
+              aria-label="会话位置"
+            >
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-800/85" aria-hidden />
+              <button
+                type="button"
+                title="回到分组管理"
+                onClick={conversationGroupTrail.onGroupClick}
+                className="max-w-[38%] min-w-0 shrink truncate text-left text-gray-900 hover:text-gray-950 hover:underline"
+              >
+                {conversationGroupTrail.groupName}
+              </button>
+              <span className="shrink-0 text-gray-300" aria-hidden>
+                /
+              </span>
+              {isEditingTitle ? (
+                <input
+                  autoFocus
+                  className="h-7 min-w-0 flex-1 rounded border border-gray-300 px-2 text-xs font-medium outline-none focus:border-orange-400"
+                  value={editTitleValue}
+                  onChange={(e) => onEditTitleChange(e.target.value)}
+                  onBlur={onEditTitleBlur}
+                  onKeyDown={onEditTitleKeyDown}
+                />
+              ) : isGeneratingTitle ? (
+                <span className="min-w-0 flex-1">
+                  <span className="skeleton-text-shimmer inline-block h-3.5 w-24 rounded" aria-hidden />
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 truncate">{currentTitle || "会话记录"}</span>
+              )}
+            </nav>
+          ) : (
+            <>
+              <span className="shrink-0 font-semibold text-sm">中医智询</span>
+              {showBackToGroupWorkspace && onBackToGroupWorkspace && (
+                <button
+                  type="button"
+                  title="返回分组管理"
+                  aria-label="返回分组管理"
+                  onClick={onBackToGroupWorkspace}
+                  className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 -ml-0.5 transition-colors"
+                >
+                  <ArrowLeft className="h-[1.05rem] w-[1.05rem]" strokeWidth={2.25} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
 
-        {showMobileTitleSkeleton && (
+        {!showGroupBanner && showMobileTitleSkeleton && !showConvBreadcrumb && (
           <div
             className="md:hidden flex-1 min-w-0 max-w-[15rem] flex items-center"
             aria-busy
@@ -71,14 +152,28 @@ export function ChatHeader({
           </div>
         )}
 
-        {/* 侧栏收起时：展开 + 新建 图标组（仅 md+） */}
+        {/* 分组工作台标题：移动端始终在品牌行后；桌面端侧栏展开时单独占左区 */}
+        {showGroupBanner && (
+          <div className="md:hidden flex min-w-0 flex-1 items-center gap-1.5 pr-2">
+            <FolderOpen className="h-[1.125rem] w-[1.125rem] shrink-0 text-amber-800/85" aria-hidden />
+            <span className="truncate text-sm font-medium text-gray-800">{groupWorkspaceTitle}</span>
+          </div>
+        )}
+        {showGroupBanner && !sidebarCollapsed && (
+          <div className="hidden md:flex items-center gap-2 min-w-0 max-w-[28rem]">
+            <FolderOpen className="h-4 w-4 shrink-0 text-amber-800/80" aria-hidden />
+            <span className="truncate text-sm font-medium text-gray-800">{groupWorkspaceTitle}</span>
+          </div>
+        )}
+
+        {/* 侧栏收起时：展开 + 新建 + 竖线；分组工作台时文件夹标题在竖线右侧（与聊天区标题区对齐） */}
         {sidebarCollapsed && (
-          <div className="hidden md:flex items-center gap-0.5 shrink-0">
+          <div className="hidden md:flex items-center gap-0.5 min-w-0 flex-1">
             <button
               type="button"
               onClick={onToggleSidebar}
               title="展开侧栏"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
             >
               <PanelLeftOpen className="w-[1.05rem] h-[1.05rem]" />
             </button>
@@ -86,44 +181,157 @@ export function ChatHeader({
               type="button"
               onClick={onNewChat}
               title="新建会话"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
             >
               <Plus className="w-[1.05rem] h-[1.05rem]" />
             </button>
-            <div className="h-4 w-px bg-gray-200 mx-1 shrink-0" />
+            <div className="mx-1 h-4 w-px shrink-0 bg-gray-200" aria-hidden />
+            {showGroupBanner && (
+              <div className="flex max-w-[28rem] min-w-0 flex-1 items-center gap-2 pl-0.5">
+                <FolderOpen className="h-4 w-4 shrink-0 text-amber-800/80" aria-hidden />
+                <span className="truncate text-sm font-medium text-gray-800">{groupWorkspaceTitle}</span>
+              </div>
+            )}
+            {/* 分组会话：面包屑跟在竖线后与主标题区对齐 */}
+            {!showGroupBanner &&
+              showConvBreadcrumb &&
+              conversationGroupTrail &&
+              hasStarted &&
+              conversationId && (
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-0.5">
+                  <FolderOpen className="h-4 w-4 shrink-0 text-amber-800/80" aria-hidden />
+                  <button
+                    type="button"
+                    title="回到分组管理"
+                    onClick={conversationGroupTrail.onGroupClick}
+                    className="max-w-[10rem] shrink-0 truncate text-left text-sm font-medium text-gray-800 hover:text-gray-900 hover:underline"
+                  >
+                    {conversationGroupTrail.groupName}
+                  </button>
+                  <span className="shrink-0 text-gray-300" aria-hidden>
+                    /
+                  </span>
+                  <div className="flex min-h-8 min-w-0 flex-1 items-center text-sm font-medium text-gray-800">
+                    {isEditingTitle ? (
+                      <input
+                        autoFocus
+                        className="h-8 w-full box-border rounded border border-gray-300 px-2 text-sm font-medium outline-none focus:border-orange-400"
+                        value={editTitleValue}
+                        onChange={(e) => onEditTitleChange(e.target.value)}
+                        onBlur={onEditTitleBlur}
+                        onKeyDown={onEditTitleKeyDown}
+                      />
+                    ) : isGeneratingTitle ? (
+                      <span
+                        className="block w-full select-none leading-snug text-transparent"
+                        aria-hidden
+                      >
+                        &nbsp;
+                      </span>
+                    ) : (
+                      <span
+                        key={currentTitle || "会话记录"}
+                        className="sidebar-conv-title-sweep block w-full truncate leading-snug font-medium"
+                      >
+                        {currentTitle || "会话记录"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
           </div>
         )}
 
-        {/* 会话标题（md+） */}
-        {hasStarted && conversationId && (
-          <div className="hidden md:block font-medium text-sm text-gray-800 truncate min-h-[1.25rem] max-w-[28rem]">
-            {isEditingTitle ? (
-              <input
-                autoFocus
-                className="border border-gray-300 rounded px-2 py-1 text-sm outline-none focus:border-orange-400 w-full"
-                value={editTitleValue}
-                onChange={(e) => onEditTitleChange(e.target.value)}
-                onBlur={onEditTitleBlur}
-                onKeyDown={onEditTitleKeyDown}
-              />
-            ) : isGeneratingTitle ? (
-              <span className="block text-transparent select-none" aria-hidden>
-                &nbsp;
-              </span>
+        {/* 会话标题（md+）：侧栏收起且为分组会话时，面包屑已出现在上一行收起条内，此处省略 */}
+        {!showGroupBanner &&
+          hasStarted &&
+          conversationId &&
+          (!sidebarCollapsed || !showConvBreadcrumb) && (
+          <div className="hidden max-w-[28rem] min-w-0 items-center gap-1.5 md:flex">
+            {showConvBreadcrumb && conversationGroupTrail ? (
+              <>
+                <FolderOpen className="h-4 w-4 shrink-0 text-amber-800/80" aria-hidden />
+                <button
+                  type="button"
+                  title="回到分组管理"
+                  onClick={conversationGroupTrail.onGroupClick}
+                  className="max-w-[11rem] shrink-0 truncate text-left text-sm font-medium text-gray-800 hover:text-gray-900 hover:underline"
+                >
+                  {conversationGroupTrail.groupName}
+                </button>
+                <span className="shrink-0 text-gray-300 select-none" aria-hidden>
+                  /
+                </span>
+                <div className="flex min-h-8 min-w-0 flex-1 items-center text-sm font-medium text-gray-800">
+                  {isEditingTitle ? (
+                    <input
+                      autoFocus
+                      className="h-8 w-full box-border rounded border border-gray-300 px-2 text-sm font-medium outline-none focus:border-orange-400"
+                      value={editTitleValue}
+                      onChange={(e) => onEditTitleChange(e.target.value)}
+                      onBlur={onEditTitleBlur}
+                      onKeyDown={onEditTitleKeyDown}
+                    />
+                  ) : isGeneratingTitle ? (
+                    <span className="block w-full select-none leading-snug text-transparent" aria-hidden>
+                      &nbsp;
+                    </span>
+                  ) : (
+                    <span
+                      key={currentTitle || "会话记录"}
+                      className="sidebar-conv-title-sweep block w-full truncate leading-snug font-medium"
+                    >
+                      {currentTitle || "会话记录"}
+                    </span>
+                  )}
+                </div>
+              </>
             ) : (
-              <span
-                key={currentTitle || "会话记录"}
-                className="block truncate font-medium sidebar-conv-title-sweep"
-              >
-                {currentTitle || "会话记录"}
-              </span>
+              <>
+                {showBackToGroupWorkspace && onBackToGroupWorkspace && (
+                  <button
+                    type="button"
+                    title="返回分组管理"
+                    aria-label="返回分组管理"
+                    onClick={() => {
+                      onBackToGroupWorkspace();
+                    }}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                  >
+                    <ArrowLeft className="h-[1.1rem] w-[1.1rem]" strokeWidth={2.25} />
+                  </button>
+                )}
+                <div className="flex min-h-8 min-w-0 flex-1 items-center text-sm font-medium text-gray-800">
+                  {isEditingTitle ? (
+                    <input
+                      autoFocus
+                      className="h-8 w-full box-border rounded border border-gray-300 px-2 text-sm font-medium outline-none focus:border-orange-400"
+                      value={editTitleValue}
+                      onChange={(e) => onEditTitleChange(e.target.value)}
+                      onBlur={onEditTitleBlur}
+                      onKeyDown={onEditTitleKeyDown}
+                    />
+                  ) : isGeneratingTitle ? (
+                    <span className="block w-full select-none leading-snug text-transparent" aria-hidden>
+                      &nbsp;
+                    </span>
+                  ) : (
+                    <span
+                      key={currentTitle || "会话记录"}
+                      className="sidebar-conv-title-sweep block w-full truncate leading-snug font-medium"
+                    >
+                      {currentTitle || "会话记录"}
+                    </span>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
       </div>
 
       <div className="flex items-center gap-1 md:gap-3">
-        {hasStarted && conversationId && (
+        {!showGroupBanner && hasStarted && conversationId && (
           <div className="relative" ref={headerMenuRef}>
             <button
               onClick={() => onSetHeaderMenuOpen(!headerMenuOpen)}

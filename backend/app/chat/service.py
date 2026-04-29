@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.group_service import assert_own_group
 from app.chat.models import ConversationRecord, MessageRecord
 from app.chat.schemas import ChatMessage
 from app.core.chat_context import chat_agent_kb_id, chat_user_id
@@ -244,6 +245,7 @@ async def stream_chat(
     deep_think: bool = False,
     web_search_enabled: bool = False,
     web_search_mode: Literal["force", "auto"] = "force",
+    group_id: str | None = None,
 ) -> AsyncIterator[str]:
     user_id = user.id if user else None
     msg_in = message.strip()
@@ -253,6 +255,11 @@ async def stream_chat(
         return
     if regenerate_last_reply and not conversation_id:
         yield _sse({"type": "error", "message": "重新生成需要已有会话（conversation_id）。"})
+        yield "data: [DONE]\n\n"
+        return
+    # 匿名会话不能使用分组（新建会话时才读 group_id）
+    if group_id is not None and not conversation_id and user is None:
+        yield _sse({"type": "error", "message": "请先登录后再在分组内新建会话。"})
         yield "data: [DONE]\n\n"
         return
 
@@ -327,6 +334,14 @@ async def stream_chat(
             conv_id = str(uuid.uuid4())
             title = "新会话"
             anon_sec = secrets.token_hex(32) if user_id is None else None
+
+            gid_for_conv: str | None = None
+            if group_id is not None:
+                assert user is not None
+                async with async_session_factory() as session:
+                    await assert_own_group(session, group_id, user)
+                gid_for_conv = group_id
+
             async with async_session_factory() as session:
                 session.add(
                     ConversationRecord(
@@ -335,6 +350,7 @@ async def stream_chat(
                         title=title,
                         agent_id=agent_id,
                         anon_session_secret=anon_sec,
+                        group_id=gid_for_conv,
                     )
                 )
                 session.add(

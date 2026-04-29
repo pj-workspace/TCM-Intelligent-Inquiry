@@ -15,7 +15,23 @@ from app.chat.history_service import (
     delete_conversation,
     update_conversation_title,
 )
-from app.chat.schemas import ChatRequest, ConversationItem, MessageItem, ConversationTitleUpdate
+from app.chat.group_service import (
+    create_group,
+    delete_group,
+    list_groups,
+    rename_group,
+    update_conversation_group,
+)
+from app.chat.schemas import (
+    ChatRequest,
+    ConversationItem,
+    MessageItem,
+    ConversationTitleUpdate,
+    ConversationGroupItem,
+    ConversationGroupCreate,
+    ConversationGroupRename,
+    ConversationGroupAssign,
+)
 from app.chat.service import stream_chat
 from app.core.database import async_session_factory, get_session
 
@@ -49,6 +65,7 @@ async def chat(
             deep_think=req.deep_think,
             web_search_enabled=req.web_search_enabled,
             web_search_mode=req.web_search_mode,
+            group_id=req.group_id,
         ),
         media_type="text/event-stream",
     )
@@ -80,6 +97,72 @@ async def conversation_messages(
     return await list_messages_for_conversation(
         session, conversation_id, user, x_anon_session
     )
+
+
+@router.put(
+    "/conversations/{conversation_id}/group",
+    summary="将会话移动到某分组（或移出分组）",
+)
+async def update_conversation_group_route(
+    conversation_id: str,
+    req: ConversationGroupAssign,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    await update_conversation_group(session, user, conversation_id, req.group_id)
+    return {"success": True}
+
+
+@router.get(
+    "/groups",
+    response_model=list[ConversationGroupItem],
+    summary="当前用户的会话分组列表",
+)
+async def chat_groups_list(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    return await list_groups(session, user)
+
+
+@router.post(
+    "/groups",
+    response_model=ConversationGroupItem,
+    summary="新建分组",
+)
+async def chat_groups_create(
+    req: ConversationGroupCreate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    return await create_group(session, user, req.name)
+
+
+@router.patch(
+    "/groups/{group_id}",
+    summary="重命名分组",
+)
+async def chat_groups_rename(
+    group_id: str,
+    req: ConversationGroupRename,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    await rename_group(session, user, group_id, req.name)
+    return {"success": True}
+
+
+@router.delete(
+    "/groups/{group_id}",
+    summary="删除分组（会话移回未分组）",
+)
+async def chat_groups_delete(
+    group_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    await delete_group(session, user, group_id)
+    return {"success": True}
 
 
 @router.delete(

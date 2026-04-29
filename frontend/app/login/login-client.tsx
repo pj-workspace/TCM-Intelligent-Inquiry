@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { AuthForm } from "@/components/auth/AuthForm";
+import { AppLogo } from "@/components/brand/AppLogo";
 
 export function LoginPageClient() {
   const router = useRouter();
@@ -17,6 +18,13 @@ export function LoginPageClient() {
           className="mx-auto w-full max-w-md shrink-0"
         >
           <div className="rounded-2xl border border-[#e5e5e5] bg-white p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+            <div className="mb-8 flex flex-col items-center gap-3 text-center">
+              <AppLogo size={72} className="rounded-2xl shadow-sm ring-1 ring-black/[0.06]" priority />
+              <div>
+                <h1 className="text-lg font-semibold tracking-tight text-gray-900">中医智询</h1>
+                <p className="mt-1 text-sm text-gray-500">TCM Intelligent Inquiry</p>
+              </div>
+            </div>
             <AuthForm
               onAuthenticated={() => {
                 router.push("/");

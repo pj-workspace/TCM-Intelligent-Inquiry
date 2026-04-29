@@ -37,7 +37,7 @@ export function KnowledgeTab() {
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+    <div className="box-border w-full min-w-0 space-y-6 animate-in fade-in slide-in-from-bottom-2">
       <ConfirmDialog
         open={k.deleteId !== null}
         title="删除知识库"
@@ -140,7 +140,7 @@ export function KnowledgeTab() {
             <p className="mt-1 text-xs">在上方创建后即可上传文档</p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid w-full min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(280px,_100%),_1fr))]">
             {k.kbs.map((kb) => (
               <KnowledgeBaseCard
                 key={kb.id}

@@ -47,8 +47,8 @@ export function SettingsPageClient() {
         <h1 className="text-base font-semibold">工具与 Agent 设置</h1>
       </header>
 
-      {/* Layout */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* Layout：横向 flex 子项补全 w-full/min-w-0，避免首轮布局时 main 可用宽度未稳定、resize 后才正常 */}
+      <div className="flex min-h-0 w-full min-w-0 flex-1 overflow-hidden">
         {/* Sidebar Nav */}
         <nav className="w-56 shrink-0 border-r border-[#e5e5e5] bg-[#fbfaf7] p-4">
           <div className="space-y-1">
@@ -111,8 +111,8 @@ export function SettingsPageClient() {
         </nav>
 
         {/* Main Content Area：min-w-0 避免被子内容 intrinsic 最小宽度撑开整页（flex 默认 min-width:auto） */}
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#fdfdfc] p-6 md:p-8">
-          <div className="mx-auto w-full min-w-0 max-w-4xl">
+        <main className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden bg-[#fdfdfc] p-6 md:p-8">
+          <div className="mx-auto box-border w-full min-w-0 max-w-4xl shrink-0">
             {activeTab === "builtin" && <BuiltinToolsTab />}
             {activeTab === "mcp" && <McpTab />}
             {activeTab === "knowledge" && <KnowledgeTab />}

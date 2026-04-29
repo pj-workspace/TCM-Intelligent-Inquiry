@@ -3,6 +3,8 @@ export type { SidebarConversation } from "./sidebar/Sidebar";
 
 export { ConversationSearchModal } from "./search/ConversationSearchModal";
 
+export { GroupWorkspace } from "./group/GroupWorkspace";
+
 export { ChatHeader } from "./header/ChatHeader";
 
 export { ChatInputBar } from "./input/ChatInputBar";

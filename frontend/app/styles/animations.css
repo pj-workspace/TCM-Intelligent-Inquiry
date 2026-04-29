@@ -37,8 +37,9 @@
 }
 
 .sidebar-conv-title-sweep {
-  display: inline-block;
+  display: block;
   max-width: 100%;
+  line-height: 1.35;
   background: linear-gradient(
     120deg,
     #111827 0%,

@@ -39,6 +39,7 @@ type ChatInputBarProps = {
   onToggleDeepThink: () => void;
   onToggleWebSearch: () => void;
   onSetWebSearchMode: (mode: "force" | "auto") => void;
+  placeholder?: string;
 };
 
 export function ChatInputBar({
@@ -56,6 +57,7 @@ export function ChatInputBar({
   onToggleDeepThink,
   onToggleWebSearch,
   onSetWebSearchMode,
+  placeholder = "有问题，尽管问，Shift+Enter 换行",
 }: ChatInputBarProps) {
   return (
     <motion.div
@@ -94,7 +96,7 @@ export function ChatInputBar({
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="有问题，尽管问，Shift+Enter 换行"
+            placeholder={placeholder}
             className="no-scrollbar w-full max-h-[200px] min-h-[60px] overflow-y-auto py-4 px-4 bg-transparent resize-none outline-none text-[16px] text-gray-800 placeholder:text-gray-400"
             rows={1}
           />
