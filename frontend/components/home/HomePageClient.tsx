@@ -11,11 +11,11 @@ import {
   ConversationSearchModal,
   MessageBubble,
   Sidebar,
-  markdownToPlainText,
 } from "@/components/chat";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE } from "@/lib/api";
+import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtils";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
 
@@ -128,18 +128,14 @@ export function HomePageClient() {
     if (!messages.length) return;
     const title =
       serverConversations.find((c) => c.id === conversationId)?.title || "会话记录";
-    let text = `${title}\n\n`;
-    for (const msg of messages) {
-      if (msg.type === "message") {
-        const role = msg.role === "user" ? "用户" : "TCM AI";
-        text += `[${role}]:\n${markdownToPlainText(msg.content || "")}\n\n`;
-      }
-    }
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const md = conversationToMarkdown(title, messages);
+    const blob = new Blob([md], {
+      type: "text/markdown;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${title}.txt`;
+    a.download = `${sanitizeDownloadBasename(title)}.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -264,7 +260,7 @@ export function HomePageClient() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.3 }}
-                  className="pt-8"
+                  className="pt-8 pb-6 md:pb-8"
                 >
                   {messages.map((msg, idx) => {
                     const prevMsg = messages[idx - 1];
@@ -347,7 +343,12 @@ export function HomePageClient() {
                     )}
                   </AnimatePresence>
 
-                  <div ref={messagesEndRef} className="h-50 shrink-0" />
+                  {/* 需 ≥ 底部输入条可视高度，否则最后几条消息会顶在输入框下沿（输入条为 absolute 叠在滚动区上） */}
+                  <div
+                    ref={messagesEndRef}
+                    className="min-h-[min(42vh,13.5rem)] shrink-0 md:min-h-[min(38vh,14rem)]"
+                    aria-hidden
+                  />
                 </motion.div>
               )}
             </AnimatePresence>

@@ -6,6 +6,7 @@ import type {
   ToolStep,
 } from "@/types/chat";
 import type { BrainstormStep } from "@/types/brainstorm";
+import { toolActionLabel } from "@/lib/brainstorm-utils";
 
 /** 将 SSE / 历史记录中的工具入参转为可展示字符串 */
 export function toolIoToPreview(v: unknown): string | undefined {
@@ -109,4 +110,73 @@ export function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
     modelName:
       msg.role === "assistant" && msg.model_name ? msg.model_name : undefined,
   };
+}
+
+/* ── 会话导出（Markdown）────────────────────────────────────────────────── */
+
+function traceStepsToMarkdown(steps: BrainstormStep[]): string {
+  const lines: string[] = ["## 头脑风暴"];
+  for (const step of steps) {
+    if (step.type === "thinking") {
+      const d =
+        step.durationSec != null && Number.isFinite(step.durationSec)
+          ? `${
+              step.durationSec < 10
+                ? Math.round(step.durationSec * 10) / 10
+                : Math.round(step.durationSec)
+            }s`
+          : null;
+      lines.push("", `### 思考${d != null ? `（${d}）` : ""}`, "", step.content);
+    } else {
+      const st =
+        step.status === "running"
+          ? "进行中"
+          : step.status === "error"
+            ? "失败"
+            : "完成";
+      lines.push("", `### 工具 · ${toolActionLabel(step.toolName)}`, "", `- **状态**：${st}`);
+      if (step.inputPreview?.trim())
+        lines.push("", "**参数**", "", "```", step.inputPreview.trim(), "```");
+      if (step.outputPreview?.trim())
+        lines.push("", "**结果摘要**", "", step.outputPreview.trim());
+    }
+  }
+  return lines.join("\n");
+}
+
+/** 文件名用：去掉路径非法字符并截断长度 */
+export function sanitizeDownloadBasename(raw: string, fallback = "会话记录"): string {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  const base =
+    collapsed.length > 0
+      ? collapsed.replace(/[/\\?%*:|"<>[\x00-\x1f\r\n]/g, "_").replace(/_+/g, "_").trim()
+      : fallback;
+  const clipped = base.substring(0, 120).replace(/^\.+|\.+$/g, "") || fallback;
+  return clipped;
+}
+
+/**
+ * 会话导出为 Markdown：保留 Markdown 原文，头脑风暴/trace 导出为可读小节。
+ */
+export function conversationToMarkdown(title: string, messages: Message[]): string {
+  const heading = sanitizeDownloadBasename(title);
+  const blocks: string[] = [`# ${heading}`];
+  for (const msg of messages) {
+    if (msg.type === "message") {
+      const who = msg.role === "user" ? "用户" : "TCM AI";
+      let block = `## ${who}\n\n${msg.content ?? ""}`;
+      if (msg.role === "assistant") {
+        const extras: string[] = [];
+        if (msg.modelName?.trim())
+          extras.push(`_模型：${msg.modelName.trim()}_`);
+        if (msg.interrupted)
+          extras.push("_（本条输出曾被终止）_");
+        if (extras.length) block += `\n\n${extras.join("\n\n")}`;
+      }
+      blocks.push(block);
+    } else if (msg.type === "trace") {
+      blocks.push(traceStepsToMarkdown(msg.steps));
+    }
+  }
+  return `${blocks.filter((b) => b.trim()).join("\n\n---\n\n")}\n`;
 }

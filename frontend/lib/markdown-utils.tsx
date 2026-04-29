@@ -1,4 +1,11 @@
 import type { Components } from "react-markdown";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
+
+marked.use({
+  gfm: true,
+  breaks: false,
+});
 
 function escapeHtml(s: string): string {
   return s
@@ -48,20 +55,104 @@ export function markdownToPlainText(md: string): string {
     .trim();
 }
 
+/** Markdown → 可打印 HTML（GFM）；失败时退回原文转义展示 */
+function markdownToSafePdfHtml(markdown: string): string {
+  try {
+    const md = preprocessAssistantMarkdown(markdown);
+    const raw = marked.parse(md, { async: false }) as string;
+    return DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: [
+        "a",
+        "b",
+        "blockquote",
+        "br",
+        "code",
+        "del",
+        "dd",
+        "dt",
+        "div",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "img",
+        "input",
+        "kbd",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "s",
+        "section",
+        "strong",
+        "sub",
+        "sup",
+        "span",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "ul",
+      ],
+      ALLOWED_ATTR: [
+        "href",
+        "src",
+        "alt",
+        "title",
+        "target",
+        "rel",
+        "colspan",
+        "rowspan",
+        "class",
+        "type",
+        "checked",
+        "disabled",
+      ],
+    });
+  } catch {
+    return `<pre class="pdf-plain-fallback">${escapeHtml(markdown)}</pre>`;
+  }
+}
+
 export function exportAssistantAsPdf(title: string, markdown: string) {
-  const plain = markdownToPlainText(markdown);
+  const bodyHtml = markdownToSafePdfHtml(markdown);
   const w = window.open("", "_blank");
   if (!w) return;
-  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(
+  const doc = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(
     title
   )}</title><style>
-    body{font-family:system-ui,sans-serif;padding:28px;max-width:720px;margin:0 auto;color:#111;line-height:1.6}
-    h1{font-size:1.25rem;font-weight:600;margin:0 0 16px}
-    pre{white-space:pre-wrap;word-break:break-word;font-size:14px;margin:0}
-    @media print{body{padding:16px}}
+    body{font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;padding:28px;max-width:720px;margin:0 auto;color:#111;background:#fff}
+    h1{font-size:1.25rem;font-weight:600;margin:0 0 20px}
+    .pdf-export{font-size:15px;line-height:1.65}
+    .pdf-export h2,.pdf-export h3,.pdf-export h4{margin:1.1em 0 0.45em;font-weight:600;line-height:1.35}
+    .pdf-export h2{font-size:1.2rem}.pdf-export h3{font-size:1.06rem}.pdf-export h4{font-size:1rem}
+    .pdf-export p{margin:0.65em 0}
+    .pdf-export ul,.pdf-export ol{padding-left:1.4rem;margin:0.65em 0}
+    .pdf-export li{margin:0.25em 0}
+    .pdf-export .task-list-item{list-style:none;padding-left:0.25em}
+    .pdf-export .task-list-item input{vertical-align:middle;margin-right:0.35em;margin-top:-1px}
+    .pdf-export blockquote{border-left:3px solid #e5e5e5;margin:0.85em 0;padding:0 0 0 1rem;color:#444}
+    .pdf-export code{background:#f4f4f4;padding:0.15em 0.4em;border-radius:4px;font-size:0.92em;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+    .pdf-export pre{background:#f6f6f6;padding:14px;border-radius:10px;overflow:auto;border:1px solid #eaeaea;line-height:1.5;font-size:0.93em;margin:1em 0}
+    .pdf-export pre code{background:none;padding:0;border:none;font-size:1em}
+    .pdf-export table{border-collapse:collapse;width:100%;margin:1em 0;font-size:14px}
+    .pdf-export th,.pdf-export td{border:1px solid #ddd;padding:9px 10px;text-align:left;vertical-align:top}
+    .pdf-export th{background:#f5f5f5;font-weight:600}
+    .pdf-export thead th{background:#eaeaea;border-color:#ccc}
+    .pdf-export a{color:#c2410c}
+    .pdf-export hr{border:none;border-top:1px solid #e5e5e5;margin:1.35em 0}
+    .pdf-plain-fallback{white-space:pre-wrap;word-break:break-word;font-family:inherit;margin:0}
+    @media print{body{padding:14px}}
   </style></head><body>
   <h1>${escapeHtml(title)}</h1>
-  <pre>${escapeHtml(plain)}</pre>
+  <div class="pdf-export">${bodyHtml}</div>
   <script>window.onload=function(){window.print();}</script>
   </body></html>`;
   w.document.write(doc);
