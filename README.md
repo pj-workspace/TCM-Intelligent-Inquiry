@@ -38,7 +38,8 @@
 ```text
 tcm-intelligent-inquiry/
 ├── docker-compose.yml          # 本地 Postgres / Redis / Qdrant（可选 worker）
-├── backend/
+├── doc/                       # 前后端集成契约与文档策略（见 doc/README.md）
+├── backend/                   # 后端；子目录说明见 backend/README.md
 │   ├── main.py                 # FastAPI 入口
 │   ├── celery_app.py           # Celery 应用（异步入库）
 │   ├── app/
@@ -55,7 +56,7 @@ tcm-intelligent-inquiry/
 │   ├── tests/                  # pytest
 │   ├── .env.example
 │   └── requirements.txt
-└── frontend/                   # 前端（若有独立说明见 frontend/README.md）
+└── frontend/                   # 前端（说明见 frontend/README.md）
 ```
 
 ---

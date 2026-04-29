@@ -1,1 +1,49 @@
-Generic single-database configuration.
+# Alembic — 数据库迁移（本项目）
+
+本目录为 **SQLAlchemy + Alembic** 单库迁移配置，与 `backend/alembic.ini` 中的 `script_location` 对应。
+
+---
+
+## 常用命令
+
+在 **`backend/`** 目录下执行（与 `alembic.ini` 同级）：
+
+```bash
+# 升级到最新 revision
+alembic upgrade head
+
+# 查看当前库版本
+alembic current
+
+# 生成新迁移（模型变更后，按需使用 autogenerate）
+alembic revision --autogenerate -m "describe change"
+```
+
+---
+
+## 与 `init_db` / 空库 的关系
+
+若表已由应用内 `create_all`（`DATABASE_AUTO_CREATE_TABLES`）建好，且结构与迁移一致，可将版本标到最新而**不重复执行 DDL**：
+
+```bash
+alembic stamp head
+```
+
+若仅有早期 revision、缺少后续表（如 `mcp_servers`），需按根目录 **`README.md`** 中「Alembic 与 init_db 的关系」表格分步 `stamp` 再 `upgrade`。
+
+**不要**在未对齐 revision 的情况下混用手动改表与迁移，以免环境与 CI 不可复现。
+
+---
+
+## 生成修订时的注意点
+
+- 迁移应对 **PostgreSQL** 目标库可重复执行（`upgrade`/`downgrade` 语义清晰）。
+- 与 `pg_trgm`、向量相关扩展或索引若新增，应在迁移中显式创建，并记录在 revision 说明里。
+- 提交前在干净库上验证：`alembic upgrade head`。
+
+---
+
+## 参考
+
+- 官方文档：https://alembic.sqlalchemy.org/
+- 项目根 [`README.md`](../../README.md)：`alembic upgrade head`、Docker、完整后端说明
