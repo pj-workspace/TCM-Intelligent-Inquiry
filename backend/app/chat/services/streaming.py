@@ -25,6 +25,14 @@ from app.chat.policy.turns import ResolvedChatTurn
 from app.chat.schemas import ChatMessage
 from app.chat.services.groups import assert_own_group
 from app.core.chat_context import chat_agent_kb_id, chat_user_id
+from app.core.ai_chat_trace import (
+    format_chat_model_stream_chunk_raw,
+    format_llm_turn_request,
+    format_stream_aggregate_summary,
+    format_title_llm_call,
+    format_tool_event_raw,
+    serialize_tool_output_for_raw_log,
+)
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.config import active_chat_model_label, get_settings, primary_qwen_chat_model
@@ -119,28 +127,34 @@ def _extract_text(chunk) -> str:
     return ""
 
 
-def _iter_reasoning_delta_from_chunk(chunk: Any) -> Iterator[str]:
+def _iter_reasoning_delta_from_chunk(
+    chunk: Any, *, truncate: bool = True
+) -> Iterator[str]:
     """DashScope 等 OpenAI 兼容流：思考在 delta.reasoning_content，LangChain 多放在 additional_kwargs。"""
     kwargs = getattr(chunk, "additional_kwargs", None)
     if isinstance(kwargs, dict):
         for key in ("reasoning_content", "reasoning", "thinking"):
             v = kwargs.get(key)
             if v:
-                yield _truncate(str(v), _THINKING_MAX)
+                s = str(v)
+                yield _truncate(s, _THINKING_MAX) if truncate else s
                 return
     rm = getattr(chunk, "response_metadata", None)
     if isinstance(rm, dict):
         for key in ("reasoning_content", "reasoning"):
             v = rm.get(key)
             if v:
-                yield _truncate(str(v), _THINKING_MAX)
+                s = str(v)
+                yield _truncate(s, _THINKING_MAX) if truncate else s
                 return
 
 
-def _iter_model_stream_parts(chunk) -> Iterator[tuple[str, str]]:
+def _iter_model_stream_parts(
+    chunk, *, truncate: bool = True
+) -> Iterator[tuple[str, str]]:
     """从 chat_model_stream chunk 拆出 (kind, delta)，kind 为 text 或 thinking。"""
     # 必须先处理 reasoning：若 content 为 str 时旧逻辑会提前 return，会漏掉 Qwen/DashScope 的思考流
-    for r in _iter_reasoning_delta_from_chunk(chunk):
+    for r in _iter_reasoning_delta_from_chunk(chunk, truncate=truncate):
         yield "thinking", r
 
     content = getattr(chunk, "content", None)
@@ -169,7 +183,8 @@ def _iter_model_stream_parts(chunk) -> Iterator[tuple[str, str]]:
                     or ""
                 )
                 if raw:
-                    yield "thinking", _truncate(str(raw), _THINKING_MAX)
+                    s = str(raw)
+                    yield "thinking", (_truncate(s, _THINKING_MAX) if truncate else s)
         elif isinstance(block, str) and block:
             yield "text", block
 
@@ -289,7 +304,15 @@ async def _generate_title_async(
             raw = _extract_text(res) if res is not None else ""
             if not raw and hasattr(res, "content"):
                 raw = str(getattr(res, "content", "") or "")
-            return raw.strip()
+            trimmed = raw.strip()
+            if get_settings().ai_chat_trace_log:
+                log = get_logger(__name__)
+                log.info("\n%s", format_title_llm_call(
+                    user_message_excerpt=msg_in,
+                    prompt=prompt,
+                    reply_raw=trimmed or raw,
+                ))
+            return trimmed
 
         # 略长于主对话首 token，避免慢模型误判为超时；仍由 wait_for 保证不无限阻塞
         ai_title = await asyncio.wait_for(_call_model(), timeout=12.0)
@@ -309,7 +332,7 @@ async def _generate_title_async(
                 .values(title=title)
             )
             await session.commit()
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to save generated title")
 
     return title
@@ -376,6 +399,10 @@ async def stream_chat(
     is_new_conversation = False
     title_task = None
     title_yielded = False
+
+    chat_trace = False
+    trace_visible_parts: list[str] = []
+    trace_thinking_parts: list[str] = []
 
     try:
         yield _sse({"type": "notice", "safetyNotice": STREAM_SAFETY_NOTICE})
@@ -510,12 +537,27 @@ async def stream_chat(
         await ensure_urls_probed(uniq_in_messages, ok_cache=vl_ok_cache)
         lc_messages = sanitize_messages_for_vl_images(lc_messages, vl_ok_cache)
 
+        chat_trace = bool(get_settings().ai_chat_trace_log)
+        if chat_trace:
+            trace_meta = {
+                "conversation_id": conv_id,
+                "agent_id": effective_agent_id,
+                "chat_model": _meta_chat_model_label(resolved),
+                "effective_deep_think": resolved.effective_deep_think,
+                "effective_web_search": resolved.effective_web_search,
+                "web_search_mode": web_search_mode,
+                "effective_tool_calling": resolved.effective_tool_calling,
+                "regenerate_last_reply": regenerate_last_reply,
+            }
+            logger.info("\n%s", format_llm_turn_request(lc_messages, meta=trace_meta))
+
         assistant_parts: list[str] = []
         thinking_buf: list[str] = []
         thinking_t0: float | None = None
         #: 与 SSE on_tool_start 配对，供 on_tool_end 落库
         tool_pending_by_run: dict[str, dict[str, Any]] = {}
         tool_pending_fifo: list[dict[str, Any]] = []
+        trace_stream_rm_merged: dict[str, Any] = {}
 
         async def flush_thinking_segment() -> None:
             nonlocal thinking_buf, thinking_t0
@@ -581,6 +623,19 @@ async def stream_chat(
             if etype == "on_chat_model_stream":
                 chunk = data.get("chunk")
                 if chunk:
+                    if chat_trace:
+                        logger.info("\n%s", format_chat_model_stream_chunk_raw(chunk))
+                        rm_cm = getattr(chunk, "response_metadata", None)
+                        if isinstance(rm_cm, dict):
+                            trace_stream_rm_merged.update(rm_cm)
+                        for kind, rdelta in _iter_model_stream_parts(
+                            chunk, truncate=False
+                        ):
+                            if rdelta:
+                                if kind == "text":
+                                    trace_visible_parts.append(rdelta)
+                                else:
+                                    trace_thinking_parts.append(rdelta)
                     streamed = False
                     for kind, delta in _iter_model_stream_parts(chunk):
                         if not delta:
@@ -602,6 +657,8 @@ async def stream_chat(
                         if delta:
                             await flush_thinking_segment()
                             assistant_parts.append(delta)
+                            if chat_trace:
+                                trace_visible_parts.append(delta)
                             yield _sse({"type": "text-delta", "textDelta": delta})
 
             elif etype == "on_tool_start":
@@ -631,6 +688,14 @@ async def stream_chat(
                     payload["runId"] = run_id
                 if raw_in is not None:
                     payload["input"] = _json_safe_for_sse(raw_in)
+                if chat_trace:
+                    logger.info(
+                        "\n%s",
+                        format_tool_event_raw(
+                            "on_tool_start（原始输入，非 SSE 裁剪）",
+                            {"name": name, "run_id": run_id, "input": raw_in},
+                        ),
+                    )
                 yield _sse(payload)
 
             elif etype == "on_tool_end":
@@ -658,6 +723,20 @@ async def stream_chat(
                     tr["runId"] = run_id
                 if preview:
                     tr["outputPreview"] = preview
+                if chat_trace:
+                    logger.info(
+                        "\n%s",
+                        format_tool_event_raw(
+                            "on_tool_end（原始输出对象，非 SSE 预览）",
+                            {
+                                "event_name": name,
+                                "run_id": run_id,
+                                "resolved_name": tr_name,
+                                "status": tool_status,
+                                "output": serialize_tool_output_for_raw_log(out),
+                            },
+                        ),
+                    )
                 yield _sse(tr)
 
                 rec: dict[str, Any] = {"name": tr_name, "outputPreview": preview}
@@ -679,6 +758,16 @@ async def stream_chat(
         await flush_thinking_segment()
         await flush_assistant_segment()
 
+        if chat_trace:
+            logger.info(
+                "\n%s",
+                format_stream_aggregate_summary(
+                    visible="".join(trace_visible_parts),
+                    thinking="".join(trace_thinking_parts),
+                    stream_response_metadata_merge=trace_stream_rm_merged or None,
+                ),
+            )
+
         if title_task and not title_yielded:
             try:
                 new_title = await title_task
@@ -694,6 +783,15 @@ async def stream_chat(
         yield "data: [DONE]\n\n"
 
     except Exception as exc:
+        if chat_trace and (trace_visible_parts or trace_thinking_parts):
+            logger.info(
+                "\n%s\n（说明：本条为流式未正常结束前已收到的部分聚合）",
+                format_stream_aggregate_summary(
+                    visible="".join(trace_visible_parts),
+                    thinking="".join(trace_thinking_parts),
+                    stream_response_metadata_merge=trace_stream_rm_merged or None,
+                ),
+            )
         logger.exception("stream_chat error")
         if title_task and not title_yielded and is_new_conversation and conv_id:
             title_task.cancel()

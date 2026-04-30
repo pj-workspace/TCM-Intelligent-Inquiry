@@ -267,6 +267,12 @@ class Settings(BaseSettings):
         description="调用 SearXNG /search 的超时（秒），宜与容器内 outgoing.request_timeout 同量级以免久等",
     )
 
+    # ── 诊断日志（慎用：打印完整用户内容与图片 URL）──────────────────────────
+    ai_chat_trace_log: bool = Field(
+        default=False,
+        description="为 True 时在日志中输出主对话链路的完整原始数据（messages 全量、每帧 stream chunk、工具原始入出、流式聚合无截断）；环境变量 AI_CHAT_TRACE_LOG",
+    )
+
     # ── 服务 ──────────────────────────────────────────────────────────────────
     cors_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
