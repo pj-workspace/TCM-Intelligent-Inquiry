@@ -9,6 +9,7 @@ import {
   groupMessagesIntoTraces,
   mapApiRowToMessage,
   sumThinkingDurations,
+  lastAssistantFollowUpFromMessages,
 } from "@/lib/chatUtils";
 import { toast } from "sonner";
 import { uploadOssChatImageWithProgress } from "@/lib/ossUpload";
@@ -166,6 +167,141 @@ export function useChat(opts: {
     setFollowUpsLoadingForId(null);
   }, []);
 
+  /** 与 SSE 收尾共用：追问建议 POST */
+  const enqueueFollowUpsRequest = useCallback(
+    (targetId: string, assistantReplyAccum: string, userQuestion?: string) => {
+      if (!token) return;
+      const body = assistantReplyAccum.trim();
+      const looksLikeHardError =
+        body.startsWith("**Error:**") || body.startsWith("**网络错误");
+      if (body.length < 12 || looksLikeHardError) return;
+
+      followUpsAbortRef.current?.abort();
+      const fa = new AbortController();
+      followUpsAbortRef.current = fa;
+      setFollowUpsLoadingForId(targetId);
+      void (async () => {
+        try {
+          let anon: string | undefined;
+          try {
+            anon = localStorage.getItem("tcm_anon_secret") ?? undefined;
+          } catch {
+            anon = undefined;
+          }
+          const cid = conversationIdRef.current;
+          const payload: Record<string, unknown> = {
+            assistant_reply: body,
+          };
+          const uq = (userQuestion ?? "").trim();
+          if (uq) {
+            payload.user_question = uq;
+          }
+          if (cid) {
+            payload.conversation_id = cid;
+            if (anon) payload.anon_session_secret = anon;
+            payload.assistant_message_id = targetId;
+          }
+          const r = await fetch(`${API_BASE}/api/chat/follow-up-suggestions`, {
+            method: "POST",
+            headers: apiJsonHeaders(token),
+            body: JSON.stringify(payload),
+            signal: fa.signal,
+          });
+          if (fa.signal.aborted) return;
+          if (!r.ok) {
+            if (process.env.NODE_ENV === "development") {
+              console.warn(
+                "[useChat] follow-up-suggestions:",
+                r.status,
+                await parseApiError(r)
+              );
+            }
+            setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
+            return;
+          }
+          const raw = (await r.json()) as { suggestions?: unknown };
+          const items = Array.isArray(raw.suggestions)
+            ? raw.suggestions.filter((x): x is string => typeof x === "string")
+            : [];
+          if (fa.signal.aborted) return;
+          setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
+          if (items.length > 0) {
+            setFollowUpSuggestions({ messageId: targetId, items });
+          }
+        } catch (e) {
+          if (fa.signal.aborted || isLikelyUserAbort(e, fa.signal)) return;
+          if (process.env.NODE_ENV === "development") {
+            console.warn("[useChat] follow-up-suggestions failed", e);
+          }
+          setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
+        }
+      })();
+    },
+    [token],
+  );
+
+  /** 附图快捷话术：POST VL 看图建议；返回 null 时由输入栏回落到本地随机池 */
+  const fetchAiImageQuickPrompts = useCallback(
+    async (
+      imageUrls: string[],
+      signal: AbortSignal,
+    ): Promise<{ label: string; prompt: string }[] | null> => {
+      if (authLoading || imageUrls.length === 0) return null;
+      try {
+        const payload: Record<string, unknown> = { image_urls: imageUrls };
+        const cid = conversationIdRef.current;
+        if (cid) {
+          payload.conversation_id = cid;
+          try {
+            const anon = localStorage.getItem("tcm_anon_secret") ?? undefined;
+            if (anon) payload.anon_session_secret = anon;
+          } catch {
+            /* ignore */
+          }
+        }
+        const r = await fetch(`${API_BASE}/api/chat/attachment-suggestions`, {
+          method: "POST",
+          headers: apiJsonHeaders(token),
+          body: JSON.stringify(payload),
+          signal,
+        });
+        if (!r.ok) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn(
+              "[useChat] attachment-suggestions:",
+              r.status,
+              await parseApiError(r),
+            );
+          }
+          return null;
+        }
+        const raw = (await r.json()) as {
+          items?: unknown;
+        };
+        const rows = raw.items;
+        if (!Array.isArray(rows)) return null;
+        const out: { label: string; prompt: string }[] = [];
+        for (const row of rows) {
+          if (typeof row !== "object" || row === null) continue;
+          const o = row as Record<string, unknown>;
+          const label = typeof o.label === "string" ? o.label.trim() : "";
+          const prompt = typeof o.prompt === "string" ? o.prompt.trim() : "";
+          if (!label || !prompt) continue;
+          out.push({ label, prompt });
+          if (out.length >= 3) break;
+        }
+        return out.length > 0 ? out : null;
+      } catch (e) {
+        if (signal.aborted || isLikelyUserAbort(e, signal)) return null;
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[useChat] attachment-suggestions failed", e);
+        }
+        return null;
+      }
+    },
+    [authLoading, token],
+  );
+
   const setSelectedChatModelId = useCallback((id: string) => {
     setSelectedChatModelIdState(id);
     try {
@@ -300,7 +436,10 @@ export function useChat(opts: {
     if (!res.ok) throw new Error("Failed to fetch messages");
     const data = (await res.json()) as ApiMessageRow[];
     if (!Array.isArray(data)) return;
-    setMessages(groupMessagesIntoTraces(data.map(mapApiRowToMessage)));
+    const grouped = groupMessagesIntoTraces(data.map(mapApiRowToMessage));
+    setMessages(grouped);
+    const fu = lastAssistantFollowUpFromMessages(grouped);
+    setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
   }, []);
 
   // ── Thinking / trace finalization ──────────────────────────────────────────
@@ -762,65 +901,7 @@ export function useChat(opts: {
           const looksLikeHardError =
             body.startsWith("**Error:**") || body.startsWith("**网络错误");
           if (body.length >= 12 && !looksLikeHardError) {
-            followUpsAbortRef.current?.abort();
-            const fa = new AbortController();
-            followUpsAbortRef.current = fa;
-            const targetId = currentAssistantMsgId;
-            setFollowUpsLoadingForId(targetId);
-            void (async () => {
-              try {
-                let anon: string | undefined;
-                try {
-                  anon = localStorage.getItem("tcm_anon_secret") ?? undefined;
-                } catch {
-                  anon = undefined;
-                }
-                const cid = conversationIdRef.current;
-                const payload: Record<string, unknown> = {
-                  assistant_reply: body,
-                };
-                if (cid) {
-                  payload.conversation_id = cid;
-                  if (anon) payload.anon_session_secret = anon;
-                }
-                if (effectiveChatModelForRequest) {
-                  payload.chat_model = effectiveChatModelForRequest;
-                }
-                const r = await fetch(`${API_BASE}/api/chat/follow-up-suggestions`, {
-                  method: "POST",
-                  headers: apiJsonHeaders(token),
-                  body: JSON.stringify(payload),
-                  signal: fa.signal,
-                });
-                if (fa.signal.aborted) return;
-                if (!r.ok) {
-                  if (process.env.NODE_ENV === "development") {
-                    console.warn(
-                      "[useChat] follow-up-suggestions:",
-                      r.status,
-                      await parseApiError(r)
-                    );
-                  }
-                  setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
-                  return;
-                }
-                const raw = (await r.json()) as { suggestions?: unknown };
-                const items = Array.isArray(raw.suggestions)
-                  ? raw.suggestions.filter((x): x is string => typeof x === "string")
-                  : [];
-                if (fa.signal.aborted) return;
-                setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
-                if (items.length > 0) {
-                  setFollowUpSuggestions({ messageId: targetId, items });
-                }
-              } catch (e) {
-                if (fa.signal.aborted || isLikelyUserAbort(e, fa.signal)) return;
-                if (process.env.NODE_ENV === "development") {
-                  console.warn("[useChat] follow-up-suggestions failed", e);
-                }
-                setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
-              }
-            })();
+            enqueueFollowUpsRequest(currentAssistantMsgId, body, userText);
           }
         }
 
@@ -903,6 +984,7 @@ export function useChat(opts: {
       refreshServerConversations,
       getPreferredGroupForNewConversation,
       resetFollowUpSuggestions,
+      enqueueFollowUpsRequest,
     ]
   );
 
@@ -1371,7 +1453,10 @@ export function useChat(opts: {
         if (!mr.ok || cancelled) return;
         const msgs = (await mr.json()) as ApiMessageRow[];
         if (!Array.isArray(msgs) || cancelled) return;
-        setMessages(groupMessagesIntoTraces(msgs.map(mapApiRowToMessage)));
+        const grouped = groupMessagesIntoTraces(msgs.map(mapApiRowToMessage));
+        setMessages(grouped);
+        const fu = lastAssistantFollowUpFromMessages(grouped);
+        setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
       } catch (e) {
         if (process.env.NODE_ENV === "development") {
           console.warn("[useChat] init session:", e);
@@ -1437,6 +1522,7 @@ export function useChat(opts: {
     pushImageAttachments,
     removePendingImageUrlAt,
     applyComposerAttachmentsFromUserMessage,
+    fetchAiImageQuickPrompts,
     // handlers
     handleSend,
     handleStop,

@@ -1,5 +1,6 @@
 import type {
   ApiMessageRow,
+  ChatMessage,
   FlatMessage,
   Message,
   TraceMessage,
@@ -57,6 +58,26 @@ export function groupMessagesIntoTraces(items: FlatMessage[]): Message[] {
 
   flushPendingSteps(true);
   return grouped;
+}
+
+/** 仅从「最后一条」助手气泡取追问（与仅最新消息展示追问的 UI 一致）；无则返回 null */
+export function lastAssistantFollowUpFromMessages(
+  msgs: Message[],
+): { messageId: string; items: string[] } | null {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (m.type !== "message" || m.role !== "assistant") continue;
+    const rows = (m as ChatMessage).followUpSuggestions;
+    if (
+      Array.isArray(rows) &&
+      rows.length > 0 &&
+      rows.every((x): x is string => typeof x === "string")
+    ) {
+      return { messageId: m.id, items: rows };
+    }
+    return null;
+  }
+  return null;
 }
 
 /** 服务端用户消息：纯文案或含图 JSON v1（与后端 app.chat.service._persist_user_turn_content 对齐） */
@@ -149,6 +170,12 @@ export function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
     content: msg.content,
     modelName:
       typeof msg.model_name === "string" && msg.model_name ? msg.model_name : undefined,
+    ...(() => {
+      const fus = msg.follow_up_suggestions;
+      if (!Array.isArray(fus) || fus.length === 0) return {};
+      const items = fus.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+      return items.length > 0 ? { followUpSuggestions: items } : {};
+    })(),
   };
 }
 

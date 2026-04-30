@@ -118,12 +118,26 @@ class MessageItem(BaseModel):
     created_at: datetime
     duration_sec: float | None = None
     model_name: str | None = None
+    follow_up_suggestions: list[str] | None = Field(
+        default=None,
+        description="仅存于 assistant：生成并持久化的快速追问话术",
+    )
 
 
 class FollowUpSuggestionsRequest(BaseModel):
     """根据助手正文生成追问建议（独立于主 SSE）。"""
 
     assistant_reply: str = Field(..., description="已完成的一条助手气泡全文")
+    user_question: str | None = Field(
+        default=None,
+        description="与本条助手回复相对应的用户本轮提问（含附图时的文字部分）；便于追问贴合原问题",
+        max_length=8192,
+    )
+    assistant_message_id: str | None = Field(
+        default=None,
+        max_length=36,
+        description="若与 conversation_id 同时传入：将建议写入该助手消息行（UUID）",
+    )
     conversation_id: str | None = Field(
         default=None,
         description="可选；传入时校验匿名会话与归属",
@@ -134,10 +148,58 @@ class FollowUpSuggestionsRequest(BaseModel):
     )
     chat_model: str | None = Field(
         default=None,
-        description="可选；不传则用全局默认追问模型配置",
+        description="已弃用：llm_provider=qwen 时追问固定使用 QWEN_FOLLOW_UP_SUGGESTIONS_MODEL（默认 qwen-flash），服务端忽略该字段",
         max_length=200,
     )
 
 
 class FollowUpSuggestionsResponse(BaseModel):
     suggestions: list[str] = Field(default_factory=list, description="最多 3 条，每条 ≤80 字")
+
+
+class AttachmentSuggestionItem(BaseModel):
+    label: str = Field(..., description="按钮短标题")
+    prompt: str = Field(..., description="点击后填入/发送的完整话术")
+
+
+class AttachmentSuggestionsRequest(BaseModel):
+    """根据待发送图片 URL 生成附图快捷话术（VL 看图）。"""
+
+    image_urls: list[str] = Field(
+        ...,
+        min_length=1,
+        description="与主对话相同的 OSS 签名图片 URL 列表",
+    )
+    conversation_id: str | None = Field(
+        default=None,
+        description="可选；传入时校验匿名会话与归属（与 follow-up 一致）",
+    )
+    anon_session_secret: str | None = Field(
+        default=None,
+        description="匿名会话凭证",
+    )
+
+    @model_validator(mode="after")
+    def _validate_urls(self) -> Self:
+        cleaned: list[str] = []
+        for u in self.image_urls:
+            if not isinstance(u, str):
+                continue
+            t = u.strip()
+            if not t:
+                continue
+            if len(t) > 4096:
+                raise ValueError("单张图片 URL 过长（最多 4096 字符）")
+            if not (t.startswith("https://") or t.startswith("http://")):
+                raise ValueError("image_urls 中的每一项须为 http(s) URL")
+            cleaned.append(t)
+        if len(cleaned) > 8:
+            raise ValueError("最多 8 张图片")
+        if not cleaned:
+            raise ValueError("请至少提供 1 张有效图片 URL")
+        self.image_urls = cleaned
+        return self
+
+
+class AttachmentSuggestionsResponse(BaseModel):
+    items: list[AttachmentSuggestionItem] = Field(default_factory=list)

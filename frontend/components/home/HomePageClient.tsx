@@ -56,6 +56,7 @@ export function HomePageClient() {
 
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const hasStartedRef = useRef(false);
 
   const {
     scrollViewportRef,
@@ -65,7 +66,7 @@ export function HomePageClient() {
     updateScrollState,
     scrollToBottom,
     resetScrollState,
-  } = useScrollBehavior(false);
+  } = useScrollBehavior(hasStartedRef);
 
   const getPreferredGroupForNewConversation = useCallback((): string | null => {
     if (sidebarFilter === "__ungrouped__") return null;
@@ -90,7 +91,6 @@ export function HomePageClient() {
     isGeneratingTitle,
     lastAssistantMessageId,
     followUpSuggestions,
-    followUpsLoadingForId,
     deleteTargetId,
     deletePending,
     bulkDeletePending,
@@ -111,6 +111,7 @@ export function HomePageClient() {
     pushImageAttachments,
     removePendingImageUrlAt,
     applyComposerAttachmentsFromUserMessage,
+    fetchAiImageQuickPrompts,
     handleStop,
     handleRegenerateAssistant,
     handleNewChat,
@@ -126,6 +127,16 @@ export function HomePageClient() {
     togglePinConversation,
     deleteConversationsBulk,
   } = chat;
+
+  hasStartedRef.current = hasStarted;
+
+  const followUpLayoutKey = useMemo(
+    () =>
+      `${followUpSuggestions?.messageId ?? ""}:${
+        followUpSuggestions?.items?.length ?? 0
+      }`,
+    [followUpSuggestions?.messageId, followUpSuggestions?.items?.length],
+  );
 
   const inputBarModelCaps = useMemo(() => {
     const noListOrUnknownModel = {
@@ -353,12 +364,28 @@ export function HomePageClient() {
     [token]
   );
 
-  // 监听 messages / genState 变化，自动跟随滚动
+  // 监听消息与追问占位变化，延迟一帧滚底以配合布局完成后高度，减弱「整块上闪」观感
   useEffect(() => {
     if (!hasStarted) return;
     if (!autoFollowMainRef.current) return;
-    scrollToBottom(false);
-  }, [messages, genState, hasStarted, scrollToBottom, autoFollowMainRef]);
+    let rafHandle2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      rafHandle2 = requestAnimationFrame(() => {
+        scrollToBottom(false);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(rafHandle2);
+    };
+  }, [
+    messages,
+    genState,
+    hasStarted,
+    scrollToBottom,
+    autoFollowMainRef,
+    followUpLayoutKey,
+  ]);
 
   // 从 sessionStorage 恢复未发送的草稿（首屏回填一次）
   useEffect(() => {
@@ -762,7 +789,7 @@ export function HomePageClient() {
                   !viewingGroupLanding
                     ? [
                         !hasStarted ? "flex min-h-0 flex-col" : "",
-                        "pb-[clamp(7rem,14vh,10.5rem)] md:pb-[clamp(7.5rem,12vh,10rem)]",
+                        "pb-[clamp(6.25rem,10vh,8.75rem)] md:pb-[clamp(6.5rem,10.25vh,9rem)]",
                       ].join(" ")
                     : ""
                 }`}
@@ -802,12 +829,11 @@ export function HomePageClient() {
                             noTopPad={afterTrace && msg.role === "assistant"}
                             noBottomPad={beforeTrace}
                             interrupted={msg.interrupted}
-                            assistantActionsDisabled={genState !== "idle"}
-                            followUpsLoading={
+                            assistantToolbarReserve={
                               msg.role === "assistant" &&
-                              msg.id === lastAssistantMessageId &&
-                              followUpsLoadingForId === msg.id
+                              msg.id === lastAssistantMessageId
                             }
+                            assistantActionsDisabled={genState !== "idle"}
                             followUpItems={
                               msg.role === "assistant" &&
                               msg.id === lastAssistantMessageId &&
@@ -890,10 +916,10 @@ export function HomePageClient() {
                     )}
                   </AnimatePresence>
 
-                  {/* 略大于输入条区域即可；过大则追问条与输入框之间空白过多 */}
+                  {/* 与固定输入区留窄缝即可；过大则追问与输入框之间整块留白 */}
                   <div
                     ref={messagesEndRef}
-                    className="min-h-[min(18vh,8.5rem)] shrink-0 md:min-h-[min(16vh,9rem)]"
+                    className="min-h-[min(8.25vh,4rem)] shrink-0 md:min-h-[min(7.5vh,4.25rem)]"
                     aria-hidden
                   />
                 </motion.div>
@@ -961,6 +987,7 @@ export function HomePageClient() {
             attachmentUploadSkeletonCount={attachmentUploadSkeletonCount}
             attachmentUploadSlotProgress={attachmentUploadSlotProgress}
             onSendWithImagePrompt={handleSendImageQuickPrompt}
+            fetchAiImageQuickPrompts={fetchAiImageQuickPrompts}
             placeholder={
               viewingGroupLanding ? "在这里提问，新建对话" : undefined
             }

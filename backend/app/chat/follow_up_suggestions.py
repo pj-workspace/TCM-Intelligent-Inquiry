@@ -1,4 +1,4 @@
-"""根据助手已输出正文生成 2～3 条简短追问建议（独立于主 SSE）。
+"""根据助手已输出正文（及可选的用户本轮提问）生成 2～3 条简短追问建议（独立于主 SSE）。
 
 每条建议强制 ≤20 字（含标点），模型须在提示词约束下从源头写短。
 
@@ -130,13 +130,16 @@ def _parse_follow_up_payload(raw: str) -> list[str]:
     return _normalize_suggestion_strings(sug)
 
 
+_MAX_USER_QUESTION_CHARS = 8_000
+
+
 async def generate_follow_up_suggestions(
     assistant_reply: str,
     *,
-    chat_model_override: str | None = None,
+    user_question: str | None = None,
     timeout_sec: float = 22.0,
 ) -> list[str]:
-    from app.core.config import get_settings, primary_qwen_chat_model
+    from app.core.config import get_settings
     from app.llm.chat_factory import build_chat_model
 
     text = (assistant_reply or "").strip()
@@ -145,22 +148,45 @@ async def generate_follow_up_suggestions(
     if len(text) > _MAX_REPLY_CHARS:
         text = text[:_MAX_REPLY_CHARS]
 
+    uq_raw = (user_question or "").strip()
+    if len(uq_raw) > _MAX_USER_QUESTION_CHARS:
+        uq_raw = uq_raw[:_MAX_USER_QUESTION_CHARS]
+
     s = get_settings()
     p = (s.llm_provider or "qwen").strip().lower()
     use_json_object = p in _JSON_OBJECT_PROVIDERS
 
     ov: str | None = None
     if p == "qwen":
-        qs = primary_qwen_chat_model(s)
-        ov = ((chat_model_override or "").strip() or qs)
+        ov = (s.qwen_follow_up_suggestions_model or "").strip() or "qwen-flash"
 
     model = build_chat_model(
         enable_thinking=False,
         chat_model_override=ov,
         response_format_json_object=use_json_object,
     )
+    user_block = (
+        f"用户本轮提问：\n<<<\n{uq_raw}\n>>>\n\n"
+        if uq_raw
+        else ""
+    )
+    ctx_hint = (
+        "下面同时给出「用户本轮提问」与「助手正文」。请先理解用户真正在问什么、助手已答了哪些要点，再决定追问方向。\n\n"
+        if uq_raw
+        else "下面「助手正文」是上一条模型对用户的完整回复。\n\n"
+    )
+
+    assistant_label = (
+        "助手正文（对用户上述问题的完整回复）："
+        if uq_raw
+        else "助手正文（上一条完整回复）："
+    )
+
     prompt = (
-        "你是一款中医药智能问答产品的助手。\n下面「助手正文」是上一条模型对用户的完整回复。\n\n"
+        "你是一款中医药智能问答产品的助手。\n"
+        f"{ctx_hint}"
+        f"{user_block}"
+        f"{assistant_label}\n<<<\n{text}\n>>>\n\n"
         "请先判断：**是否值得**在 UI 上向用户展示 2～3 条快捷补充话术按钮。\n\n"
         "将 need_follow_ups 设为 false 的典型情况包括但不限于：\n"
         "• 正文主要是免责声明、法律咨询、不能做诊断／不能替代医生的说明，且没有多少可展开的中医细节；\n"
@@ -175,8 +201,7 @@ async def generate_follow_up_suggestions(
         "若不需要快捷话术：need_follow_ups 为 false，且 suggestions 为 []。\n\n"
         "**只输出一条合法的 JSON**，不要 Markdown 代码围栏、不要有前后解释文字（JSON keyword 为满足接口要求）。"
         'Schema 示例：{"need_follow_ups":true,'
-        '"suggestions":["阳虚怎么判断？","手脚冰凉算阳虚吗"]}\n\n'
-        f"助手正文：\n<<<\n{text}\n>>>"
+        '"suggestions":["阳虚怎么判断？","手脚冰凉算阳虚吗"]}\n'
     )
 
     async def _call() -> list[str]:

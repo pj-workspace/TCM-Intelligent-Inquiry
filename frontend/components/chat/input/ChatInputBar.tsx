@@ -304,6 +304,11 @@ type ChatInputBarProps = {
   attachmentUploadSlotProgress: number[];
   /** 有待发送图片时一键发送预制提示（会使用当前 pending 图片列表） */
   onSendWithImagePrompt?: (prompt: string) => void;
+  /** VL 看图生成快捷话术；缺省或失败时回落至本地随机池 */
+  fetchAiImageQuickPrompts?: (
+    urls: string[],
+    signal: AbortSignal,
+  ) => Promise<{ label: string; prompt: string }[] | null>;
   placeholder?: string;
 };
 
@@ -336,10 +341,11 @@ export function ChatInputBar({
   attachmentUploadSkeletonCount,
   attachmentUploadSlotProgress,
   onSendWithImagePrompt,
+  fetchAiImageQuickPrompts,
   placeholder = "有问题，尽管问，Shift+Enter 换行",
 }: ChatInputBarProps) {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
-  const pendingImageLenRef = useRef(0);
+  const imgSuggestAbortRef = useRef<AbortController | null>(null);
   const hasSendableContent = input.trim().length > 0 || pendingImageUrls.length > 0;
   const sendBlocked =
     genState !== "idle" || attachmentUploadBusy || !hasSendableContent;
@@ -356,7 +362,8 @@ export function ChatInputBar({
   const [quickPromptChoices, setQuickPromptChoices] = useState<QuickPromptItem[]>(
     initialQuickPromptsForHydration
   );
-  const [imgQuickChoices, setImgQuickChoices] = useState(initialImageQuickPromptsForHydration);
+  const [imgQuickChoices, setImgQuickChoices] = useState(() => initialImageQuickPromptsForHydration());
+  const [imgQuickLoading, setImgQuickLoading] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -366,26 +373,62 @@ export function ChatInputBar({
   }, []);
 
   useEffect(() => {
-    const len = pendingImageUrls.length;
-    const prev = pendingImageLenRef.current;
-    pendingImageLenRef.current = len;
-
-    if (len > 0 && prev === 0) {
-      const t = window.setTimeout(() => {
-        const count =
-          IMAGE_QUICK_SHOW_MIN +
-          Math.floor(
-            Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1),
-          );
-        setImgQuickChoices(
-          pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count),
-        );
-      }, 0);
-      return () => window.clearTimeout(t);
+    if (pendingImageUrls.length === 0) {
+      imgSuggestAbortRef.current?.abort();
+      imgSuggestAbortRef.current = null;
+      setImgQuickLoading(false);
+      setImgQuickChoices(initialImageQuickPromptsForHydration());
+      return;
     }
-    return undefined;
-  }, [pendingImageUrls.length]);
 
+    if (attachmentUploadBusy) {
+      imgSuggestAbortRef.current?.abort();
+      imgSuggestAbortRef.current = null;
+      setImgQuickLoading(false);
+      return;
+    }
+
+    if (!onSendWithImagePrompt) return;
+
+    if (!fetchAiImageQuickPrompts) {
+      const count =
+        IMAGE_QUICK_SHOW_MIN +
+        Math.floor(Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1));
+      setImgQuickChoices(pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count));
+      return;
+    }
+
+    imgSuggestAbortRef.current?.abort();
+    const ac = new AbortController();
+    imgSuggestAbortRef.current = ac;
+
+    const t = window.setTimeout(() => {
+      void (async () => {
+        setImgQuickLoading(true);
+        try {
+          const rows = await fetchAiImageQuickPrompts(pendingImageUrls, ac.signal);
+          if (ac.signal.aborted) return;
+          if (rows && rows.length > 0) {
+            setImgQuickChoices(rows.slice(0, 3));
+          } else {
+            const count =
+              IMAGE_QUICK_SHOW_MIN +
+              Math.floor(Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1));
+            setImgQuickChoices(
+              pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count),
+            );
+          }
+        } finally {
+          if (!ac.signal.aborted) setImgQuickLoading(false);
+        }
+      })();
+    }, 450);
+
+    return () => {
+      window.clearTimeout(t);
+      ac.abort();
+    };
+  }, [pendingImageUrls, attachmentUploadBusy, fetchAiImageQuickPrompts, onSendWithImagePrompt]);
   return (
     <motion.div
       layout
@@ -450,26 +493,34 @@ export function ChatInputBar({
               className="mt-2 mb-4 w-full overflow-hidden"
             >
               <div className="relative z-20 flex w-full flex-col items-start gap-2 bg-transparent">
-                {imgQuickChoices.map((item) => (
-                  <motion.button
-                    key={item.prompt.slice(0, 48)}
-                    type="button"
-                    layout
-                    whileHover={{ scale: genState === "idle" ? 1.005 : 1 }}
-                    whileTap={{ scale: genState === "idle" ? 0.998 : 1 }}
-                    disabled={genState !== "idle"}
-                    title={item.prompt}
-                    onClick={() => onSendWithImagePrompt(item.prompt)}
-                    className="inline-flex w-fit max-w-[min(100%,18rem)] items-center gap-2 rounded-2xl border border-gray-200/90 bg-white/90 px-3 py-2 text-left text-[13px] font-normal leading-snug text-gray-800 shadow-sm backdrop-blur-[2px] transition-colors hover:border-gray-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    <ArrowUpRight
-                      className="mt-px h-[15px] w-[15px] shrink-0 text-gray-400"
-                      strokeWidth={2}
-                      aria-hidden
-                    />
-                    <span className="max-w-full whitespace-normal">{item.label}</span>
-                  </motion.button>
-                ))}
+                {imgQuickLoading
+                  ? [0, 1, 2].map((i) => (
+                      <div
+                        key={`img-q-sk-${i}`}
+                        aria-hidden
+                        className="h-10 w-full max-w-[min(100%,14rem)] rounded-2xl border border-gray-200/70 bg-gray-100/85 animate-pulse"
+                      />
+                    ))
+                  : imgQuickChoices.map((item) => (
+                      <motion.button
+                        key={item.prompt.slice(0, 48)}
+                        type="button"
+                        layout
+                        whileHover={{ scale: genState === "idle" ? 1.005 : 1 }}
+                        whileTap={{ scale: genState === "idle" ? 0.998 : 1 }}
+                        disabled={genState !== "idle"}
+                        title={item.prompt}
+                        onClick={() => onSendWithImagePrompt(item.prompt)}
+                        className="inline-flex w-fit max-w-[min(100%,18rem)] items-center gap-2 rounded-2xl border border-gray-200/90 bg-white/90 px-3 py-2 text-left text-[13px] font-normal leading-snug text-gray-800 shadow-sm backdrop-blur-[2px] transition-colors hover:border-gray-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        <ArrowUpRight
+                          className="mt-px h-[15px] w-[15px] shrink-0 text-gray-400"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                        <span className="max-w-full whitespace-normal">{item.label}</span>
+                      </motion.button>
+                    ))}
               </div>
             </motion.div>
           ) : null}

@@ -45,6 +45,14 @@ class Settings(BaseSettings):
         default="",
         description="可选：单行 JSON 数组；非空时必须合法且恰好一项 default:true（见 README）",
     )
+    qwen_vl_attachment_suggestions_model: str = Field(
+        default="qwen3-vl-flash",
+        description="附图快捷话术：看图生成建议所用的 DashScope VL 模型 id（与主对话模型独立）",
+    )
+    qwen_follow_up_suggestions_model: str = Field(
+        default="qwen-flash",
+        description="助手气泡下追问快捷话术（纯文本）；与主对话所选模型独立，默认 qwen-flash",
+    )
     qwen_embedding_model: str = Field(
         default="text-embedding-v3", description="DashScope 向量模型名"
     )

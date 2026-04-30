@@ -16,9 +16,7 @@ interface MessageBubbleProps {
   modelName?: string;
   assistantActionsDisabled?: boolean;
   onAssistantRegenerate?: () => void;
-  /** 仅最后一条助手：追问骨架 */
-  followUpsLoading?: boolean;
-  /** 仅最后一条助手：追问文案 */
+  /** 仅最后一条助手：追问文案（已返回后渲染；加载中不出现骨架） */
   followUpItems?: string[];
   /** 点击追问填入输入框 */
   onFollowUpClick?: (text: string) => void;
@@ -29,6 +27,8 @@ interface MessageBubbleProps {
   noBottomPad?: boolean;
   /** 助手消息：用户主动终止输出后为 true */
   interrupted?: boolean;
+  /** 最后一条助手气泡：生成中预留与工具栏同高的占位，避免出现条后再占位导致整块上跳 */
+  assistantToolbarReserve?: boolean;
 }
 
 export function MessageBubble({
@@ -38,13 +38,13 @@ export function MessageBubble({
   modelName,
   assistantActionsDisabled,
   onAssistantRegenerate,
-  followUpsLoading,
   followUpItems,
   onFollowUpClick,
   onUserEdit,
   noTopPad,
   noBottomPad,
   interrupted,
+  assistantToolbarReserve,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const [menuOpen, setMenuOpen] = useState(false);
@@ -141,7 +141,6 @@ export function MessageBubble({
       modelName={modelName}
       assistantActionsDisabled={assistantActionsDisabled}
       onAssistantRegenerate={onAssistantRegenerate}
-      followUpsLoading={followUpsLoading}
       followUpItems={followUpItems}
       onFollowUpClick={onFollowUpClick}
       noTopPad={noTopPad}
@@ -154,6 +153,7 @@ export function MessageBubble({
       menuOpen={menuOpen}
       onMenuToggle={() => setMenuOpen((o) => !o)}
       menuRef={menuRef}
+      assistantToolbarReserve={assistantToolbarReserve}
     />
   );
 }

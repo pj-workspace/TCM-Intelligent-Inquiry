@@ -9,6 +9,8 @@ export type ChatMessage = {
   imageUrls?: string[];
   /** 助手消息：来自 SSE meta.chatModel */
   modelName?: string;
+  /** 助手消息：后端持久化的快速追问话术 */
+  followUpSuggestions?: string[];
   /** 助手消息：用户点击终止后标记为 true */
   interrupted?: boolean;
 };
@@ -34,6 +36,7 @@ export type ApiMessageRow = {
   content: string;
   duration_sec?: number | null;
   model_name?: string | null;
+  follow_up_suggestions?: string[] | null;
 };
 
 export type GenerationState = "idle" | "waiting" | "thinking" | "tool" | "typing";

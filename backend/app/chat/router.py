@@ -14,7 +14,9 @@ from app.chat.history_service import (
     list_my_conversations,
     delete_conversation,
     update_conversation_title,
+    persist_follow_up_suggestions_for_assistant_message,
 )
+from app.chat.attachment_suggestions import generate_attachment_suggestions
 from app.chat.follow_up_suggestions import generate_follow_up_suggestions
 from app.chat.group_service import (
     create_group,
@@ -24,6 +26,9 @@ from app.chat.group_service import (
     update_conversation_group,
 )
 from app.chat.schemas import (
+    AttachmentSuggestionItem,
+    AttachmentSuggestionsRequest,
+    AttachmentSuggestionsResponse,
     ChatRequest,
     ConversationItem,
     MessageItem,
@@ -101,12 +106,44 @@ async def follow_up_suggestions_route(
             user,
             req.anon_session_secret,
         )
-        await session.commit()
     suggestions = await generate_follow_up_suggestions(
         req.assistant_reply,
-        chat_model_override=req.chat_model,
+        user_question=req.user_question,
     )
+    if req.conversation_id:
+        await persist_follow_up_suggestions_for_assistant_message(
+            session,
+            conversation_id=req.conversation_id,
+            assistant_message_id=(req.assistant_message_id or "").strip() or None,
+            suggestions=suggestions,
+            user=user,
+            anon_session_secret=req.anon_session_secret,
+        )
     return FollowUpSuggestionsResponse(suggestions=suggestions)
+
+
+@router.post(
+    "/attachment-suggestions",
+    response_model=AttachmentSuggestionsResponse,
+    summary="根据待发送图片生成附图快捷话术（VL 看图）",
+)
+async def attachment_suggestions_route(
+    req: AttachmentSuggestionsRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord | None, Depends(get_current_user_optional)],
+):
+    if req.conversation_id:
+        await assert_can_use_conversation(
+            session,
+            req.conversation_id,
+            user,
+            req.anon_session_secret,
+        )
+        await session.commit()
+    rows = await generate_attachment_suggestions(req.image_urls)
+    return AttachmentSuggestionsResponse(
+        items=[AttachmentSuggestionItem(label=r["label"], prompt=r["prompt"]) for r in rows],
+    )
 
 
 @router.get(

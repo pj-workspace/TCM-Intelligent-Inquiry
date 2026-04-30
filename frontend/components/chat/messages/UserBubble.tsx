@@ -13,7 +13,7 @@ interface UserBubbleProps {
   onEdit?: (text: string, imageUrls?: string[]) => void;
 }
 
-/** 多图时宫内直接展示的格子数；第 4 格叠「+N」表示其余张数 */
+/** 多图时气泡外横排缩略图格数；第 4 格叠「+N」表示其余张数 */
 const MULTI_GRID_SLOTS = 4;
 
 function UserBubbleAttachments({
@@ -29,14 +29,14 @@ function UserBubbleAttachments({
   if (n === 1) {
     const u = urls[0];
     return (
-      <div className="-mx-1 -mt-0.5 mb-0 flex min-w-0 justify-end">
+      <div className="flex min-w-0 justify-end">
         <button
           type="button"
           onClick={() => onOpenPreview(0)}
           className={clsx(
-            "group/img relative block min-h-0 min-w-0 w-full max-w-[min(100%,18.5rem)] overflow-hidden rounded-2xl",
-            "bg-white/80 text-left shadow-sm ring-1 ring-black/[0.06] transition-[box-shadow,ring-color]",
-            "hover:ring-black/12 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/80"
+            "group/img relative block h-28 w-28 max-w-[min(100%,7rem)] shrink-0 overflow-hidden rounded-xl sm:h-32 sm:w-32 sm:max-w-[8rem]",
+            "bg-white text-left shadow-sm ring-1 ring-black/[0.08] transition-[box-shadow,ring-color]",
+            "hover:ring-black/14 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/80"
           )}
           aria-label="查看大图"
           title="查看大图"
@@ -45,11 +45,11 @@ function UserBubbleAttachments({
           <img
             src={u}
             alt=""
-            className="ml-auto block max-h-[13rem] w-auto max-w-full object-contain object-right"
+            className="h-full w-full object-cover object-center"
             loading="lazy"
             draggable={false}
           />
-          <span className="pointer-events-none absolute inset-0 rounded-2xl bg-black/0 transition-colors group-hover/img:bg-black/[0.03]" />
+          <span className="pointer-events-none absolute inset-0 rounded-xl bg-black/0 transition-colors group-hover/img:bg-black/[0.03]" />
         </button>
       </div>
     );
@@ -61,7 +61,7 @@ function UserBubbleAttachments({
   const plusOverlayCount = folded ? n - MULTI_GRID_SLOTS : 0;
 
   return (
-    <div className="-mx-1 -mt-0.5 mb-0 flex min-w-0 justify-end">
+    <div className="flex min-w-0 justify-end">
       <div className="no-scrollbar flex max-w-full flex-nowrap justify-end gap-2 overflow-x-auto pb-0.5">
         {Array.from({ length: slotCount }, (_, slot) => {
           const showPlusBadge = folded && slot === MULTI_GRID_SLOTS - 1;
@@ -134,54 +134,52 @@ export function UserBubble({ content, imageUrls, copied, onCopy, onEdit }: UserB
         />
       ) : null}
 
-      <div className="flex min-w-0 max-w-[88%] flex-row-reverse items-start gap-2 group sm:max-w-[min(76%,34rem)] md:max-w-[min(70%,36rem)]">
-        <div
-          className={clsx(
-            "min-w-0 max-w-full text-[15px] leading-relaxed break-words [overflow-wrap:anywhere]",
-            "bg-[#f4f4f4] text-[#1a1a1a] rounded-3xl rounded-tr-sm px-4 py-3 sm:px-5 sm:py-3.5"
-          )}
-        >
-          {hasImages && imageUrls ? (
+      <div className="group flex min-w-0 max-w-[88%] flex-col items-end gap-2 sm:max-w-[min(76%,34rem)] md:max-w-[min(70%,36rem)]">
+        {hasImages && imageUrls ? (
+          <div className="flex w-full justify-end">
             <UserBubbleAttachments urls={imageUrls} onOpenPreview={setLightboxIndex} />
-          ) : null}
+          </div>
+        ) : null}
 
+        <div className="flex w-full flex-row-reverse items-start gap-2">
           {hasText ? (
             <div
               className={clsx(
-                hasImages && "mt-3 border-t border-black/[0.07] pt-3",
-                hasImages && "text-[14.5px] leading-[1.55] sm:text-[15px] sm:leading-relaxed"
+                "min-w-0 max-w-full text-[15px] leading-relaxed break-words [overflow-wrap:anywhere]",
+                "rounded-3xl rounded-tr-sm bg-[#f4f4f4] px-4 py-3 text-[#1a1a1a] sm:px-5 sm:py-3.5"
               )}
             >
               {text}
             </div>
           ) : null}
-        </div>
-        <div
-          className="flex flex-row items-center gap-0.5 pt-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity duration-150 shrink-0"
-          aria-hidden
-        >
-          <button
-            type="button"
-            onClick={onCopy}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
-            title={copied ? "已复制" : "复制"}
-            aria-label={copied ? "已复制" : "复制"}
+
+          <div
+            className="flex flex-row items-center gap-0.5 pt-1 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity duration-150 shrink-0"
+            aria-hidden
           >
-            {copied ? (
-              <Check className="w-4 h-4 text-green-600" strokeWidth={1.75} />
-            ) : (
-              <Copy className="w-4 h-4" strokeWidth={1.75} />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => onEdit?.(content, imageUrls)}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
-            title="填入输入框编辑"
-            aria-label="填入输入框编辑"
-          >
-            <Pencil className="w-4 h-4" strokeWidth={1.75} />
-          </button>
+            <button
+              type="button"
+              onClick={onCopy}
+              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
+              title={copied ? "已复制" : "复制"}
+              aria-label={copied ? "已复制" : "复制"}
+            >
+              {copied ? (
+                <Check className="w-4 h-4 text-green-600" strokeWidth={1.75} />
+              ) : (
+                <Copy className="w-4 h-4" strokeWidth={1.75} />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => onEdit?.(content, imageUrls)}
+              className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
+              title="填入输入框编辑"
+              aria-label="填入输入框编辑"
+            >
+              <Pencil className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

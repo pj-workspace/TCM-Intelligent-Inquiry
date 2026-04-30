@@ -21,6 +21,16 @@ import {
   exportAssistantAsPdf,
 } from "@/lib/markdown-utils";
 
+/** 较慢、末尾更柔和的缓动（ease-out） */
+const softEase = [0.33, 1, 0.68, 1] as const;
+
+/** 入场整体快约 0.4s，但不短于阈值以免「闪糊」 */
+const ENTER_FAST_BY = 0.4;
+const enterSecs = (base: number) => Math.max(0.14, Number((base - ENTER_FAST_BY).toFixed(2)));
+
+/** 消失：极低时长线性，接近瞬切 */
+const exitSnapTransition = { duration: 0.04, ease: "linear" as const };
+
 /** 简洁「回车」符（用户提供的 16×16 路径，随文字色） */
 function FollowUpEnterIcon({ className }: { className?: string }) {
   return (
@@ -46,7 +56,7 @@ interface AssistantBubbleProps {
   modelName?: string;
   assistantActionsDisabled?: boolean;
   onAssistantRegenerate?: () => void;
-  followUpsLoading?: boolean;
+  /** 服务端已返回追问条；仅在有内容时渲染，请求中不出现骨架 */
   followUpItems?: string[];
   onFollowUpClick?: (text: string) => void;
   noTopPad?: boolean;
@@ -59,14 +69,18 @@ interface AssistantBubbleProps {
   menuOpen: boolean;
   onMenuToggle: () => void;
   menuRef: RefObject<HTMLDivElement | null>;
+  /** 最后一条助手：生成中用与工具栏等高的占位，避免 idle 时出现条儿时正文整体猛跳 */
+  assistantToolbarReserve?: boolean;
 }
+
+/** 近似 3 条追问骨架/按钮纵向占位，仅在追问展示期间起效，减少对贴底滚动时的视感位移 */
+const FOLLOW_UP_TRAY_MIN_H = "min-h-[9.75rem]";
 
 export function AssistantBubble({
   content,
   modelName,
   assistantActionsDisabled,
   onAssistantRegenerate,
-  followUpsLoading,
   followUpItems,
   onFollowUpClick,
   noTopPad,
@@ -79,10 +93,16 @@ export function AssistantBubble({
   menuOpen,
   onMenuToggle,
   menuRef,
+  assistantToolbarReserve,
 }: AssistantBubbleProps) {
-  const showFollowUpRegion =
-    Boolean(followUpsLoading) ||
-    !!(followUpItems && followUpItems.length > 0 && onFollowUpClick);
+  const showFollowUpRegion = !!(
+    followUpItems &&
+    followUpItems.length > 0 &&
+    onFollowUpClick
+  );
+
+  const showToolbarReserve =
+    assistantActionsDisabled && assistantToolbarReserve === true;
 
   return (
     <div
@@ -92,8 +112,13 @@ export function AssistantBubble({
         noBottomPad ? "pb-1" : "pb-4",
       )}
     >
-      <div className="flex min-w-0 w-full max-w-full flex-col items-start gap-2">
-        <div className="text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full min-w-0 md:max-w-[68ch] lg:max-w-[80ch] xl:max-w-[96ch]">
+      <div className="flex min-w-0 w-full max-w-full flex-col items-start gap-1.5">
+        <div
+          className={clsx(
+            "text-[15px] leading-relaxed bg-transparent text-[#1a1a1a] ai-content w-full min-w-0 md:max-w-[68ch] lg:max-w-[80ch] xl:max-w-[96ch]",
+            "[&>*:last-child]:!mb-2",
+          )}
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={assistantMarkdownComponents}
@@ -104,8 +129,14 @@ export function AssistantBubble({
           </ReactMarkdown>
         </div>
 
-        {!assistantActionsDisabled && (
-          <div className="flex flex-wrap items-center gap-0.5 mt-1">
+        <div className="flex w-full flex-col items-start gap-2">
+          {showToolbarReserve ? (
+            <div
+              aria-hidden
+              className="pointer-events-none mt-0.5 min-h-[2.375rem] w-full shrink-0"
+            />
+          ) : !assistantActionsDisabled ? (
+            <div className="mt-0.5 flex w-full flex-wrap items-center gap-0.5">
             <button
               type="button"
               disabled={!onAssistantRegenerate}
@@ -191,94 +222,47 @@ export function AssistantBubble({
               )}
             </div>
           </div>
-        )}
-        {showFollowUpRegion && (
-          <div
-            className="mt-2 flex w-full flex-col items-start gap-2 md:max-w-[68ch]"
-            aria-busy={followUpsLoading || undefined}
-            aria-label={followUpsLoading ? "追问建议加载中" : undefined}
-          >
-            <AnimatePresence mode="wait">
-              {followUpsLoading ? (
-                <motion.div
-                  key="follow-skel"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex flex-col items-start gap-2"
-                >
-                  {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className={clsx(
-                        "relative inline-flex max-w-[min(100%,26rem)] w-fit shrink-0 overflow-hidden rounded-2xl",
-                        "border border-[#e2ddd3] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
-                      )}
-                      aria-hidden
-                    >
-                      <div
-                        className={clsx(
-                          "relative h-3.5 overflow-hidden rounded-md bg-neutral-200/88",
-                          i === 0 && "w-[13rem]",
-                          i === 1 && "w-[11rem]",
-                          i === 2 && "w-[12rem]"
-                        )}
-                      >
-                        <motion.div
-                          className="pointer-events-none absolute inset-y-0 w-[70%] -skew-x-12 bg-gradient-to-r from-transparent via-white/90 to-transparent"
-                          initial={false}
-                          animate={{ left: ["-75%", "115%"] }}
-                          transition={{
-                            duration: 1.45,
-                            repeat: Infinity,
-                            ease: "linear",
-                            repeatDelay: 0.05,
-                            delay: i * 0.32,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="follow-items"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.25 }}
-                  className="flex flex-col items-start gap-2"
-                >
+          ) : null}
+
+          <AnimatePresence initial={false}>
+            {showFollowUpRegion ? (
+              <motion.div
+                key="follow-tray-wrap"
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6, transition: exitSnapTransition }}
+                transition={{
+                  duration: enterSecs(0.7),
+                  ease: softEase,
+                }}
+                className={clsx(
+                  "mt-2 flex w-full flex-col items-start gap-2 md:max-w-[68ch]",
+                  FOLLOW_UP_TRAY_MIN_H,
+                )}
+              >
+                <div className="flex flex-col items-start gap-2">
                   {(followUpItems ?? []).map((text, idx) => (
-                    <motion.button
+                    <button
                       key={`${idx}-${text.slice(0, 24)}`}
                       type="button"
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        type: "spring",
-                        stiffness: 380,
-                        damping: 28,
-                        delay: idx * 0.06,
-                      }}
                       onClick={() => onFollowUpClick?.(text)}
                       className={clsx(
                         "inline-flex max-w-[min(100%,26rem)] w-fit shrink-0 items-start gap-2 rounded-2xl border border-[#e2ddd3] bg-white px-3 py-2.5",
                         "text-left text-[13px] leading-snug text-[#3d3d3d]",
                         "shadow-[0_1px_2px_rgba(0,0,0,0.05)]",
                         "hover:border-[#cfc5b8] hover:bg-[#fcfbf9] hover:shadow-sm",
-                        "active:scale-[0.995] transition-[transform,background-color,border-color,box-shadow] duration-150"
+                        "active:scale-[0.995] transition-[transform,background-color,border-color,box-shadow] duration-150",
                       )}
                     >
                       <FollowUpEnterIcon className="mt-[3px] h-4 w-4 shrink-0 text-neutral-400" />
                       <span className="min-w-0 flex-1 break-words">{text}</span>
-                    </motion.button>
+                    </button>
                   ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );

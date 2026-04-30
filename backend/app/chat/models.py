@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -67,6 +67,8 @@ class MessageRecord(Base):
     duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     #: 仅 role=assistant 时使用：生成该条回复时使用的对话模型名
     model_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    #: 仅 role=assistant：模型生成的追问建议（持久化便于刷新后继续展示）
+    follow_up_suggestions: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
