@@ -17,12 +17,16 @@ truth_source_order:
 2. **`api-documentation.md`** — OpenAPI 与本文档如何分工；何时引用 `openapi.json`；不要重复手写全套 REST。
 3. **`README.md`**（本文件）— 索引与上述顺序。
 
+排查 **DashScope OpenAI 兼容 `chat/completions`** 时：**请求体**见 **`dashscope-openai-chat-completion-request.md`**，**响应**见 **`dashscope-openai-chat-completion-response.md`**（与对外 **`/api/chat` SSE** 不同层）。
+
 ## 文件清单
 
 | 路径 | 用途 |
 |------|------|
 | `frontend-integration.md` | 集成契约：HTTP+SSE，含可解析的字段表与步骤 |
 | `api-documentation.md` | 文档策略与 AI 上下文加载策略 |
+| `dashscope-openai-chat-completion-request.md` | 上游 DashScope `chat/completions` **请求体**字段速查（`messages`、多模态、`extra_body`、联网与技能等） |
+| `dashscope-openai-chat-completion-response.md` | 上游 DashScope `chat/completions` 响应：**非流式** `chat.completion` + **流式** `chat.completion.chunk` |
 
 ## 硬约束（全局）
 
