@@ -219,6 +219,34 @@ class Settings(BaseSettings):
         description="周期探测时对多个 MCP 并发 discover_tools 的上限，减轻慢节点串行叠加阻塞",
     )
 
+    # ── 阿里云 OSS（对话图片上传、供 VL 等拉取时用签名 GET URL）────────────────
+    aliyun_oss_access_key_id: str = Field(
+        default="",
+        description="OSS RAM AccessKey Id（与 DashScope Key 分开配置）",
+    )
+    aliyun_oss_access_key_secret: str = Field(default="", description="OSS RAM Secret")
+    aliyun_oss_endpoint: str = Field(
+        default="",
+        description="地域 Endpoint，如 https://oss-cn-beijing.aliyuncs.com",
+    )
+    aliyun_oss_bucket: str = Field(default="", description="Bucket 名称")
+    aliyun_oss_chat_prefix: str = Field(
+        default="chat-uploads/",
+        description="聊天图片对象键前缀，建议以 / 结尾",
+    )
+    aliyun_oss_sign_url_expires_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="上传返回的读取签名 URL 有效期（秒）；供 DashScope 拉图",
+    )
+    oss_chat_image_max_bytes: int = Field(
+        default=8 * 1024 * 1024,
+        ge=512_000,
+        le=48 * 1024 * 1024,
+        description="聊天图片单次上传最大字节（默认 8MB）",
+    )
+
     # ── SearXNG（自托管元搜索，docker compose 服务 searxng 默认映射 8888）────
     searxng_url: str = Field(
         default="http://127.0.0.1:8888",
