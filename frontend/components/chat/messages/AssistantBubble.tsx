@@ -31,7 +31,7 @@ const enterSecs = (base: number) => Math.max(0.14, Number((base - ENTER_FAST_BY)
 /** 消失：极低时长线性，接近瞬切 */
 const exitSnapTransition = { duration: 0.04, ease: "linear" as const };
 
-/** 简洁「回车」符（用户提供的 16×16 路径，随文字色） */
+/** 追问条前导「回车」符（16×16） */
 function FollowUpEnterIcon({ className }: { className?: string }) {
   return (
     <svg

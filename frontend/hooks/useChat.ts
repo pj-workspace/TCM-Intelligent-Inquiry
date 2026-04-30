@@ -240,7 +240,7 @@ export function useChat(opts: {
     [token],
   );
 
-  /** 附图快捷话术：POST VL 看图建议；返回 null 时由输入栏回落到本地随机池 */
+  /** 附图 VL 快捷话术：POST 后端；仅返回后由输入栏展示，失败或空则不出条 */
   const fetchAiImageQuickPrompts = useCallback(
     async (
       imageUrls: string[],
@@ -1030,13 +1030,13 @@ export function useChat(opts: {
   );
 
   const pushImageAttachments = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList?.length) return;
+    async (fileList: FileList | readonly File[] | null) => {
+      const files = fileList == null ? [] : Array.from(fileList);
+      if (files.length === 0) return;
       if (!token) {
         router.push("/login");
         return;
       }
-      const files = Array.from(fileList);
       const bad = files.find((f) => !f.type.startsWith("image/"));
       if (bad != null || files.length === 0) {
         toast.error("请选择图片格式（JPEG/PNG/WebP/GIF）");

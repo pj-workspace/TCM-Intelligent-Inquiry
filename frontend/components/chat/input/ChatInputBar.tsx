@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import clsx from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Select from "@radix-ui/react-select";
@@ -41,6 +42,13 @@ const springTransition = {
   damping: 30,
   mass: 0.8,
 };
+
+/** 与 AssistantBubble 追问条入场一致 */
+const followUpSoftEase = [0.33, 1, 0.68, 1] as const;
+const FOLLOW_UP_ENTER_FAST_BY = 0.4;
+const followUpEnterSecs = (base: number) =>
+  Math.max(0.14, Number((base - FOLLOW_UP_ENTER_FAST_BY).toFixed(2)));
+const followUpExitSnap = { duration: 0.04, ease: "linear" as const };
 
 /** 首屏输入区上方每次随机展示条数 */
 const QUICK_PROMPT_SHOW_COUNT = 5;
@@ -163,54 +171,6 @@ function pickRandomPrompts(pool: QuickPromptItem[], count: number): QuickPromptI
   return copy.slice(0, Math.min(count, copy.length));
 }
 
-/** 有待发送图片时的一键话术（中医科普向，不可替代面诊） */
-const IMAGE_ATTACHMENT_QUICK_PROMPTS: { label: string; prompt: string }[] = [
-  {
-    label: "总结图中要点",
-    prompt:
-      "请结合我上传的图片，用中医药学习与科普的视角，归纳图中可见的关键信息（如药材、方剂、穴位示意、调养建议文字等）；若涉及健康判断，请明确说明仅供参考，具体问题需执业医师面诊与检查。",
-  },
-  {
-    label: "药方与功效科普",
-    prompt:
-      "若图中涉及中药方、饮片配伍或中成药包装，请从科普角度梳理大致组方思路、常见功效取向与一般性用药留意点；若信息不足请说明，勿作出个体化处方建议。",
-  },
-  {
-    label: "辨药与性味配伍",
-    prompt:
-      "请根据图片，尝试说明可能的中药饮片或药材种类、其主要性味归经要点及常见配伍应用（通俗解释）；辨认不确定时请直说「无法仅从图片确定」，避免臆断。",
-  },
-  {
-    label: "望诊图示科普",
-    prompt:
-      "若图中包含舌象、面色或体态示意，请仅从中医望诊知识做通俗科普（可能对应哪些常见证型倾向）；强调望诊仅为四诊之一，不得替代当面诊断。",
-  },
-  {
-    label: "拓展相关知识",
-    prompt:
-      "在图片内容基础上，请简要延伸相关的中医基础知识、经典治法原则或日常调养注意，条理清晰，适合入门阅读，并标明科普性质。",
-  },
-];
-
-const IMAGE_QUICK_SHOW_MIN = 2;
-const IMAGE_QUICK_SHOW_MAX = 3;
-
-function pickRandomImageQuickPrompts(
-  pool: readonly { label: string; prompt: string }[],
-  count: number,
-): { label: string; prompt: string }[] {
-  const copy = [...pool];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy.slice(0, Math.min(count, pool.length));
-}
-
-function initialImageQuickPromptsForHydration(): { label: string; prompt: string }[] {
-  return IMAGE_ATTACHMENT_QUICK_PROMPTS.slice(0, IMAGE_QUICK_SHOW_MIN);
-}
-
 /** SSR 与水合首帧必须与服务端 HTML 完全一致，禁止使用 random */
 function initialQuickPromptsForHydration(): QuickPromptItem[] {
   return QUICK_PROMPT_POOL.slice(0, QUICK_PROMPT_SHOW_COUNT);
@@ -296,7 +256,8 @@ type ChatInputBarProps = {
   /** 已选入待发送的图片（OSS URL） */
   pendingImageUrls: string[];
   onRemovePendingImage: (index: number) => void;
-  onImageFilesSelected: (files: FileList | null) => void;
+  /** 与其它添加方式共用：选择文件或粘贴截图 */
+  onImageFilesSelected: (files: FileList | readonly File[] | null) => void;
   attachmentUploadBusy: boolean;
   /** 本轮正在上传的文件个数，用于骨架占位 */
   attachmentUploadSkeletonCount: number;
@@ -304,7 +265,7 @@ type ChatInputBarProps = {
   attachmentUploadSlotProgress: number[];
   /** 有待发送图片时一键发送预制提示（会使用当前 pending 图片列表） */
   onSendWithImagePrompt?: (prompt: string) => void;
-  /** VL 看图生成快捷话术；缺省或失败时回落至本地随机池 */
+  /** VL 看图生成快捷话术；仅在后端返回后展示，无前端的本地假文案 */
   fetchAiImageQuickPrompts?: (
     urls: string[],
     signal: AbortSignal,
@@ -346,10 +307,51 @@ export function ChatInputBar({
 }: ChatInputBarProps) {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const imgSuggestAbortRef = useRef<AbortController | null>(null);
+  /** 与上一轮 effect 对比：仅在「本轮上传 attachmentUploadBusy: true→false」后才考虑拉 VL 话术 */
+  const prevAttachBusyRef = useRef(attachmentUploadBusy);
+  /** 当前输入区还有待发图期间只拉一次建议；清空附图后复位，再次上传可走首轮逻辑 */
+  const attachmentSuggestFetchedForStackRef = useRef(false);
   const hasSendableContent = input.trim().length > 0 || pendingImageUrls.length > 0;
   const sendBlocked =
     genState !== "idle" || attachmentUploadBusy || !hasSendableContent;
   const attachmentAtCap = pendingImageUrls.length >= CHAT_PENDING_ATTACHMENT_MAX;
+
+  /** 粘贴剪贴板图片：与点击添加共用上传逻辑（非图片或未拦截时仍可正常粘贴文字） */
+  const handleComposerPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (attachmentDisabled || genState !== "idle" || attachmentUploadBusy || attachmentAtCap)
+        return;
+
+      const dt = e.clipboardData;
+      if (!dt) return;
+
+      const imageFiles: File[] = [];
+      for (let i = 0; i < dt.items.length; i++) {
+        const item = dt.items[i];
+        if (item.kind !== "file") continue;
+        const f = item.getAsFile();
+        if (f && f.type.startsWith("image/")) imageFiles.push(f);
+      }
+      if (imageFiles.length === 0 && dt.files?.length) {
+        for (let i = 0; i < dt.files.length; i++) {
+          const f = dt.files.item(i);
+          if (f && f.type.startsWith("image/")) imageFiles.push(f);
+        }
+      }
+
+      if (imageFiles.length === 0) return;
+
+      e.preventDefault();
+      onImageFilesSelected(imageFiles);
+    },
+    [
+      attachmentAtCap,
+      attachmentDisabled,
+      attachmentUploadBusy,
+      genState,
+      onImageFilesSelected,
+    ],
+  );
 
   /** 首屏五张大卡：仅无待传图、无输入文字、未在上传时展示，避免与附件区、附图话术条抢位 */
   const showLandingQuickPromptCards =
@@ -362,8 +364,9 @@ export function ChatInputBar({
   const [quickPromptChoices, setQuickPromptChoices] = useState<QuickPromptItem[]>(
     initialQuickPromptsForHydration
   );
-  const [imgQuickChoices, setImgQuickChoices] = useState(() => initialImageQuickPromptsForHydration());
-  const [imgQuickLoading, setImgQuickLoading] = useState(false);
+  const [imgQuickChoices, setImgQuickChoices] = useState<{ label: string; prompt: string }[]>([]);
+  /** 每次成功拉到非空推荐后递增，便于 AnimatePresence 重新播放入场动效 */
+  const [imgQuickTrayAnimKey, setImgQuickTrayAnimKey] = useState(0);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -373,28 +376,39 @@ export function ChatInputBar({
   }, []);
 
   useEffect(() => {
+    const wasBusyBeforeThisRun = prevAttachBusyRef.current;
+
     if (pendingImageUrls.length === 0) {
       imgSuggestAbortRef.current?.abort();
       imgSuggestAbortRef.current = null;
-      setImgQuickLoading(false);
-      setImgQuickChoices(initialImageQuickPromptsForHydration());
+      setImgQuickChoices([]);
+      attachmentSuggestFetchedForStackRef.current = false;
+      prevAttachBusyRef.current = attachmentUploadBusy;
       return;
     }
 
     if (attachmentUploadBusy) {
       imgSuggestAbortRef.current?.abort();
       imgSuggestAbortRef.current = null;
-      setImgQuickLoading(false);
+      prevAttachBusyRef.current = attachmentUploadBusy;
       return;
     }
 
-    if (!onSendWithImagePrompt) return;
+    /** 仅在「本轮上传结束」后对当前待发图栈拉一次；继续加图不重拉；清空后再上传可再拉一次 */
+    const uploadJustFinished =
+      wasBusyBeforeThisRun && pendingImageUrls.length > 0;
+    prevAttachBusyRef.current = attachmentUploadBusy;
+
+    if (!uploadJustFinished || !onSendWithImagePrompt) {
+      return;
+    }
+
+    if (attachmentSuggestFetchedForStackRef.current) {
+      return;
+    }
+    attachmentSuggestFetchedForStackRef.current = true;
 
     if (!fetchAiImageQuickPrompts) {
-      const count =
-        IMAGE_QUICK_SHOW_MIN +
-        Math.floor(Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1));
-      setImgQuickChoices(pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count));
       return;
     }
 
@@ -402,36 +416,27 @@ export function ChatInputBar({
     const ac = new AbortController();
     imgSuggestAbortRef.current = ac;
 
-    const t = window.setTimeout(() => {
-      void (async () => {
-        setImgQuickLoading(true);
-        try {
-          const rows = await fetchAiImageQuickPrompts(pendingImageUrls, ac.signal);
-          if (ac.signal.aborted) return;
-          if (rows && rows.length > 0) {
-            setImgQuickChoices(rows.slice(0, 3));
-          } else {
-            const count =
-              IMAGE_QUICK_SHOW_MIN +
-              Math.floor(Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1));
-            setImgQuickChoices(
-              pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count),
-            );
-          }
-        } finally {
-          if (!ac.signal.aborted) setImgQuickLoading(false);
+    void (async () => {
+      try {
+        const rows = await fetchAiImageQuickPrompts(pendingImageUrls, ac.signal);
+        if (ac.signal.aborted) return;
+        if (rows && rows.length > 0) {
+          setImgQuickChoices(rows.slice(0, 3));
+          setImgQuickTrayAnimKey((k) => k + 1);
+        } else {
+          setImgQuickChoices([]);
         }
-      })();
-    }, 450);
+      } catch {
+        if (!ac.signal.aborted) setImgQuickChoices([]);
+      }
+    })();
 
     return () => {
-      window.clearTimeout(t);
       ac.abort();
     };
   }, [pendingImageUrls, attachmentUploadBusy, fetchAiImageQuickPrompts, onSendWithImagePrompt]);
   return (
     <motion.div
-      layout
       transition={springTransition}
       className="absolute bottom-0 left-0 right-0 z-10 flex flex-col items-center bg-gradient-to-t from-[#fdfdfc] from-45% via-[#fdfdfc]/96 to-transparent px-4 pb-5 pt-4 md:px-8"
     >
@@ -481,53 +486,48 @@ export function ChatInputBar({
 
         <AnimatePresence initial={false}>
           {pendingImageUrls.length > 0 &&
-          !attachmentUploadBusy &&
-          onSendWithImagePrompt ? (
+          onSendWithImagePrompt &&
+          imgQuickChoices.length > 0 ? (
             <motion.div
-              key="img-quick-prompts"
-              layout
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
-              className="mt-2 mb-4 w-full overflow-hidden"
+              key={`img-ai-tray-${imgQuickTrayAnimKey}`}
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6, transition: followUpExitSnap }}
+              transition={{
+                duration: followUpEnterSecs(0.7),
+                ease: followUpSoftEase,
+              }}
+              className="relative z-20 mt-2 mb-4 flex w-full flex-col items-start gap-2 md:max-w-[68ch]"
             >
-              <div className="relative z-20 flex w-full flex-col items-start gap-2 bg-transparent">
-                {imgQuickLoading
-                  ? [0, 1, 2].map((i) => (
-                      <div
-                        key={`img-q-sk-${i}`}
-                        aria-hidden
-                        className="h-10 w-full max-w-[min(100%,14rem)] rounded-2xl border border-gray-200/70 bg-gray-100/85 animate-pulse"
-                      />
-                    ))
-                  : imgQuickChoices.map((item) => (
-                      <motion.button
-                        key={item.prompt.slice(0, 48)}
-                        type="button"
-                        layout
-                        whileHover={{ scale: genState === "idle" ? 1.005 : 1 }}
-                        whileTap={{ scale: genState === "idle" ? 0.998 : 1 }}
-                        disabled={genState !== "idle"}
-                        title={item.prompt}
-                        onClick={() => onSendWithImagePrompt(item.prompt)}
-                        className="inline-flex w-fit max-w-[min(100%,18rem)] items-center gap-2 rounded-2xl border border-gray-200/90 bg-white/90 px-3 py-2 text-left text-[13px] font-normal leading-snug text-gray-800 shadow-sm backdrop-blur-[2px] transition-colors hover:border-gray-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
-                      >
-                        <ArrowUpRight
-                          className="mt-px h-[15px] w-[15px] shrink-0 text-gray-400"
-                          strokeWidth={2}
-                          aria-hidden
-                        />
-                        <span className="max-w-full whitespace-normal">{item.label}</span>
-                      </motion.button>
-                    ))}
-              </div>
+              {imgQuickChoices.map((item) => (
+                <button
+                  key={item.prompt.slice(0, 48)}
+                  type="button"
+                  disabled={genState !== "idle" || attachmentUploadBusy}
+                  title={item.prompt}
+                  onClick={() => onSendWithImagePrompt(item.prompt)}
+                  className={clsx(
+                    "inline-flex max-w-[min(100%,26rem)] w-fit shrink-0 items-start gap-2 rounded-2xl border border-[#e2ddd3] bg-white px-3 py-2.5",
+                    "text-left text-[13px] leading-snug text-[#3d3d3d]",
+                    "shadow-[0_1px_2px_rgba(0,0,0,0.05)]",
+                    "hover:border-[#cfc5b8] hover:bg-[#fcfbf9] hover:shadow-sm",
+                    "active:scale-[0.995] transition-[transform,background-color,border-color,box-shadow] duration-150",
+                    "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[#e2ddd3] disabled:hover:bg-white",
+                  )}
+                >
+                  <ArrowUpRight
+                    className="mt-px h-[15px] w-[15px] shrink-0 text-neutral-400"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                  <span className="max-w-full whitespace-normal">{item.label}</span>
+                </button>
+              ))}
             </motion.div>
           ) : null}
         </AnimatePresence>
 
         <motion.div
-          layout
           transition={springTransition}
           className="relative flex w-full flex-col overflow-hidden rounded-3xl border border-[#e5e5e5] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-shadow focus-within:border-gray-300 focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.05)]"
         >
@@ -602,7 +602,13 @@ export function ChatInputBar({
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={handleComposerPaste}
             placeholder={placeholder}
+            title={
+              attachmentDisabled
+                ? undefined
+                : "提示：可在输入框内直接粘贴截图或图片（与「添加图片」相同）"
+            }
             className="no-scrollbar w-full max-h-[200px] min-h-[60px] overflow-y-auto py-4 px-4 bg-transparent resize-none outline-none text-[16px] text-gray-800 placeholder:text-gray-400"
             rows={1}
           />
