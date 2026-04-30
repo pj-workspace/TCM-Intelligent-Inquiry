@@ -101,7 +101,7 @@ async def test_live_searx_returns_hits(monkeypatch):
         pytest.skip("设置 SEARXNG_E2E=1 且 docker compose up -d searxng 后再跑本用例")
 
     class _S:
-        searxng_url = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
+        searxng_url = os.environ.get("SEARXNG_URL", "http://127.0.0.1:9888")
         searxng_timeout_seconds = 45.0
 
     monkeypatch.setattr(searx_run, "get_settings", lambda: _S())

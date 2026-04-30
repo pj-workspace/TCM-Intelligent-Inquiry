@@ -116,11 +116,11 @@ class Settings(BaseSettings):
 
     # ── 基础设施（docker-compose 默认值见 .env.example）──────────────────────
     database_url: str = Field(
-        default="postgresql+asyncpg://tcm:tcm_secret@127.0.0.1:5433/tcm",
+        default="postgresql+asyncpg://tcm:tcm_secret@127.0.0.1:5434/tcm",
         description="异步 SQLAlchemy 连接串",
     )
     redis_url: str = Field(
-        default="redis://127.0.0.1:6379/0",
+        default="redis://127.0.0.1:6381/0",
         description="Redis 连接串",
     )
     # 异步入库：True 时走 Celery worker；False 时用 FastAPI BackgroundTasks（无需单独 worker）
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
         description="是否用 Celery 执行 ingest-async 任务",
     )
     qdrant_url: str = Field(
-        default="http://127.0.0.1:6333",
+        default="http://127.0.0.1:7333",
         description="Qdrant HTTP 地址",
     )
     # 未在工具参数中指定 kb_id 时使用；为空则自动选用数据库中第一个知识库
@@ -255,9 +255,9 @@ class Settings(BaseSettings):
         description="聊天图片单次上传最大字节（默认 8MB）",
     )
 
-    # ── SearXNG（自托管元搜索，docker compose 服务 searxng 默认映射 8888）────
+    # ── SearXNG（自托管元搜索，docker compose 服务 searxng 默认映射 9888）────
     searxng_url: str = Field(
-        default="http://127.0.0.1:8888",
+        default="http://127.0.0.1:9888",
         description="SearXNG 根 URL；设为空字符串可禁用联网检索请求",
     )
     searxng_timeout_seconds: float = Field(

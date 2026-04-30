@@ -10,9 +10,9 @@ services:
       POSTGRES_USER: tcm
       POSTGRES_PASSWORD: tcm_secret
       POSTGRES_DB: tcm
-    # 使用 5433 避免与本机已安装的 PostgreSQL（常见占用 5432）冲突
+    # 使用 5434 避免与本机 PostgreSQL（常见 5432/5433）冲突
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - tcm_pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,8 +24,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: tcm-redis
+    # 使用 6381 避免与本机 Redis 霸占 127.0.0.1:6379 时 Celery/API 误入非 Docker 实例
     ports:
-      - "6379:6379"
+      - "6381:6379"
     volumes:
       - tcm_redis_data:/data
     command: redis-server --appendonly yes
@@ -39,9 +40,10 @@ services:
     # 与 pip 的 qdrant-client 主版本尽量接近，减少兼容性告警
     image: qdrant/qdrant:v1.13.5
     container_name: tcm-qdrant
+    # 宿主 7333/7334，避免与本机可能已运行的 Qdrant 默认端口冲突
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "7333:6333"
+      - "7334:6334"
     volumes:
       - tcm_qdrant_data:/qdrant/storage
     environment:
@@ -52,7 +54,7 @@ services:
     image: docker.io/searxng/searxng:latest
     container_name: tcm-searxng
     ports:
-      - "8888:8080"
+      - "9888:8080"
     volumes:
       - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
@@ -64,10 +66,14 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
+    # 不设 pip -q：首次/依赖变更时装包较久，有输出可避免误以为 worker 挂了、日志消失
     command: >
-      sh -c "pip install --no-cache-dir -q -r requirements.txt
+      sh -c "echo '[worker] installing deps...'
+      && pip install --no-cache-dir -r requirements.txt
+      && echo '[worker] starting celery'
       && celery -A celery_app worker -l info -Q tcm"
     environment:
+      PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql+asyncpg://tcm:tcm_secret@postgres:5432/tcm
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333

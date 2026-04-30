@@ -79,7 +79,7 @@ tcm-intelligent-inquiry/
 docker compose up -d
 ```
 
-默认 Postgres 映射宿主 **`5433`**（避免与本机 5432 冲突），Redis **`6379`**，Qdrant **`6333`**。
+默认 Postgres 映射宿主 **`5434`**，Redis **`6381`**（避免与本机霸占 `127.0.0.1:6379` 的 Redis 冲突），Qdrant **`7333`**（gRPC **`7334`**），SearXNG **`9888`**。
 
 ### 2. 后端配置
 
