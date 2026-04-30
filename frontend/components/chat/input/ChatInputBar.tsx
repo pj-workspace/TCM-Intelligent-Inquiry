@@ -192,13 +192,12 @@ const IMAGE_ATTACHMENT_QUICK_PROMPTS: { label: string; prompt: string }[] = [
   },
 ];
 
-/** 附图一键话术：服务端仍含完整题库，界面每次只展示其中 2～3 条 */
 const IMAGE_QUICK_SHOW_MIN = 2;
 const IMAGE_QUICK_SHOW_MAX = 3;
 
 function pickRandomImageQuickPrompts(
   pool: readonly { label: string; prompt: string }[],
-  count: number
+  count: number,
 ): { label: string; prompt: string }[] {
   const copy = [...pool];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -345,6 +344,15 @@ export function ChatInputBar({
   const sendBlocked =
     genState !== "idle" || attachmentUploadBusy || !hasSendableContent;
   const attachmentAtCap = pendingImageUrls.length >= CHAT_PENDING_ATTACHMENT_MAX;
+
+  /** 首屏五张大卡：仅无待传图、无输入文字、未在上传时展示，避免与附件区、附图话术条抢位 */
+  const showLandingQuickPromptCards =
+    !hasStarted &&
+    pendingImageUrls.length === 0 &&
+    !attachmentUploadBusy &&
+    attachmentUploadSkeletonCount === 0 &&
+    !input.trim();
+
   const [quickPromptChoices, setQuickPromptChoices] = useState<QuickPromptItem[]>(
     initialQuickPromptsForHydration
   );
@@ -367,10 +375,10 @@ export function ChatInputBar({
         const count =
           IMAGE_QUICK_SHOW_MIN +
           Math.floor(
-            Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1)
+            Math.random() * (IMAGE_QUICK_SHOW_MAX - IMAGE_QUICK_SHOW_MIN + 1),
           );
         setImgQuickChoices(
-          pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count)
+          pickRandomImageQuickPrompts(IMAGE_ATTACHMENT_QUICK_PROMPTS, count),
         );
       }, 0);
       return () => window.clearTimeout(t);
@@ -385,9 +393,9 @@ export function ChatInputBar({
       className="absolute bottom-0 left-0 right-0 z-10 flex flex-col items-center bg-gradient-to-t from-[#fdfdfc] from-45% via-[#fdfdfc]/96 to-transparent px-4 pb-5 pt-4 md:px-8"
     >
       <div className="relative w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl">
-        {/* 快捷入口：紧贴输入框上方横排（参考元宝式布局） */}
+        {/* 首屏五大快捷卡片：仅在输入区「无图且无字」且无上传中时展示 */}
         <AnimatePresence mode="popLayout">
-          {!hasStarted && (
+          {showLandingQuickPromptCards && (
             <motion.div
               layout
               initial={{ opacity: 0, y: 8 }}
@@ -441,7 +449,7 @@ export function ChatInputBar({
               transition={{ duration: 0.22, ease: "easeOut" }}
               className="mt-2 mb-4 w-full overflow-hidden"
             >
-              <div className="flex w-full flex-col items-start gap-2 bg-transparent">
+              <div className="relative z-20 flex w-full flex-col items-start gap-2 bg-transparent">
                 {imgQuickChoices.map((item) => (
                   <motion.button
                     key={item.prompt.slice(0, 48)}

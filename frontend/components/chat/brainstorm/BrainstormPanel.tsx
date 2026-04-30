@@ -18,6 +18,7 @@ export function BrainstormPanel({
   durationSec,
   collapsed = false,
   onToggle,
+  compactTopAfterAssistant = false,
 }: BrainstormPanelProps) {
   const isOpen = !collapsed;
   const [toolIoExpanded, setToolIoExpanded] = useState<Record<string, boolean>>({});
@@ -43,7 +44,12 @@ export function BrainstormPanel({
   })();
 
   return (
-    <div className="flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl justify-start px-4 pt-1.5 pb-2 sm:px-5 md:mx-auto md:px-6 lg:px-8">
+    <div
+      className={clsx(
+        "flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl justify-start px-4 sm:px-5 md:mx-auto md:px-6 lg:px-8",
+        compactTopAfterAssistant ? "pt-0 pb-2" : "pt-1.5 pb-2",
+      )}
+    >
       <div className="w-full max-w-full">
         <button
           type="button"

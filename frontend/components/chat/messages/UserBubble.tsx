@@ -10,7 +10,7 @@ interface UserBubbleProps {
   imageUrls?: string[];
   copied: boolean;
   onCopy: () => void;
-  onEdit?: (text: string) => void;
+  onEdit?: (text: string, imageUrls?: string[]) => void;
 }
 
 /** 多图时宫内直接展示的格子数；第 4 格叠「+N」表示其余张数 */
@@ -175,7 +175,7 @@ export function UserBubble({ content, imageUrls, copied, onCopy, onEdit }: UserB
           </button>
           <button
             type="button"
-            onClick={() => onEdit?.(content)}
+            onClick={() => onEdit?.(content, imageUrls)}
             className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-black/5 transition-colors"
             title="填入输入框编辑"
             aria-label="填入输入框编辑"

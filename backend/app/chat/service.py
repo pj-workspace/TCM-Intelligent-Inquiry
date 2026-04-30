@@ -538,6 +538,26 @@ async def stream_chat(
                 )
                 await session.commit()
 
+        async def flush_assistant_segment() -> None:
+            """正文与工具交替时需在中间落库多条 assistant，否则刷新后 trace 会被 group 整条挤到正文上方。"""
+            nonlocal assistant_parts
+            if not assistant_parts:
+                return
+            text = "".join(assistant_parts)
+            assistant_parts.clear()
+            lbl = _meta_chat_model_label(resolved)
+            async with async_session_factory() as session:
+                session.add(
+                    MessageRecord(
+                        id=str(uuid.uuid4()),
+                        conversation_id=conv_id,
+                        role="assistant",
+                        content=text,
+                        model_name=lbl,
+                    )
+                )
+                await session.commit()
+
         async for event in graph.astream_events({"messages": lc_messages}, version="v2"):
             if title_task and not title_yielded and title_task.done():
                 title_yielded = True
@@ -572,6 +592,8 @@ async def stream_chat(
                             assistant_parts.append(delta)
                             yield _sse({"type": "text-delta", "textDelta": delta})
                         else:
+                            if assistant_parts:
+                                await flush_assistant_segment()
                             if thinking_t0 is None:
                                 thinking_t0 = time.monotonic()
                             thinking_buf.append(delta)
@@ -585,6 +607,7 @@ async def stream_chat(
 
             elif etype == "on_tool_start":
                 await flush_thinking_segment()
+                await flush_assistant_segment()
                 name = event.get("name") or ""
                 raw_in = data.get("input")
                 if raw_in is None:
@@ -655,19 +678,7 @@ async def stream_chat(
                     await session.commit()
 
         await flush_thinking_segment()
-        assistant_text = "".join(assistant_parts)
-        _model_label = _meta_chat_model_label(resolved)
-        async with async_session_factory() as session:
-            session.add(
-                MessageRecord(
-                    id=str(uuid.uuid4()),
-                    conversation_id=conv_id,
-                    role="assistant",
-                    content=assistant_text,
-                    model_name=_model_label,
-                )
-            )
-            await session.commit()
+        await flush_assistant_segment()
 
         if title_task and not title_yielded:
             try:

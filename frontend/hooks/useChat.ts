@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
-import { API_BASE, apiHeaders, apiJsonHeaders } from "@/lib/api";
+import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import {
   toolIoToPreview,
   groupMessagesIntoTraces,
@@ -33,6 +33,31 @@ const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
 const QWEN_CHAT_MODEL_LS_KEY = "tcm_qwen_chat_model";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** 同步应用「结束思考步」到消息列表（供与 tool-call 等同批 setState 使用） */
+function applyFinalizeThinkingStepToMessages(
+  msgs: Message[],
+  traceId: string,
+  stepId: string,
+  starts: Record<string, number>,
+): Message[] {
+  const start = starts[stepId];
+  if (start == null) return msgs;
+  const sec = Math.max(0, (Date.now() - start) / 1000);
+  delete starts[stepId];
+  return msgs.map((m) =>
+    m.type === "trace" && m.id === traceId
+      ? {
+          ...m,
+          steps: m.steps.map((step) =>
+            step.type === "thinking" && step.id === stepId
+              ? { ...step, durationSec: sec }
+              : step
+          ),
+        }
+      : m
+  );
+}
 
 /**
  * abort() + body stream 在读时中止时，不一定是 `Error/DOMException` 且 `.name=== "AbortError"`；
@@ -69,10 +94,23 @@ export function useChat(opts: {
   const router = useRouter();
   const { token, loading: authLoading } = useAuth();
 
+  const pendingChatModelRef = useRef<string | undefined>(undefined);
+  const pendingNewConversationGroupRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const followUpsAbortRef = useRef<AbortController | null>(null);
+  const conversationIdRef = useRef<string | null>(null);
+  const thinkingStepStartedAt = useRef<Record<string, number>>({});
+  const traceStartedAt = useRef<Record<string, number>>({});
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasStarted, setHasStarted] = useState(false);
   const [genState, setGenState] = useState<GenerationState>("idle");
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationIdState] = useState<string | null>(null);
+
+  const setConversationId = useCallback((next: string | null) => {
+    conversationIdRef.current = next;
+    setConversationIdState(next);
+  }, []);
   const [serverConversations, setServerConversations] = useState<ServerConversation[]>([]);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -92,12 +130,11 @@ export function useChat(opts: {
     }
   });
 
-  const pendingChatModelRef = useRef<string | undefined>(undefined);
-  const pendingNewConversationGroupRef = useRef<string | null>(null);
-
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const thinkingStepStartedAt = useRef<Record<string, number>>({});
-  const traceStartedAt = useRef<Record<string, number>>({});
+  const [followUpSuggestions, setFollowUpSuggestions] = useState<{
+    messageId: string;
+    items: string[];
+  } | null>(null);
+  const [followUpsLoadingForId, setFollowUpsLoadingForId] = useState<string | null>(null);
 
   // ── Feature toggles (passed in from caller via setter pattern) ─────────────
   const [deepThinkEnabled, setDeepThinkEnabled] = useState(false);
@@ -110,9 +147,7 @@ export function useChat(opts: {
   /** 已上传待发送的图片 URL（OSS 签名） */
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([]);
   const [attachmentUploadBusy, setAttachmentUploadBusy] = useState(false);
-  /** 本次选择、正在上传的文件个数，用于骨架占位 */
   const [attachmentUploadSkeletonCount, setAttachmentUploadSkeletonCount] = useState(0);
-  /** 与骨架一一对应，各文件上传进度 0~1（XHR 每次 onprogress 即时更新） */
   const [attachmentUploadSlotProgress, setAttachmentUploadSlotProgress] = useState<number[]>([]);
 
   const attachmentUploadSlotProgressRef = useRef<number[]>([]);
@@ -122,6 +157,13 @@ export function useChat(opts: {
     setAttachmentUploadSlotProgress([]);
     setAttachmentUploadBusy(false);
     setAttachmentUploadSkeletonCount(0);
+  }, []);
+
+  const resetFollowUpSuggestions = useCallback(() => {
+    followUpsAbortRef.current?.abort();
+    followUpsAbortRef.current = null;
+    setFollowUpSuggestions(null);
+    setFollowUpsLoadingForId(null);
   }, []);
 
   const setSelectedChatModelId = useCallback((id: string) => {
@@ -264,23 +306,9 @@ export function useChat(opts: {
   // ── Thinking / trace finalization ──────────────────────────────────────────
   const finalizeThinkingStep = useCallback((traceId: string | null, stepId: string | null) => {
     if (!traceId || !stepId) return;
-    const start = thinkingStepStartedAt.current[stepId];
-    if (start == null) return;
-    const sec = Math.max(0, (Date.now() - start) / 1000);
-    delete thinkingStepStartedAt.current[stepId];
+    if (thinkingStepStartedAt.current[stepId] == null) return;
     setMessages((prev) =>
-      prev.map((m) =>
-        m.type === "trace" && m.id === traceId
-          ? {
-              ...m,
-              steps: m.steps.map((step) =>
-                step.type === "thinking" && step.id === stepId
-                  ? { ...step, durationSec: sec }
-                  : step
-              ),
-            }
-          : m
-      )
+      applyFinalizeThinkingStepToMessages(prev, traceId, stepId, thinkingStepStartedAt.current)
     );
   }, []);
 
@@ -313,6 +341,8 @@ export function useChat(opts: {
     ) => {
       if (!token) return;
 
+      resetFollowUpSuggestions();
+
       pendingChatModelRef.current = undefined;
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
@@ -336,11 +366,12 @@ export function useChat(opts: {
       setGenState("waiting");
 
       const startTime = Date.now();
-      const currentAssistantMsgId = Date.now().toString() + "-msg";
+      let currentAssistantMsgId = Date.now().toString() + "-msg";
       let currentTraceId: string | null = null;
       let openThinkingStepId: string | null = null;
-      let toolRunStartedAt: number | null = null;
       let hasAssistantMsg = false;
+      let streamEndedWithSSEError = false;
+      let assistantReplyAccum = "";
 
       try {
         const preferredGid =
@@ -354,7 +385,7 @@ export function useChat(opts: {
           },
           body: JSON.stringify({
             message: userText,
-            conversation_id: conversationId,
+            conversation_id: conversationIdRef.current ?? conversationId,
             regenerate_last_reply: streamOpts?.regenerateLastReply ?? false,
             agent_id: localStorage.getItem("tcm_default_agent_id") ?? undefined,
             deep_think: deepThinkEnabled,
@@ -381,11 +412,82 @@ export function useChat(opts: {
         let buffer = "";
         if (!reader) return;
 
-        const ensureCurrentTraceId = () => {
-          if (currentTraceId != null) return currentTraceId;
-          currentTraceId = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-          traceStartedAt.current[currentTraceId] = Date.now();
-          return currentTraceId;
+        const ensureFreshTraceBeforeToolOrThink = (prev: Message[], base: string | null) => {
+          if (!base) {
+            currentTraceId = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+            traceStartedAt.current[currentTraceId] = Date.now();
+            return currentTraceId;
+          }
+          const rw = prev.find(
+            (m): m is TraceMessage => m.type === "trace" && m.id === base
+          );
+          if (hasAssistantMsg && rw?.status === "done") {
+            currentTraceId = `trace-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+            traceStartedAt.current[currentTraceId] = Date.now();
+            return currentTraceId;
+          }
+          currentTraceId = base;
+          return base;
+        };
+
+        const continuationAssistantBubble = (): ChatMessage => ({
+          id: `${Date.now().toString()}-msg-${Math.random().toString(36).slice(2, 9)}`,
+          role: "assistant",
+          type: "message",
+          content: "",
+          modelName: pendingChatModelRef.current,
+        });
+
+        /** 按 SSE 时间在「已到手的正文 ↔ 占位接续气泡」之间插入新头脑风暴块 */
+        const insertNewStreamingTrace = (
+          prev: Message[],
+          traceMsg: TraceMessage,
+        ): Message[] => {
+          if (!hasAssistantMsg) return [...prev, traceMsg];
+
+          const emptyPhIdx = prev.findLastIndex(
+            (m): m is ChatMessage =>
+              m.type === "message" &&
+              m.role === "assistant" &&
+              m.id === currentAssistantMsgId &&
+              !(m.content || "").trim(),
+          );
+          let lastTraceBeforePlaceholder = -1;
+          if (emptyPhIdx !== -1) {
+            for (let i = 0; i < emptyPhIdx; i++) {
+              if (prev[i].type === "trace") lastTraceBeforePlaceholder = i;
+            }
+          }
+          if (
+            emptyPhIdx !== -1 &&
+            lastTraceBeforePlaceholder !== -1 &&
+            lastTraceBeforePlaceholder < emptyPhIdx
+          ) {
+            return [
+              ...prev.slice(0, lastTraceBeforePlaceholder + 1),
+              traceMsg,
+              ...prev.slice(lastTraceBeforePlaceholder + 1),
+            ];
+          }
+
+          const nonemptyAsIdx = prev.findLastIndex(
+            (m): m is ChatMessage =>
+              m.type === "message" &&
+              m.role === "assistant" &&
+              !!(m.content || "").trim(),
+          );
+          if (nonemptyAsIdx !== -1) {
+            const cont = continuationAssistantBubble();
+            currentAssistantMsgId = cont.id;
+            return [
+              ...prev.slice(0, nonemptyAsIdx + 1),
+              traceMsg,
+              cont,
+              ...prev.slice(nonemptyAsIdx + 1),
+            ];
+          }
+
+          return [...prev, traceMsg];
         };
 
         while (true) {
@@ -427,31 +529,29 @@ export function useChat(opts: {
                 }
               } else if (data.type === "thinking-delta") {
                 const piece = data.textDelta ?? "";
-                const traceId = ensureCurrentTraceId();
                 if (openThinkingStepId === null) {
                   const nid = `think-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
                   openThinkingStepId = nid;
                   thinkingStepStartedAt.current[nid] = Date.now();
                   setGenState("thinking");
                   setMessages((prev) => {
+                    const traceIdResolved = ensureFreshTraceBeforeToolOrThink(prev, currentTraceId);
                     const trace = prev.find(
-                      (msg): msg is TraceMessage => msg.type === "trace" && msg.id === traceId
+                      (msg): msg is TraceMessage =>
+                        msg.type === "trace" && msg.id === traceIdResolved
                     );
                     if (!trace) {
-                      return [
-                        ...prev,
-                        {
-                          id: traceId,
-                          type: "trace",
-                          steps: [{ id: nid, type: "thinking", content: piece }],
-                          status: "streaming",
-                          totalDurationSec: undefined,
-                          collapsed: false,
-                        },
-                      ];
+                      return insertNewStreamingTrace(prev, {
+                        id: traceIdResolved,
+                        type: "trace",
+                        steps: [{ id: nid, type: "thinking", content: piece }],
+                        status: "streaming",
+                        totalDurationSec: undefined,
+                        collapsed: false,
+                      });
                     }
                     return prev.map((msg) =>
-                      msg.type === "trace" && msg.id === traceId
+                      msg.type === "trace" && msg.id === traceIdResolved
                         ? {
                             ...msg,
                             status: "streaming",
@@ -463,9 +563,10 @@ export function useChat(opts: {
                 } else {
                   setGenState("thinking");
                   const tid = openThinkingStepId;
-                  setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.type === "trace" && msg.id === traceId
+                  setMessages((prev) => {
+                    const traceIdResolved = ensureFreshTraceBeforeToolOrThink(prev, currentTraceId);
+                    return prev.map((msg) =>
+                      msg.type === "trace" && msg.id === traceIdResolved
                         ? {
                             ...msg,
                             steps: msg.steps.map((step) =>
@@ -475,20 +576,28 @@ export function useChat(opts: {
                             ),
                           }
                         : msg
-                    )
-                  );
+                    );
+                  });
                 }
               } else if (data.type === "tool-call") {
-                const traceId = ensureCurrentTraceId();
-                finalizeThinkingStep(traceId, openThinkingStepId);
+                const stepSnap = openThinkingStepId;
                 openThinkingStepId = null;
                 const runKey =
                   data.runId ??
                   `run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const rowId = `tool-${runKey}`;
-                toolRunStartedAt = Date.now();
                 setGenState("tool");
                 setMessages((prev) => {
+                  const traceIdResolved = ensureFreshTraceBeforeToolOrThink(prev, currentTraceId);
+                  let base = prev;
+                  if (stepSnap) {
+                    base = applyFinalizeThinkingStepToMessages(
+                      prev,
+                      traceIdResolved,
+                      stepSnap,
+                      thinkingStepStartedAt.current,
+                    );
+                  }
                   const toolStep: ToolStep = {
                     id: rowId,
                     type: "tool",
@@ -498,24 +607,21 @@ export function useChat(opts: {
                     runId: data.runId ?? runKey,
                     inputPreview: toolIoToPreview((data as { input?: unknown }).input),
                   };
-                  const trace = prev.find(
-                    (msg): msg is TraceMessage => msg.type === "trace" && msg.id === traceId
+                  const trace = base.find(
+                    (msg): msg is TraceMessage => msg.type === "trace" && msg.id === traceIdResolved
                   );
                   if (!trace) {
-                    return [
-                      ...prev,
-                      {
-                        id: traceId,
-                        type: "trace",
-                        steps: [toolStep],
-                        status: "streaming",
-                        totalDurationSec: undefined,
-                        collapsed: false,
-                      },
-                    ];
+                    return insertNewStreamingTrace(base, {
+                      id: traceIdResolved,
+                      type: "trace",
+                      steps: [toolStep],
+                      status: "streaming",
+                      totalDurationSec: undefined,
+                      collapsed: false,
+                    });
                   }
-                  return prev.map((msg) =>
-                    msg.type === "trace" && msg.id === traceId
+                  return base.map((msg) =>
+                    msg.type === "trace" && msg.id === traceIdResolved
                       ? { ...msg, status: "streaming", steps: [...msg.steps, toolStep] }
                       : msg
                   );
@@ -527,10 +633,6 @@ export function useChat(opts: {
                   typeof data.outputPreview === "string" && data.outputPreview
                     ? data.outputPreview
                     : undefined;
-                const toolElapsed =
-                  toolRunStartedAt != null ? Date.now() - toolRunStartedAt : 999;
-                toolRunStartedAt = null;
-                if (toolElapsed < 420) await delay(420 - toolElapsed);
                 setMessages((prev) =>
                   prev.map((msg) => {
                     if (msg.type !== "trace" || msg.id !== currentTraceId) return msg;
@@ -563,7 +665,6 @@ export function useChat(opts: {
                     };
                   })
                 );
-                await delay(150);
               } else if (data.type === "text-delta") {
                 finalizeThinkingStep(currentTraceId, openThinkingStepId);
                 openThinkingStepId = null;
@@ -573,6 +674,9 @@ export function useChat(opts: {
                   // 从头脑风暴切到正文时布局剧变，避免 scrollTop 钳位被误判为上滑而停止跟滚
                   autoFollowMainRef.current = true;
                 }
+                const piece =
+                  typeof data.textDelta === "string" ? data.textDelta : "";
+                assistantReplyAccum += piece;
                 if (!hasAssistantMsg) {
                   hasAssistantMsg = true;
                   setGenState("typing");
@@ -582,7 +686,7 @@ export function useChat(opts: {
                       id: currentAssistantMsgId,
                       role: "assistant",
                       type: "message",
-                      content: data.textDelta,
+                      content: piece,
                       modelName: pendingChatModelRef.current,
                     },
                   ]);
@@ -591,7 +695,7 @@ export function useChat(opts: {
                   setMessages((prev) =>
                     prev.map((msg) =>
                       msg.type === "message" && msg.id === currentAssistantMsgId
-                        ? { ...msg, content: (msg.content || "") + data.textDelta }
+                        ? { ...msg, content: (msg.content || "") + piece }
                         : msg
                     )
                   );
@@ -621,6 +725,7 @@ export function useChat(opts: {
                 }
                 setIsGeneratingTitle(false);
               } else if (data.type === "error") {
+                streamEndedWithSSEError = true;
                 console.error("Backend error:", data.message);
                 finalizeThinkingStep(currentTraceId, openThinkingStepId);
                 openThinkingStepId = null;
@@ -646,6 +751,79 @@ export function useChat(opts: {
 
         finalizeThinkingStep(currentTraceId, openThinkingStepId);
         if (currentTraceId) finalizeTrace(currentTraceId, false);
+
+        if (
+          !abortController.signal.aborted &&
+          !streamEndedWithSSEError &&
+          hasAssistantMsg &&
+          token
+        ) {
+          const body = assistantReplyAccum.trim();
+          const looksLikeHardError =
+            body.startsWith("**Error:**") || body.startsWith("**网络错误");
+          if (body.length >= 12 && !looksLikeHardError) {
+            followUpsAbortRef.current?.abort();
+            const fa = new AbortController();
+            followUpsAbortRef.current = fa;
+            const targetId = currentAssistantMsgId;
+            setFollowUpsLoadingForId(targetId);
+            void (async () => {
+              try {
+                let anon: string | undefined;
+                try {
+                  anon = localStorage.getItem("tcm_anon_secret") ?? undefined;
+                } catch {
+                  anon = undefined;
+                }
+                const cid = conversationIdRef.current;
+                const payload: Record<string, unknown> = {
+                  assistant_reply: body,
+                };
+                if (cid) {
+                  payload.conversation_id = cid;
+                  if (anon) payload.anon_session_secret = anon;
+                }
+                if (effectiveChatModelForRequest) {
+                  payload.chat_model = effectiveChatModelForRequest;
+                }
+                const r = await fetch(`${API_BASE}/api/chat/follow-up-suggestions`, {
+                  method: "POST",
+                  headers: apiJsonHeaders(token),
+                  body: JSON.stringify(payload),
+                  signal: fa.signal,
+                });
+                if (fa.signal.aborted) return;
+                if (!r.ok) {
+                  if (process.env.NODE_ENV === "development") {
+                    console.warn(
+                      "[useChat] follow-up-suggestions:",
+                      r.status,
+                      await parseApiError(r)
+                    );
+                  }
+                  setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
+                  return;
+                }
+                const raw = (await r.json()) as { suggestions?: unknown };
+                const items = Array.isArray(raw.suggestions)
+                  ? raw.suggestions.filter((x): x is string => typeof x === "string")
+                  : [];
+                if (fa.signal.aborted) return;
+                setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
+                if (items.length > 0) {
+                  setFollowUpSuggestions({ messageId: targetId, items });
+                }
+              } catch (e) {
+                if (fa.signal.aborted || isLikelyUserAbort(e, fa.signal)) return;
+                if (process.env.NODE_ENV === "development") {
+                  console.warn("[useChat] follow-up-suggestions failed", e);
+                }
+                setFollowUpsLoadingForId((cur) => (cur === targetId ? null : cur));
+              }
+            })();
+          }
+        }
+
         await refreshServerConversations();
         if (!abortController.signal.aborted) {
           setGenState("idle");
@@ -724,6 +902,7 @@ export function useChat(opts: {
       finalizeTrace,
       refreshServerConversations,
       getPreferredGroupForNewConversation,
+      resetFollowUpSuggestions,
     ]
   );
 
@@ -904,6 +1083,17 @@ export function useChat(opts: {
     setPendingImageUrls((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  /** 从历史用户气泡恢复待发送图片（点击铅笔编辑时） */
+  const applyComposerAttachmentsFromUserMessage = useCallback(
+    (imageUrls?: string[]) => {
+      cancelAttachmentUploadAnimations();
+      const cleaned = (imageUrls ?? []).map((u) => u.trim()).filter(Boolean);
+      const deduped = [...new Set(cleaned)];
+      setPendingImageUrls(deduped.slice(0, CHAT_PENDING_ATTACHMENT_MAX));
+    },
+    [cancelAttachmentUploadAnimations],
+  );
+
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
@@ -915,6 +1105,7 @@ export function useChat(opts: {
       if (idx <= 0) return;
       let userIdx = -1;
       let userText: string | null = null;
+      let regenerateImageUrls: string[] | undefined;
       for (let i = idx - 1; i >= 0; i--) {
         const m = messages[i];
         if (m.type !== "message" || m.role !== "user") continue;
@@ -923,6 +1114,8 @@ export function useChat(opts: {
         const hasPic = (um.imageUrls?.length ?? 0) > 0;
         if (!hasTxt && !hasPic) continue;
         userText = hasTxt ? um.content.trim() : "（附图）";
+        const raw = (um.imageUrls ?? []).map((u) => u.trim()).filter(Boolean);
+        regenerateImageUrls = raw.length ? raw : undefined;
         userIdx = i;
         break;
       }
@@ -939,12 +1132,16 @@ export function useChat(opts: {
         }
         return prev.slice(0, userIdx + 1);
       });
-      void runChatStream(userText, false, { regenerateLastReply: true });
+      void runChatStream(userText, false, {
+        regenerateLastReply: true,
+        ...(regenerateImageUrls?.length ? { imageUrls: regenerateImageUrls } : {}),
+      });
     },
     [genState, token, messages, runChatStream]
   );
 
   const handleNewChat = useCallback(() => {
+    resetFollowUpSuggestions();
     localStorage.removeItem("tcm_conversation_id");
     localStorage.removeItem("tcm_anon_secret");
     setConversationId(null);
@@ -963,11 +1160,13 @@ export function useChat(opts: {
     refreshServerConversations,
     onNewChatScrollReset,
     cancelAttachmentUploadAnimations,
+    resetFollowUpSuggestions,
   ]);
 
   const handleSelectConversation = useCallback(
     async (id: string) => {
       if (genState !== "idle" || !token) return;
+      resetFollowUpSuggestions();
       setIsGeneratingTitle(false);
       setMessages([]);
       onNewChatScrollReset();
@@ -980,7 +1179,7 @@ export function useChat(opts: {
         console.error(e);
       }
     },
-    [genState, token, loadMessagesWithToken, onNewChatScrollReset]
+    [genState, token, loadMessagesWithToken, onNewChatScrollReset, resetFollowUpSuggestions]
   );
 
   const openDeleteDialog = useCallback(
@@ -1187,6 +1386,7 @@ export function useChat(opts: {
   /** 未登录：清空服务端会话缓存与本地残留匿名状态 */
   useEffect(() => {
     if (authLoading || token) return;
+    resetFollowUpSuggestions();
     setServerConversations([]);
     setConversationFolders([]);
     localStorage.removeItem("tcm_conversation_id");
@@ -1200,7 +1400,7 @@ export function useChat(opts: {
     cancelAttachmentUploadAnimations();
     thinkingStepStartedAt.current = {};
     traceStartedAt.current = {};
-  }, [authLoading, token, cancelAttachmentUploadAnimations]);
+  }, [authLoading, token, cancelAttachmentUploadAnimations, resetFollowUpSuggestions]);
 
   return {
     // state
@@ -1212,6 +1412,8 @@ export function useChat(opts: {
     serverConversations,
     isGeneratingTitle,
     lastAssistantMessageId,
+    followUpSuggestions,
+    followUpsLoadingForId,
     deleteTargetId,
     deletePending,
     bulkDeletePending,
@@ -1234,6 +1436,7 @@ export function useChat(opts: {
     attachmentUploadSlotProgress,
     pushImageAttachments,
     removePendingImageUrlAt,
+    applyComposerAttachmentsFromUserMessage,
     // handlers
     handleSend,
     handleStop,

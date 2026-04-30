@@ -89,6 +89,8 @@ export function HomePageClient() {
     pinnedIds,
     isGeneratingTitle,
     lastAssistantMessageId,
+    followUpSuggestions,
+    followUpsLoadingForId,
     deleteTargetId,
     deletePending,
     bulkDeletePending,
@@ -108,6 +110,7 @@ export function HomePageClient() {
     attachmentUploadSlotProgress,
     pushImageAttachments,
     removePendingImageUrlAt,
+    applyComposerAttachmentsFromUserMessage,
     handleStop,
     handleRegenerateAssistant,
     handleNewChat,
@@ -398,7 +401,7 @@ export function HomePageClient() {
     async (prompt: string) => {
       await chat.handleSend(prompt, setInput);
     },
-    [chat]
+    [chat],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -759,7 +762,7 @@ export function HomePageClient() {
                   !viewingGroupLanding
                     ? [
                         !hasStarted ? "flex min-h-0 flex-col" : "",
-                        "pb-[clamp(8.5rem,20vh,13.5rem)] md:pb-[clamp(9rem,18vh,12.5rem)]",
+                        "pb-[clamp(7rem,14vh,10.5rem)] md:pb-[clamp(7.5rem,12vh,10rem)]",
                       ].join(" ")
                     : ""
                 }`}
@@ -775,8 +778,11 @@ export function HomePageClient() {
                 >
                   {messages.map((msg, idx) => {
                     const prevMsg = messages[idx - 1];
+                    const nextMsg = messages[idx + 1];
                     if (msg.type === "message") {
                       const afterTrace = prevMsg?.type === "trace";
+                      const beforeTrace =
+                        msg.role === "assistant" && nextMsg?.type === "trace";
                       return (
                         <motion.div
                           key={msg.id}
@@ -794,8 +800,29 @@ export function HomePageClient() {
                             }
                             modelName={msg.modelName}
                             noTopPad={afterTrace && msg.role === "assistant"}
+                            noBottomPad={beforeTrace}
                             interrupted={msg.interrupted}
                             assistantActionsDisabled={genState !== "idle"}
+                            followUpsLoading={
+                              msg.role === "assistant" &&
+                              msg.id === lastAssistantMessageId &&
+                              followUpsLoadingForId === msg.id
+                            }
+                            followUpItems={
+                              msg.role === "assistant" &&
+                              msg.id === lastAssistantMessageId &&
+                              followUpSuggestions?.messageId === msg.id
+                                ? followUpSuggestions.items
+                                : undefined
+                            }
+                            onFollowUpClick={
+                              msg.role === "assistant" && msg.id === lastAssistantMessageId
+                                ? (text) => {
+                                    setInput(text);
+                                    requestAnimationFrame(() => inputRef.current?.focus());
+                                  }
+                                : undefined
+                            }
                             onAssistantRegenerate={
                               msg.role === "assistant" && msg.id === lastAssistantMessageId
                                 ? () => handleRegenerateAssistant(msg.id)
@@ -803,7 +830,8 @@ export function HomePageClient() {
                             }
                             onUserEdit={
                               msg.role === "user"
-                                ? (text) => {
+                                ? (text, imageUrls) => {
+                                    applyComposerAttachmentsFromUserMessage(imageUrls);
                                     setInput(text);
                                     requestAnimationFrame(() => inputRef.current?.focus());
                                   }
@@ -826,6 +854,9 @@ export function HomePageClient() {
                             isStreaming={msg.status === "streaming"}
                             durationSec={msg.totalDurationSec}
                             collapsed={msg.collapsed}
+                            compactTopAfterAssistant={
+                              prevMsg?.type === "message" && prevMsg.role === "assistant"
+                            }
                             onToggle={() =>
                               setMessages((prev) =>
                                 prev.map((item) =>
@@ -859,10 +890,10 @@ export function HomePageClient() {
                     )}
                   </AnimatePresence>
 
-                  {/* 需 ≥ 底部输入条可视高度，否则最后几条消息会顶在输入框下沿（输入条为 absolute 叠在滚动区上） */}
+                  {/* 略大于输入条区域即可；过大则追问条与输入框之间空白过多 */}
                   <div
                     ref={messagesEndRef}
-                    className="min-h-[min(42vh,13.5rem)] shrink-0 md:min-h-[min(38vh,14rem)]"
+                    className="min-h-[min(18vh,8.5rem)] shrink-0 md:min-h-[min(16vh,9rem)]"
                     aria-hidden
                   />
                 </motion.div>

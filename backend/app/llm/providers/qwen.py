@@ -67,6 +67,8 @@ class DashScopeChatOpenAI(ChatOpenAI):
 def build_qwen_chat(
     enable_thinking: bool = False,
     chat_model_override: str | None = None,
+    *,
+    response_format_json_object: bool = False,
 ) -> ChatOpenAI:
     s = get_settings()
     key = (s.dashscope_api_key or "").strip()
@@ -85,6 +87,9 @@ def build_qwen_chat(
     # 避免全局开关覆盖按钮关闭的情况。
     if enable_thinking:
         kwargs["extra_body"] = {"enable_thinking": True}
+    if response_format_json_object:
+        # DashScope 要求 messages 中须出现单词 json/json（见官方 structured output 文档）
+        kwargs.setdefault("model_kwargs", {})["response_format"] = {"type": "json_object"}
     return DashScopeChatOpenAI(**kwargs)
 
 

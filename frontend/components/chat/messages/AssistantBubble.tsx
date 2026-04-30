@@ -2,6 +2,7 @@
 
 import type { RefObject } from "react";
 import clsx from "clsx";
+import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -20,12 +21,36 @@ import {
   exportAssistantAsPdf,
 } from "@/lib/markdown-utils";
 
+/** 简洁「回车」符（用户提供的 16×16 路径，随文字色） */
+function FollowUpEnterIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden
+    >
+      <path
+        d="M2.7998 3.90039C3.07595 3.90039 3.2998 4.12425 3.2998 4.40039V6.40039C3.2998 7.44973 4.15085 8.30078 5.2002 8.30078H11.9941L10.0469 6.35352L9.98242 6.27539C9.85456 6.08135 9.87613 5.81723 10.0469 5.64648C10.2176 5.47584 10.4818 5.45416 10.6758 5.58203L10.7539 5.64648L13.5537 8.44629C13.5595 8.4521 13.5639 8.45981 13.5693 8.46582C13.5804 8.47802 13.5908 8.49066 13.6006 8.50391C13.6096 8.51608 13.6182 8.52825 13.626 8.54102C13.6337 8.55358 13.6399 8.56682 13.6465 8.58008C13.6536 8.59442 13.6614 8.60822 13.667 8.62305C13.6726 8.63764 13.6765 8.65276 13.6807 8.66797C13.6845 8.68197 13.6888 8.69574 13.6914 8.70996C13.6968 8.73945 13.7002 8.76974 13.7002 8.80078V8.80566C13.6998 8.84424 13.6929 8.88225 13.6836 8.91992C13.6786 8.94025 13.6734 8.96023 13.666 8.97949C13.6616 8.99091 13.6556 9.00156 13.6504 9.0127C13.6423 9.02981 13.6339 9.04652 13.624 9.0625C13.6177 9.07262 13.6106 9.08205 13.6035 9.0918C13.5911 9.10894 13.5779 9.12521 13.5635 9.14062C13.5598 9.14449 13.5575 9.14954 13.5537 9.15332L10.7539 11.9531C10.5586 12.1484 10.2421 12.1484 10.0469 11.9531C9.85214 11.7578 9.85179 11.4412 10.0469 11.2461L11.9922 9.30078H5.2002C3.59857 9.30078 2.2998 8.00202 2.2998 6.40039V4.40039C2.2998 4.12425 2.52366 3.90039 2.7998 3.90039Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 interface AssistantBubbleProps {
   content: string;
   modelName?: string;
   assistantActionsDisabled?: boolean;
   onAssistantRegenerate?: () => void;
+  followUpsLoading?: boolean;
+  followUpItems?: string[];
+  onFollowUpClick?: (text: string) => void;
   noTopPad?: boolean;
+  noBottomPad?: boolean;
   interrupted?: boolean;
   copied: boolean;
   onCopy: () => void;
@@ -41,7 +66,11 @@ export function AssistantBubble({
   modelName,
   assistantActionsDisabled,
   onAssistantRegenerate,
+  followUpsLoading,
+  followUpItems,
+  onFollowUpClick,
   noTopPad,
+  noBottomPad,
   interrupted,
   copied,
   onCopy,
@@ -51,11 +80,16 @@ export function AssistantBubble({
   onMenuToggle,
   menuRef,
 }: AssistantBubbleProps) {
+  const showFollowUpRegion =
+    Boolean(followUpsLoading) ||
+    !!(followUpItems && followUpItems.length > 0 && onFollowUpClick);
+
   return (
     <div
       className={clsx(
         "flex w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl mx-auto px-4 sm:px-5 md:px-6 lg:px-8 justify-start",
-        noTopPad ? "pt-0 pb-4" : "py-4"
+        noTopPad ? "pt-0" : "pt-4",
+        noBottomPad ? "pb-1" : "pb-4",
       )}
     >
       <div className="flex min-w-0 w-full max-w-full flex-col items-start gap-2">
@@ -156,6 +190,93 @@ export function AssistantBubble({
                 </div>
               )}
             </div>
+          </div>
+        )}
+        {showFollowUpRegion && (
+          <div
+            className="mt-2 flex w-full flex-col items-start gap-2 md:max-w-[68ch]"
+            aria-busy={followUpsLoading || undefined}
+            aria-label={followUpsLoading ? "追问建议加载中" : undefined}
+          >
+            <AnimatePresence mode="wait">
+              {followUpsLoading ? (
+                <motion.div
+                  key="follow-skel"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-col items-start gap-2"
+                >
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className={clsx(
+                        "relative inline-flex max-w-[min(100%,26rem)] w-fit shrink-0 overflow-hidden rounded-2xl",
+                        "border border-[#e2ddd3] bg-white px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+                      )}
+                      aria-hidden
+                    >
+                      <div
+                        className={clsx(
+                          "relative h-3.5 overflow-hidden rounded-md bg-neutral-200/88",
+                          i === 0 && "w-[13rem]",
+                          i === 1 && "w-[11rem]",
+                          i === 2 && "w-[12rem]"
+                        )}
+                      >
+                        <motion.div
+                          className="pointer-events-none absolute inset-y-0 w-[70%] -skew-x-12 bg-gradient-to-r from-transparent via-white/90 to-transparent"
+                          initial={false}
+                          animate={{ left: ["-75%", "115%"] }}
+                          transition={{
+                            duration: 1.45,
+                            repeat: Infinity,
+                            ease: "linear",
+                            repeatDelay: 0.05,
+                            delay: i * 0.32,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="follow-items"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.25 }}
+                  className="flex flex-col items-start gap-2"
+                >
+                  {(followUpItems ?? []).map((text, idx) => (
+                    <motion.button
+                      key={`${idx}-${text.slice(0, 24)}`}
+                      type="button"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 380,
+                        damping: 28,
+                        delay: idx * 0.06,
+                      }}
+                      onClick={() => onFollowUpClick?.(text)}
+                      className={clsx(
+                        "inline-flex max-w-[min(100%,26rem)] w-fit shrink-0 items-start gap-2 rounded-2xl border border-[#e2ddd3] bg-white px-3 py-2.5",
+                        "text-left text-[13px] leading-snug text-[#3d3d3d]",
+                        "shadow-[0_1px_2px_rgba(0,0,0,0.05)]",
+                        "hover:border-[#cfc5b8] hover:bg-[#fcfbf9] hover:shadow-sm",
+                        "active:scale-[0.995] transition-[transform,background-color,border-color,box-shadow] duration-150"
+                      )}
+                    >
+                      <FollowUpEnterIcon className="mt-[3px] h-4 w-4 shrink-0 text-neutral-400" />
+                      <span className="min-w-0 flex-1 break-words">{text}</span>
+                    </motion.button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
       </div>

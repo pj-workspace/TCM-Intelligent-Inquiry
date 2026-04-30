@@ -118,3 +118,26 @@ class MessageItem(BaseModel):
     created_at: datetime
     duration_sec: float | None = None
     model_name: str | None = None
+
+
+class FollowUpSuggestionsRequest(BaseModel):
+    """根据助手正文生成追问建议（独立于主 SSE）。"""
+
+    assistant_reply: str = Field(..., description="已完成的一条助手气泡全文")
+    conversation_id: str | None = Field(
+        default=None,
+        description="可选；传入时校验匿名会话与归属",
+    )
+    anon_session_secret: str | None = Field(
+        default=None,
+        description="匿名会话凭证；与对话接口一致",
+    )
+    chat_model: str | None = Field(
+        default=None,
+        description="可选；不传则用全局默认追问模型配置",
+        max_length=200,
+    )
+
+
+class FollowUpSuggestionsResponse(BaseModel):
+    suggestions: list[str] = Field(default_factory=list, description="最多 3 条，每条 ≤80 字")

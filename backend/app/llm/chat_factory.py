@@ -9,6 +9,8 @@ from app.core.config import get_settings
 def build_chat_model(
     enable_thinking: bool = False,
     chat_model_override: str | None = None,
+    *,
+    response_format_json_object: bool = False,
 ) -> BaseChatModel:
     s = get_settings()
     p = (s.llm_provider or "qwen").strip().lower()
@@ -19,6 +21,7 @@ def build_chat_model(
         return build_qwen_chat(
             enable_thinking=enable_thinking,
             chat_model_override=chat_model_override,
+            response_format_json_object=response_format_json_object,
         )
 
     if p == "openai":
@@ -26,12 +29,15 @@ def build_chat_model(
         if not key:
             raise ValueError("llm_provider=openai 时请配置 OPENAI_API_KEY")
         base = (s.openai_base_url or "").strip() or "https://api.openai.com/v1"
-        return ChatOpenAI(
-            model=s.openai_chat_model,
-            api_key=key,
-            base_url=base.rstrip("/"),
-            temperature=0.2,
-        )
+        kw: dict = {
+            "model": s.openai_chat_model,
+            "api_key": key,
+            "base_url": base.rstrip("/"),
+            "temperature": 0.2,
+        }
+        if response_format_json_object:
+            kw["model_kwargs"] = {"response_format": {"type": "json_object"}}
+        return ChatOpenAI(**kw)
 
     if p == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -58,12 +64,15 @@ def build_chat_model(
         if not key:
             raise ValueError("llm_provider=glm 时请配置 ZHIPU_API_KEY（智谱 AI）")
         base = (s.glm_base_url or "").strip() or "https://open.bigmodel.cn/api/paas/v4"
-        return ChatOpenAI(
-            model=s.glm_chat_model,
-            api_key=key,
-            base_url=base.rstrip("/"),
-            temperature=0.2,
-        )
+        kw: dict = {
+            "model": s.glm_chat_model,
+            "api_key": key,
+            "base_url": base.rstrip("/"),
+            "temperature": 0.2,
+        }
+        if response_format_json_object:
+            kw["model_kwargs"] = {"response_format": {"type": "json_object"}}
+        return ChatOpenAI(**kw)
 
     if p == "deepseek":
         key = (s.deepseek_api_key or "").strip()
@@ -72,12 +81,15 @@ def build_chat_model(
         base = (s.deepseek_base_url or "").strip() or "https://api.deepseek.com/v1"
         # deepseek-reasoner 是独立的推理模型，深度思考时自动切换
         model = "deepseek-reasoner" if enable_thinking else s.deepseek_chat_model
-        return ChatOpenAI(
-            model=model,
-            api_key=key,
-            base_url=base.rstrip("/"),
-            temperature=0.2,
-        )
+        kw: dict = {
+            "model": model,
+            "api_key": key,
+            "base_url": base.rstrip("/"),
+            "temperature": 0.2,
+        }
+        if response_format_json_object:
+            kw["model_kwargs"] = {"response_format": {"type": "json_object"}}
+        return ChatOpenAI(**kw)
 
     raise ValueError(
         f"不支持的 llm_provider: {p!r}，可选: qwen, openai, anthropic, glm, deepseek"

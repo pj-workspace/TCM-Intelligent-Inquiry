@@ -23,6 +23,8 @@ export interface BrainstormPanelProps {
   durationSec?: number;
   collapsed?: boolean;
   onToggle?: () => void;
+  /** 紧跟在助手正文气泡后时使用，减小与上文的空隙 */
+  compactTopAfterAssistant?: boolean;
 }
 
 export type WebResultItem = {

@@ -16,9 +16,17 @@ interface MessageBubbleProps {
   modelName?: string;
   assistantActionsDisabled?: boolean;
   onAssistantRegenerate?: () => void;
-  /** 用户消息：将内容填入输入框 */
-  onUserEdit?: (text: string) => void;
+  /** 仅最后一条助手：追问骨架 */
+  followUpsLoading?: boolean;
+  /** 仅最后一条助手：追问文案 */
+  followUpItems?: string[];
+  /** 点击追问填入输入框 */
+  onFollowUpClick?: (text: string) => void;
+  /** 用户消息：将内容与附图一并恢复到输入栏 */
+  onUserEdit?: (text: string, imageUrls?: string[]) => void;
   noTopPad?: boolean;
+  /** 助手：下一条是头脑风暴时收紧下边距 */
+  noBottomPad?: boolean;
   /** 助手消息：用户主动终止输出后为 true */
   interrupted?: boolean;
 }
@@ -30,8 +38,12 @@ export function MessageBubble({
   modelName,
   assistantActionsDisabled,
   onAssistantRegenerate,
+  followUpsLoading,
+  followUpItems,
+  onFollowUpClick,
   onUserEdit,
   noTopPad,
+  noBottomPad,
   interrupted,
 }: MessageBubbleProps) {
   const isUser = role === "user";
@@ -129,7 +141,11 @@ export function MessageBubble({
       modelName={modelName}
       assistantActionsDisabled={assistantActionsDisabled}
       onAssistantRegenerate={onAssistantRegenerate}
+      followUpsLoading={followUpsLoading}
+      followUpItems={followUpItems}
+      onFollowUpClick={onFollowUpClick}
       noTopPad={noTopPad}
+      noBottomPad={noBottomPad}
       interrupted={interrupted}
       copied={copied}
       onCopy={() => void handleCopy()}

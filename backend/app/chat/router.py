@@ -15,6 +15,7 @@ from app.chat.history_service import (
     delete_conversation,
     update_conversation_title,
 )
+from app.chat.follow_up_suggestions import generate_follow_up_suggestions
 from app.chat.group_service import (
     create_group,
     delete_group,
@@ -31,6 +32,8 @@ from app.chat.schemas import (
     ConversationGroupCreate,
     ConversationGroupRename,
     ConversationGroupAssign,
+    FollowUpSuggestionsRequest,
+    FollowUpSuggestionsResponse,
 )
 from app.chat.turn_resolve import resolve_chat_turn
 from app.chat.service import stream_chat
@@ -79,6 +82,31 @@ async def chat(
         ),
         media_type="text/event-stream",
     )
+
+
+@router.post(
+    "/follow-up-suggestions",
+    response_model=FollowUpSuggestionsResponse,
+    summary="根据助手正文生成追问建议（非流式，独立于对话 SSE）",
+)
+async def follow_up_suggestions_route(
+    req: FollowUpSuggestionsRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[UserRecord | None, Depends(get_current_user_optional)],
+):
+    if req.conversation_id:
+        await assert_can_use_conversation(
+            session,
+            req.conversation_id,
+            user,
+            req.anon_session_secret,
+        )
+        await session.commit()
+    suggestions = await generate_follow_up_suggestions(
+        req.assistant_reply,
+        chat_model_override=req.chat_model,
+    )
+    return FollowUpSuggestionsResponse(suggestions=suggestions)
 
 
 @router.get(
