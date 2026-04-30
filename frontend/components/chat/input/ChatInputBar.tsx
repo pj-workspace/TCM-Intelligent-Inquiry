@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
@@ -10,10 +11,20 @@ import {
   PenLine,
   BookOpen,
   Leaf,
-  Sun,
   Brain,
   Globe,
   Check,
+  Stethoscope,
+  HeartPulse,
+  Apple,
+  Moon,
+  Sun,
+  Wind,
+  Sparkles,
+  ScrollText,
+  ThermometerSun,
+  Activity,
+  type LucideIcon,
 } from "lucide-react";
 import type { GenerationState } from "@/types/chat";
 
@@ -23,6 +34,132 @@ const springTransition = {
   damping: 30,
   mass: 0.8,
 };
+
+/** 首屏输入区上方每次随机展示条数 */
+const QUICK_PROMPT_SHOW_COUNT = 5;
+
+type QuickPromptItem = {
+  title: string;
+  subtitle: string;
+  prompt: string;
+  Icon: LucideIcon;
+  iconClassName: string;
+};
+
+const QUICK_PROMPT_POOL: QuickPromptItem[] = [
+  {
+    title: "症状自查",
+    subtitle: "睡眠、疲乏等常见问题",
+    prompt: "我最近总是失眠多梦，该怎么调理？",
+    Icon: PenLine,
+    iconClassName: "text-blue-500",
+  },
+  {
+    title: "方剂查询",
+    subtitle: "经典方功效与须知",
+    prompt: "六味地黄丸的功效和禁忌是什么？",
+    Icon: BookOpen,
+    iconClassName: "text-emerald-600",
+  },
+  {
+    title: "节气养生",
+    subtitle: "四时饮食起居建议",
+    prompt: "春季养肝有什么好的食疗建议？",
+    Icon: Leaf,
+    iconClassName: "text-orange-500",
+  },
+  {
+    title: "体质辨识",
+    subtitle: "平和、气虚、阴虚等",
+    prompt: "怕冷又容易累，从中医角度可能是什么体质？日常怎么调养？",
+    Icon: Activity,
+    iconClassName: "text-violet-600",
+  },
+  {
+    title: "舌脉科普",
+    subtitle: "了解诊察含义",
+    prompt: "舌苔厚腻在中医里一般说明什么？需要注意什么？",
+    Icon: Stethoscope,
+    iconClassName: "text-sky-600",
+  },
+  {
+    title: "情志调摄",
+    subtitle: "压力、焦虑与肝郁",
+    prompt: "工作压力大、容易烦躁胸闷，中医有哪些简单的调理思路？",
+    Icon: Wind,
+    iconClassName: "text-teal-600",
+  },
+  {
+    title: "食疗药膳",
+    subtitle: "安全与搭配原则",
+    prompt: "脾胃虚弱的人适合常吃哪些家常菜？有哪些需要少吃的？",
+    Icon: Apple,
+    iconClassName: "text-rose-600",
+  },
+  {
+    title: "作息与节律",
+    subtitle: "睡眠与子午流注",
+    prompt: "经常熬夜伤肝吗？中医对作息有什么讲究？",
+    Icon: Moon,
+    iconClassName: "text-indigo-600",
+  },
+  {
+    title: "四季起居",
+    subtitle: "顺应寒热",
+    prompt: "三伏天容易中暑乏力，中医养生要注意什么？",
+    Icon: Sun,
+    iconClassName: "text-amber-600",
+  },
+  {
+    title: "经典条文",
+    subtitle: "《内经》等入门",
+    prompt: "用通俗的话解释一下「未病先防」在《黄帝内经》里是什么意思？",
+    Icon: ScrollText,
+    iconClassName: "text-stone-600",
+  },
+  {
+    title: "感冒分型",
+    subtitle: "风寒风热辨要点",
+    prompt: "流清涕、怕冷无汗，在中医里常见于哪种感冒类型？该怎样护理？",
+    Icon: ThermometerSun,
+    iconClassName: "text-orange-600",
+  },
+  {
+    title: "脾胃养护",
+    subtitle: "纳呆、腹胀",
+    prompt: "饭后容易腹胀嗳气，中医认为可能是什么问题？饮食方面怎么改善？",
+    Icon: HeartPulse,
+    iconClassName: "text-red-600",
+  },
+  {
+    title: "穴位保健",
+    subtitle: "日常按揉常识",
+    prompt: "经常久坐颈肩酸胀，有哪几个常用的保健穴位可以自己按揉？",
+    Icon: Sparkles,
+    iconClassName: "text-fuchsia-600",
+  },
+  {
+    title: "药食禁忌",
+    subtitle: "合理进补",
+    prompt: "感冒发烧期间，饮食上中医一般建议避免什么？",
+    Icon: BookOpen,
+    iconClassName: "text-green-700",
+  },
+];
+
+function pickRandomPrompts(pool: QuickPromptItem[], count: number): QuickPromptItem[] {
+  const copy = [...pool];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, Math.min(count, copy.length));
+}
+
+/** SSR 与水合首帧必须与服务端 HTML 完全一致，禁止使用 random */
+function initialQuickPromptsForHydration(): QuickPromptItem[] {
+  return QUICK_PROMPT_POOL.slice(0, QUICK_PROMPT_SHOW_COUNT);
+}
 
 type ChatInputBarProps = {
   input: string;
@@ -59,37 +196,71 @@ export function ChatInputBar({
   onSetWebSearchMode,
   placeholder = "有问题，尽管问，Shift+Enter 换行",
 }: ChatInputBarProps) {
+  const [quickPromptChoices, setQuickPromptChoices] = useState<QuickPromptItem[]>(
+    initialQuickPromptsForHydration
+  );
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setQuickPromptChoices(pickRandomPrompts(QUICK_PROMPT_POOL, QUICK_PROMPT_SHOW_COUNT));
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
+
   return (
     <motion.div
       layout
       transition={springTransition}
-      className={`absolute left-0 right-0 px-4 md:px-8 flex flex-col items-center z-10 ${
-        hasStarted
-          ? "bottom-0 pb-6 pt-4 bg-gradient-to-t from-[#fdfdfc] via-[#fdfdfc] to-transparent"
-          : "bottom-[45%]"
-      }`}
+      className="absolute bottom-0 left-0 right-0 z-10 flex flex-col items-center bg-gradient-to-t from-[#fdfdfc] from-40% via-[#fdfdfc]/95 to-transparent px-4 pb-6 pt-4 md:px-8"
     >
-      <AnimatePresence mode="popLayout">
-        {!hasStarted && (
-          <motion.div
-            layout
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-            className="mb-8 flex items-center gap-3 text-3xl md:text-4xl font-serif text-[#1a1a1a]"
-          >
-            <Sun className="w-8 h-8 text-orange-500" />
-            <span>需要中医咨询吗？</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div className="relative w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl">
+        {/* 快捷入口：紧贴输入框上方横排（参考元宝式布局） */}
+        <AnimatePresence mode="popLayout">
+          {!hasStarted && (
+            <motion.div
+              layout
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="no-scrollbar mb-3 flex flex-wrap gap-2 sm:flex-nowrap sm:snap-x sm:snap-mandatory sm:overflow-x-auto pb-0.5"
+            >
+              {quickPromptChoices.map((item) => {
+                const { Icon } = item;
+                return (
+                  <motion.button
+                    key={item.prompt}
+                    type="button"
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => onInputChange(item.prompt)}
+                    className="w-max max-w-[min(20rem,calc(100vw-5rem))] shrink-0 snap-start rounded-xl border border-[#e5e5e5] bg-white/95 px-3 py-2 text-left shadow-sm transition-colors hover:border-gray-300 hover:bg-white sm:max-w-[min(21rem,calc((100vw-7rem)/2))] md:py-2.5"
+                  >
+                    <div className="flex min-w-0 gap-2">
+                      <Icon
+                        className={`mt-0.5 h-4 w-4 shrink-0 ${item.iconClassName}`}
+                        aria-hidden
+                      />
+                      <div className="min-w-[6.5rem] max-w-[16rem] sm:max-w-[18rem]">
+                        <div className="whitespace-normal text-sm font-semibold leading-snug text-gray-900">
+                          {item.title}
+                        </div>
+                        <p className="mt-1 whitespace-normal text-[11px] leading-snug text-gray-500">
+                          {item.subtitle}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-      <div className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl relative">
         <motion.div
           layout
           transition={springTransition}
-          className="relative flex flex-col w-full bg-white rounded-2xl border border-[#e5e5e5] shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus-within:border-gray-300 focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.05)] transition-shadow overflow-hidden"
+          className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-[#e5e5e5] bg-white shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-shadow focus-within:border-gray-300 focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.05)]"
         >
           <textarea
             ref={inputRef}
@@ -260,51 +431,6 @@ export function ChatInputBar({
             </div>
           </motion.div>
         </motion.div>
-
-        {/* 快捷问题建议（首屏） */}
-        <AnimatePresence mode="popLayout">
-          {!hasStarted && (
-            <motion.div
-              layout
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.15, ease: "easeOut" }}
-              className="flex flex-wrap items-center justify-center gap-2 mt-6"
-            >
-              <motion.button
-                type="button"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onInputChange("我最近总是失眠多梦，该怎么调理？")}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-[#e5e5e5] rounded-full text-sm text-gray-600 hover:bg-gray-50 transition-colors shadow-sm"
-              >
-                <PenLine className="w-4 h-4 text-blue-500" />
-                症状自查
-              </motion.button>
-              <motion.button
-                type="button"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onInputChange("六味地黄丸的功效和禁忌是什么？")}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-[#e5e5e5] rounded-full text-sm text-gray-600 hover:bg-gray-50 transition-colors shadow-sm"
-              >
-                <BookOpen className="w-4 h-4 text-green-500" />
-                方剂查询
-              </motion.button>
-              <motion.button
-                type="button"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onInputChange("春季养肝有什么好的食疗建议？")}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-[#e5e5e5] rounded-full text-sm text-gray-600 hover:bg-gray-50 transition-colors shadow-sm"
-              >
-                <Leaf className="w-4 h-4 text-orange-500" />
-                节气养生
-              </motion.button>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* 免责声明 */}
         <AnimatePresence>

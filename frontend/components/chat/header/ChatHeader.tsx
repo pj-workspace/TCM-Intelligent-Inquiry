@@ -85,7 +85,7 @@ export function ChatHeader({
   );
 
   return (
-    <header className="flex-shrink-0 h-14 flex items-center justify-between px-4 md:px-6 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm z-10">
+    <header className="z-10 flex h-14 flex-shrink-0 items-center justify-between bg-white/80 px-4 backdrop-blur-sm md:px-6">
       <div className="flex items-center gap-1 min-w-0 flex-1 md:flex-initial">
         {/* 移动端：分组内会话显示「分组/标题」面包屑 */}
         <div className="flex min-w-0 flex-1 items-center gap-2 shrink-0 md:hidden">

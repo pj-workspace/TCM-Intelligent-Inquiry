@@ -22,6 +22,7 @@ import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtil
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
 import type { ServerConversation } from "@/types/chat";
+import { WelcomeHero } from "./WelcomeHero";
 
 const messageTransition = { type: "spring" as const, stiffness: 200, damping: 28, mass: 0.6 };
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
@@ -712,8 +713,13 @@ export function HomePageClient() {
               <div
                 ref={scrollViewportRef}
                 onScroll={updateScrollState}
-                className="chat-scroll-area no-scrollbar flex-1 overflow-y-auto"
+                className={`chat-scroll-area no-scrollbar flex-1 overflow-y-auto ${
+                  !hasStarted && !viewingGroupLanding
+                    ? "flex min-h-0 flex-col pb-[clamp(15rem,38vh,23rem)] md:pb-[clamp(16rem,36vh,22rem)]"
+                    : ""
+                }`}
               >
+                {!hasStarted && !viewingGroupLanding && <WelcomeHero />}
                 <AnimatePresence>
                   {hasStarted && (
                 <motion.div
