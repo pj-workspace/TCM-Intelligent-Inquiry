@@ -9,7 +9,7 @@ import pytest
 def test_mcp_register_list_delete_roundtrip(client, auth_headers):
     # 使用公网可解析主机名，避免 SSRF 策略拦截；实际连接由 discover_tools mock
     with patch(
-        "app.mcp.service.discover_tools",
+        "app.mcp.services.mcp_service.discover_tools",
         new_callable=AsyncMock,
         return_value=["tool_a"],
     ):
@@ -43,7 +43,7 @@ def test_mcp_register_list_delete_roundtrip(client, auth_headers):
 @pytest.mark.integration
 def test_mcp_private_url_rejected(client, auth_headers):
     with patch(
-        "app.mcp.service.discover_tools",
+        "app.mcp.services.mcp_service.discover_tools",
         new_callable=AsyncMock,
         return_value=["tool_a"],
     ):

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import get_current_user
+from app.auth.api.deps import get_current_user
 from app.auth.models import UserRecord
 from app.auth.oauth import service as oauth_svc
 from app.auth.oauth.schemas import LoginCodeExchangeIn, ThirdCompleteIn, UnbindVerifyIn

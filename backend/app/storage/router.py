@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from app.auth.deps import get_current_user
+from app.auth.api.deps import get_current_user
 from app.auth.models import UserRecord
 from app.core.config import get_settings
 from app.core.logging import get_logger

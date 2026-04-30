@@ -28,7 +28,7 @@ async def lifespan(_: FastAPI):
 
     await init_db()
     from app.core.database import async_session_factory
-    from app.mcp.service import restore_mcp_tool_registrations
+    from app.mcp.services.mcp_service import restore_mcp_tool_registrations
 
     async with async_session_factory() as session:
         from app.agent.tools.formula.seed import seed_formulas_if_empty
@@ -113,11 +113,11 @@ async def add_utf8_charset(request, call_next):
 
 # ── 路由注册（每个域的 router 在此聚合）──────────────────────────────────────
 from app.agent.router import router as agent_router
-from app.auth.router import router as auth_router
+from app.auth.api import router as auth_router
 from app.auth.oauth.router import router as oauth_router
-from app.chat.router import router as chat_router
-from app.knowledge.router import router as knowledge_router
-from app.mcp.router import router as mcp_router
+from app.chat.api import router as chat_router
+from app.knowledge.api import router as knowledge_router
+from app.mcp.api import router as mcp_router
 from app.storage.router import router as storage_router
 
 app.include_router(chat_router)

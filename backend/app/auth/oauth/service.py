@@ -12,12 +12,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.jwt_codec import create_access_token
-from app.auth.mail_service import delete_register_code, register_code_valid
+from app.auth.security.jwt_codec import create_access_token
+from app.auth.services.mail_service import delete_register_code, register_code_valid
 from app.auth.models import UserOauthAccount, UserRecord, utc_naive_now
 from app.auth.oauth.providers import get_provider
 from app.auth.oauth.providers.base import OAuthUserProfile
-from app.auth.password import hash_password
+from app.auth.security.password import hash_password
 from app.auth.schemas import TokenResponse
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, UnauthorizedError, ValidationError
@@ -332,7 +332,7 @@ async def list_bindings(session: AsyncSession, user_id: str) -> list[dict]:
 async def send_unbind_code(user_id: str, email: str | None, provider: str) -> None:
     if not email or not email.strip():
         raise ValidationError("当前账号未绑定邮箱，无法进行解绑验证")
-    from app.auth.mail_service import ensure_send_unbind_code
+    from app.auth.services.mail_service import ensure_send_unbind_code
 
     await ensure_send_unbind_code(user_id, provider, email.strip())
 
@@ -342,7 +342,7 @@ async def verify_unbind(
 ) -> None:
     if not email or not email.strip():
         raise ValidationError("当前账号未绑定邮箱，无法进行解绑验证")
-    from app.auth.mail_service import pop_unbind_code_if_match
+    from app.auth.services.mail_service import pop_unbind_code_if_match
 
     ok = await pop_unbind_code_if_match(user_id, provider, code)
     if not ok:

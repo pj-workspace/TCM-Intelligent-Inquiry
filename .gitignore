@@ -1,1 +1,4 @@
 .DS_Store
+
+# 知识库 Celery / 本地异步入库的临时上传目录（运行时生成）
+backend/data/ingest_tmp/

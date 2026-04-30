@@ -80,7 +80,7 @@ export function lastAssistantFollowUpFromMessages(
   return null;
 }
 
-/** 服务端用户消息：纯文案或含图 JSON v1（与后端 app.chat.service._persist_user_turn_content 对齐） */
+/** 服务端用户消息：纯文案或含图 JSON v1（与后端 app.chat.services.streaming._persist_user_turn_content 对齐） */
 export function parseUserMessageContent(raw: string): {
   displayText: string;
   imageUrls?: string[];

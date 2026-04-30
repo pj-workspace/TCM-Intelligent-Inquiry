@@ -18,7 +18,7 @@ from app.agent.schemas import (
     ToolListResponse,
 )
 from app.agent.service import AgentService
-from app.auth.deps import require_api_user
+from app.auth.api.deps import require_api_user
 from app.auth.models import UserRecord
 from app.core.database import get_session
 

@@ -2,7 +2,7 @@
 
 import redis as redis_sync
 
-from app.auth.mail_service import redis_email_login_code, redis_register_code
+from app.auth.services.mail_service import redis_email_login_code, redis_register_code
 from app.core.config import get_settings
 
 

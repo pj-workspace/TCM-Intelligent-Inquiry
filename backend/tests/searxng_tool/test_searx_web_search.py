@@ -5,8 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from app.agent.tools import searx_web_search as sws
 from app.agent.tools.searx_web_search import format_searx_results_for_llm, run_searx_web_search
+from app.agent.tools.searx_web_search import plugin as searx_plugin
+from app.agent.tools.searx_web_search import run as searx_run
 
 
 class _FakeResponse403:
@@ -60,7 +61,7 @@ async def test_run_searx_disabled_when_url_empty(monkeypatch):
         searxng_url = ""
         searxng_timeout_seconds = 5.0
 
-    monkeypatch.setattr(sws, "get_settings", lambda: _S())
+    monkeypatch.setattr(searx_run, "get_settings", lambda: _S())
     out = await run_searx_web_search("test")
     assert "SEARXNG_URL" in out
 
@@ -71,9 +72,9 @@ async def test_run_searx_403_message(monkeypatch):
         searxng_url = "http://127.0.0.1:9"
         searxng_timeout_seconds = 5.0
 
-    monkeypatch.setattr(sws, "get_settings", lambda: _S())
+    monkeypatch.setattr(searx_run, "get_settings", lambda: _S())
 
-    with patch.object(sws.httpx, "AsyncClient", return_value=_FakeHttpClient(_FakeResponse403())):
+    with patch.object(searx_run.httpx, "AsyncClient", return_value=_FakeHttpClient(_FakeResponse403())):
         out = await run_searx_web_search("q")
     assert "403" in out
     assert "json" in out
@@ -88,7 +89,7 @@ async def test_searx_tool_registered_and_invokable():
 
     ensure_tools_loaded()
     t = tool_registry.get(["searx_web_search"])[0]
-    with patch.object(sws, "run_searx_web_search", new=AsyncMock(return_value="mocked")):
+    with patch.object(searx_plugin, "run_searx_web_search", new=AsyncMock(return_value="mocked")):
         got = await t.ainvoke({"query": "x", "max_results": 3})
     assert got == "mocked"
 
@@ -103,7 +104,7 @@ async def test_live_searx_returns_hits(monkeypatch):
         searxng_url = os.environ.get("SEARXNG_URL", "http://127.0.0.1:8888")
         searxng_timeout_seconds = 45.0
 
-    monkeypatch.setattr(sws, "get_settings", lambda: _S())
+    monkeypatch.setattr(searx_run, "get_settings", lambda: _S())
     out = await run_searx_web_search("SearXNG", max_results=3)
     assert "无法连接" not in out
     assert not out.startswith("SearXNG 返回 HTTP")

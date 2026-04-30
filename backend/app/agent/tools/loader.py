@@ -8,7 +8,7 @@ from __future__ import annotations
 import importlib
 from typing import Final
 
-# 新增工具时：在此追加模块路径即可
+# 新增工具：增加 `your_tool/__init__.py`（导出并 import plugin），在此追加 `"app.agent.tools.your_tool"`。
 _TOOL_MODULES: Final[tuple[str, ...]] = (
     "app.agent.tools.tcm_search",
     "app.agent.tools.formula_lookup",
