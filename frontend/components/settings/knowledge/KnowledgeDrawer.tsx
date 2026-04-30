@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { X, FileText, Loader2, Upload, Search } from "lucide-react";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 import type { KnowledgeBase, KnowledgeDocument, IngestJobState, SearchResult } from "@/types/knowledge";
 import { KnowledgeUploadPanel } from "./KnowledgeUploadPanel";
 import { KnowledgeSearchPanel } from "./KnowledgeSearchPanel";
@@ -63,23 +65,21 @@ export function KnowledgeDrawer({
 }: KnowledgeDrawerProps) {
   const [activeTab, setActiveTab] = useState<"docs" | "upload" | "search">("docs");
 
-  if (!open || !kb) return null;
-
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-        <div
-          className="relative flex w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl"
-          style={{ maxHeight: "calc(100vh - 48px)" }}
-          onClick={(e) => e.stopPropagation()}
+    <AnimatePresence>
+      {open && kb ? (
+        <motion.div
+          key={kb.id}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm sm:p-6"
+          onClick={(e) => e.target === e.currentTarget && onClose()}
+          {...uiModalBackdrop}
         >
+          <motion.div
+            className="relative flex w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl"
+            style={{ maxHeight: "calc(100vh - 48px)" }}
+            onClick={(e) => e.stopPropagation()}
+            {...uiModalPanel}
+          >
           {/* Header */}
           <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
             <div className="min-w-0 flex-1">
@@ -217,8 +217,9 @@ export function KnowledgeDrawer({
               />
             )}
           </div>
-        </div>
-      </div>
-    </>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }

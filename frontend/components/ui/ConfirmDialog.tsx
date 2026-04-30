@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -42,23 +43,17 @@ export function ConfirmDialog({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="confirm-dialog-title"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
           onClick={pending ? undefined : onCancel}
+          {...uiModalBackdrop}
         >
           <motion.div
             className="relative w-full max-w-sm rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
             onClick={(e) => e.stopPropagation()}
+            {...uiModalPanel}
           >
             <button
               type="button"

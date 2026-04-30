@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import {
   BookOpen,
   ChevronRight,
@@ -180,11 +181,13 @@ export function BuiltinToolsTab() {
       )}
 
       {activeTool && (
-        <ToolInvokeModal
-          key={activeTool.name}
-          tool={activeTool}
-          onClose={() => setActiveTool(null)}
-        />
+        <AnimatePresence mode="sync">
+          <ToolInvokeModal
+            key={activeTool.name}
+            tool={activeTool}
+            onClose={() => setActiveTool(null)}
+          />
+        </AnimatePresence>
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChatMessage(BaseModel):
@@ -14,7 +14,7 @@ class ConversationTitleUpdate(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="本轮用户输入")
+    message: str = Field(default="", description="本轮用户输入；可与图片 URL 同时使用")
     history: list[ChatMessage] = Field(
         default_factory=list,
         description="仅在新会话首轮有效：客户端维护的历史；传入 conversation_id 后服务端以数据库为准",
@@ -54,6 +54,34 @@ class ChatRequest(BaseModel):
         default=None,
         description="仅 llm_provider=qwen 且配置了 QWEN_CHAT_MODEL_OPTIONS 时有效；DashScope model id。",
     )
+    image_urls: list[str] = Field(
+        default_factory=list,
+        description="图片 URL（通常由 OSS 上传接口返回的签名 HTTPS 地址）；与 message 拼接为多模态用户消息。"
+        "VL 模型要求每张图宽高均须大于 10px；须经上传校验通过，否则易被模型以 400 拒绝。",
+    )
+
+    @model_validator(mode="after")
+    def _validate_message_and_images(self) -> Self:
+        msg = self.message.strip()
+        cleaned: list[str] = []
+        for u in self.image_urls:
+            if not isinstance(u, str):
+                continue
+            t = u.strip()
+            if not t:
+                continue
+            if len(t) > 4096:
+                raise ValueError("单张图片 URL 过长（最多 4096 字符）")
+            if not (t.startswith("https://") or t.startswith("http://")):
+                raise ValueError("image_urls 中的每一项须为 http(s) URL")
+            cleaned.append(t)
+        if len(cleaned) > 8:
+            raise ValueError("本轮最多附带 8 张图片")
+        if not msg and not cleaned:
+            raise ValueError("请输入文字或上传图片")
+        self.message = msg
+        self.image_urls = cleaned
+        return self
 
 
 class ConversationItem(BaseModel):

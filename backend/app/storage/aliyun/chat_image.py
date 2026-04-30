@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from io import BytesIO
 
 import oss2
+from PIL import Image, UnidentifiedImageError
 
 from app.core.config import Settings, get_settings
 from app.storage.aliyun.oss_bucket import build_bucket
@@ -12,6 +14,9 @@ from app.storage.aliyun.oss_bucket import build_bucket
 ALLOWED_IMAGE_TYPES: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/webp", "image/gif"}
 )
+
+# 通义等多模态接口要求宽、高均须大于 10px；此处取 11 作为下限。
+MIN_IMAGE_EDGE_PX: int = 11
 
 SUFFIX_BY_TYPE: dict[str, str] = {
     "image/jpeg": ".jpg",
@@ -55,6 +60,23 @@ def _resolve_ct_and_suffix(data: bytes, content_type_hint: str | None) -> tuple[
     )
 
 
+def assert_image_meets_vl_size_limits(data: bytes) -> None:
+    """校验解码后宽高，避免 VL 返回 InvalidParameter（如 height/width 须大于 10）。"""
+    try:
+        with Image.open(BytesIO(data)) as im:
+            im.load()
+            w, h = im.size
+    except UnidentifiedImageError as e:
+        raise ValueError("无法解析图片内容，请更换有效图片文件") from e
+    except OSError as e:
+        raise ValueError("图片已损坏或格式无法读取，请更换文件后重试") from e
+    if w < MIN_IMAGE_EDGE_PX or h < MIN_IMAGE_EDGE_PX:
+        raise ValueError(
+            f"图片尺寸过小（当前 {w}×{h}）。多模态模型要求宽、高均至少 {MIN_IMAGE_EDGE_PX} 像素，"
+            "请使用更大分辨率的图片。"
+        )
+
+
 def upload_chat_image_bytes(
     *,
     owner_user_id: str,
@@ -72,6 +94,7 @@ def upload_chat_image_bytes(
         raise ValueError(f"图片超过大小限制（最大 {max_b} 字节）")
 
     ct, suffix = _resolve_ct_and_suffix(data, content_type_hint)
+    assert_image_meets_vl_size_limits(data)
     bucket: oss2.Bucket = build_bucket(s)
 
     prefix = (s.aliyun_oss_chat_prefix or "chat-uploads/").strip()

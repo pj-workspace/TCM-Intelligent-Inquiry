@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Search, X, SquarePen } from "lucide-react";
 import clsx from "clsx";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 
 export type SearchableConversation = {
   id: string;
@@ -95,15 +97,22 @@ export function ConversationSearchModal({
     ? [{ label: "", items: filtered }]
     : groupConversations(filtered);
 
-  if (!open) return null;
-
   return (
-    <div
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] bg-black/30 backdrop-blur-[2px]"
-    >
-      <div className="w-full max-w-[34rem] mx-4 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col max-h-[70vh]">
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="conv-search-overlay"
+          ref={overlayRef}
+          onClick={handleOverlayClick}
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[12vh] backdrop-blur-[2px]"
+          {...uiModalBackdrop}
+        >
+          <motion.div
+            key="conv-search-panel"
+            className="mx-4 flex max-h-[70vh] w-full max-w-[34rem] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            {...uiModalPanel}
+          >
         {/* 搜索栏 */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
           <Search className="w-4 h-4 text-gray-400 shrink-0" />
@@ -167,7 +176,9 @@ export function ConversationSearchModal({
             ))
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

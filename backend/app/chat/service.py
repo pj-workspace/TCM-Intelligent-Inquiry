@@ -9,6 +9,12 @@ from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any, Literal
 
 from app.chat.turn_resolve import ResolvedChatTurn
+from app.chat.vl_image_sanitize import (
+    collect_unique_image_urls_from_messages,
+    ensure_urls_probed,
+    filter_image_urls_by_probe_cache,
+    sanitize_messages_for_vl_images,
+)
 
 from app.agent.executor import build_agent_graph_for_chat_request
 
@@ -169,6 +175,57 @@ def _iter_model_stream_parts(chunk) -> Iterator[tuple[str, str]]:
             yield "text", block
 
 
+def _persist_user_turn_content(text: str, image_urls: list[str]) -> str:
+    """入库：无图则仍为纯文案；含图则用 JSON v1（供多模态还原）。"""
+    urls = [u for u in image_urls if isinstance(u, str) and u.strip()]
+    if not urls:
+        return text
+    return json.dumps({"v": 1, "text": text, "images": urls}, ensure_ascii=False)
+
+
+def _parse_user_turn_content(raw: str) -> tuple[str, list[str]]:
+    s = (raw or "").strip()
+    if not s.startswith("{"):
+        return raw, []
+    try:
+        j = json.loads(s)
+        if not isinstance(j, dict) or j.get("v") != 1:
+            return raw, []
+        imgs = j.get("images")
+        if not isinstance(imgs, list):
+            return raw, []
+        urls = [str(x).strip() for x in imgs if isinstance(x, str) and x.strip()]
+        txt = j.get("text")
+        tx = "" if txt is None else str(txt)
+        if not urls:
+            return (tx if tx else raw), []
+        return tx, urls
+    except json.JSONDecodeError:
+        return raw, []
+
+
+def _lc_human_user_from_storage(raw: str) -> HumanMessage:
+    text, imgs = _parse_user_turn_content(raw)
+    if imgs:
+        blocks: list[dict[str, Any]] = [
+            {"type": "image_url", "image_url": {"url": u}} for u in imgs
+        ]
+        t = (text or "").strip() or "（附图）"
+        return HumanMessage(content=[{"type": "text", "text": t}] + blocks)
+    raw_s = (raw or "").strip()
+    # v1 JSON 但当前无 URL（例如占位），用解析出的正文
+    if raw_s.startswith("{") and isinstance(text, str) and text != raw:
+        return HumanMessage(content=text or raw)
+    return HumanMessage(content=raw)
+
+
+def _user_message_text_for_regenerate_compare(raw: str) -> str:
+    tx, imgs = _parse_user_turn_content(raw)
+    if imgs:
+        return tx.strip() if tx.strip() else "（附图）"
+    return (tx or "").strip()
+
+
 def _history_to_lc(history: list[ChatMessage]) -> list[HumanMessage | AIMessage]:
     out: list[HumanMessage | AIMessage] = []
     for m in history:
@@ -189,7 +246,7 @@ async def _messages_to_lc(session: AsyncSession, conversation_id: str) -> list[H
     out: list[HumanMessage | AIMessage] = []
     for m in rows:
         if m.role == "user":
-            out.append(HumanMessage(content=m.content))
+            out.append(_lc_human_user_from_storage(m.content))
         elif m.role == "assistant":
             out.append(AIMessage(content=m.content))
         # thinking / tool 不进入模型上下文
@@ -271,13 +328,38 @@ async def stream_chat(
     resolved: ResolvedChatTurn,
     web_search_mode: Literal["force", "auto"] = "force",
     group_id: str | None = None,
+    image_urls: list[str] | None = None,
 ) -> AsyncIterator[str]:
+    vl_ok_cache: dict[str, bool] = {}
+
+    raw_urls = [u.strip() for u in (image_urls or ()) if isinstance(u, str) and u.strip()]
+    had_request_images = bool(raw_urls)
+
     user_id = user.id if user else None
+
+    if raw_urls:
+        await ensure_urls_probed(list(dict.fromkeys(raw_urls)), ok_cache=vl_ok_cache)
+        urls = filter_image_urls_by_probe_cache(raw_urls, vl_ok_cache)
+    else:
+        urls = []
+
     msg_in = message.strip()
-    if not msg_in:
-        yield _sse({"type": "error", "message": "消息不能为空"})
+    if not msg_in and urls:
+        msg_in = "（附图）"
+    if not msg_in and not urls:
+        if had_request_images:
+            yield _sse(
+                {
+                    "type": "error",
+                    "message": "所附图片尺寸过小或无法读取，模型无法处理，请更换每张宽、高均大于 10 像素的图片后重试。",
+                }
+            )
+        else:
+            yield _sse({"type": "error", "message": "消息不能为空"})
         yield "data: [DONE]\n\n"
         return
+
+    persist_user_body = _persist_user_turn_content(msg_in, urls)
     if regenerate_last_reply and not conversation_id:
         yield _sse({"type": "error", "message": "重新生成需要已有会话（conversation_id）。"})
         yield "data: [DONE]\n\n"
@@ -326,8 +408,7 @@ async def stream_chat(
                         )
                         yield "data: [DONE]\n\n"
                         return
-                    last_user_text = rows[last_user_i].content.strip()
-                    if last_user_text != msg_in:
+                    if _user_message_text_for_regenerate_compare(rows[last_user_i].content) != msg_in:
                         yield _sse(
                             {
                                 "type": "error",
@@ -347,7 +428,7 @@ async def stream_chat(
                             id=str(uuid.uuid4()),
                             conversation_id=conv_id,
                             role="user",
-                            content=msg_in,
+                            content=persist_user_body,
                         )
                     )
                 await session.commit()
@@ -383,13 +464,13 @@ async def stream_chat(
                         id=str(uuid.uuid4()),
                         conversation_id=conv_id,
                         role="user",
-                        content=msg_in,
+                        content=persist_user_body,
                     )
                 )
                 await session.commit()
 
             prior = _history_to_lc(history)
-            lc_messages = prior + [HumanMessage(content=msg_in)]
+            lc_messages = prior + [_lc_human_user_from_storage(persist_user_body)]
             
             # 开启异步标题生成任务
             title_task = asyncio.create_task(
@@ -425,6 +506,10 @@ async def stream_chat(
             web_search_mode=web_search_mode,
             effective_tool_calling=resolved.effective_tool_calling,
         )
+
+        uniq_in_messages = collect_unique_image_urls_from_messages(lc_messages)
+        await ensure_urls_probed(uniq_in_messages, ok_cache=vl_ok_cache)
+        lc_messages = sanitize_messages_for_vl_images(lc_messages, vl_ok_cache)
 
         assistant_parts: list[str] = []
         thinking_buf: list[str] = []

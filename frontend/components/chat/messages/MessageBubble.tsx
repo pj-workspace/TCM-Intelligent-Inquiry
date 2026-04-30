@@ -10,6 +10,8 @@ export { markdownToPlainText };
 interface MessageBubbleProps {
   role: "user" | "assistant";
   content: string;
+  /** 用户多模态气泡 */
+  userImageUrls?: string[];
   /** 助手消息：后端 SSE meta.chatModel */
   modelName?: string;
   assistantActionsDisabled?: boolean;
@@ -24,6 +26,7 @@ interface MessageBubbleProps {
 export function MessageBubble({
   role,
   content,
+  userImageUrls,
   modelName,
   assistantActionsDisabled,
   onAssistantRegenerate,
@@ -42,13 +45,18 @@ export function MessageBubble({
 
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(isUser ? content : plain);
+      let text = isUser ? content : plain;
+      if (isUser && userImageUrls?.length) {
+        const extra = userImageUrls.join("\n");
+        text = content?.trim() ? `${content}\n\n${extra}` : extra;
+      }
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       /* ignore */
     }
-  }, [content, isUser, plain]);
+  }, [content, isUser, plain, userImageUrls]);
 
   const toggleReadAloud = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -107,6 +115,7 @@ export function MessageBubble({
     return (
       <UserBubble
         content={content}
+        imageUrls={userImageUrls}
         copied={copied}
         onCopy={() => void handleCopy()}
         onEdit={onUserEdit}

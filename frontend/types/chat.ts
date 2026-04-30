@@ -5,6 +5,8 @@ export type ChatMessage = {
   role: "user" | "assistant";
   type: "message";
   content: string;
+  /** 用户消息：多模态 OSS 签名 URL（仅内存与当前会话渲染；过期后历史图可能打不开） */
+  imageUrls?: string[];
   /** 助手消息：来自 SSE meta.chatModel */
   modelName?: string;
   /** 助手消息：用户点击终止后标记为 true */

@@ -75,6 +75,7 @@ async def chat(
             resolved=resolved,
             web_search_mode=req.web_search_mode,
             group_id=req.group_id,
+            image_urls=list(req.image_urls),
         ),
         media_type="text/event-stream",
     )

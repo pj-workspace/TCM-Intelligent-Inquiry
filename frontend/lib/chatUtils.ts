@@ -59,6 +59,35 @@ export function groupMessagesIntoTraces(items: FlatMessage[]): Message[] {
   return grouped;
 }
 
+/** 服务端用户消息：纯文案或含图 JSON v1（与后端 app.chat.service._persist_user_turn_content 对齐） */
+export function parseUserMessageContent(raw: string): {
+  displayText: string;
+  imageUrls?: string[];
+} {
+  const original = raw ?? "";
+  const s = original.trim();
+  if (!s.startsWith("{")) return { displayText: original };
+  try {
+    const j = JSON.parse(s) as {
+      v?: number;
+      text?: unknown;
+      images?: unknown;
+    };
+    if (j?.v !== 1 || !Array.isArray(j.images)) return { displayText: original };
+    const urls = j.images.filter(
+      (x): x is string => typeof x === "string" && x.trim().length > 0
+    );
+    const textPart = typeof j.text === "string" ? j.text : "";
+    if (urls.length === 0) return { displayText: textPart.trim() ? textPart : original };
+    return {
+      displayText: textPart.trim() ? textPart : "（附图）",
+      imageUrls: urls,
+    };
+  } catch {
+    return { displayText: original };
+  }
+}
+
 export function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
   if (msg.role === "thinking") {
     return {
@@ -102,13 +131,24 @@ export function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
       } satisfies ToolStep;
     }
   }
+  if (msg.role === "user") {
+    const { displayText, imageUrls } = parseUserMessageContent(msg.content);
+    return {
+      id: msg.id,
+      role: "user",
+      type: "message",
+      content: displayText,
+      ...(imageUrls?.length ? { imageUrls } : {}),
+    };
+  }
+
   return {
     id: msg.id,
-    role: msg.role as "user" | "assistant",
+    role: "assistant",
     type: "message",
     content: msg.content,
     modelName:
-      msg.role === "assistant" && msg.model_name ? msg.model_name : undefined,
+      typeof msg.model_name === "string" && msg.model_name ? msg.model_name : undefined,
   };
 }
 
@@ -165,6 +205,11 @@ export function conversationToMarkdown(title: string, messages: Message[]): stri
     if (msg.type === "message") {
       const who = msg.role === "user" ? "用户" : "TCM AI";
       let block = `## ${who}\n\n${msg.content ?? ""}`;
+      if (msg.role === "user" && msg.imageUrls?.length) {
+        block +=
+          "\n\n" +
+          msg.imageUrls.map((u) => `- 图片：<${u}>`).join("\n");
+      }
       if (msg.role === "assistant") {
         const extras: string[] = [];
         if (msg.modelName?.trim())

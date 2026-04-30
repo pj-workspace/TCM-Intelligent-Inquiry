@@ -12,9 +12,11 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/contexts/auth-context";
 import { useCooldownTimer } from "@/hooks/useCooldownTimer";
 import { API_BASE, apiJsonHeaders, parseApiError } from "@/lib/api";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 
 type Binding = {
   provider: string;
@@ -560,22 +562,26 @@ export function AccountTab() {
         )}
       </SectionShell>
 
-      {changePwModalOpen && user?.email ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="change-pw-modal-title"
-          onClick={(e) => {
-            if (e.target !== e.currentTarget) return;
-            if (pwSubmitBusy || pwSendBusy || checkPwBusy) return;
-            closeChangePwModal();
-          }}
-        >
-          <div
-            className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
-            onClick={(e) => e.stopPropagation()}
+      <AnimatePresence>
+        {changePwModalOpen && user?.email ? (
+          <motion.div
+            key="account-change-pw"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="change-pw-modal-title"
+            onClick={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (pwSubmitBusy || pwSendBusy || checkPwBusy) return;
+              closeChangePwModal();
+            }}
+            {...uiModalBackdrop}
           >
+            <motion.div
+              className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
+              onClick={(e) => e.stopPropagation()}
+              {...uiModalPanel}
+            >
             <button
               type="button"
               className="absolute right-3 top-3 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none"
@@ -742,31 +748,36 @@ export function AccountTab() {
                 ) : null}
               </form>
             )}
-          </div>
-        </div>
-      ) : null}
+          </motion.div>
+        </motion.div>
+        ) : null}
+      </AnimatePresence>
 
-      {unbindModalProvider ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="unbind-modal-title"
-          onClick={(e) => {
-            if (e.target !== e.currentTarget) return;
-            if (
-              unbindVerifyingFor === unbindModalProvider ||
-              unbindSendingFor === unbindModalProvider
-            ) {
-              return;
-            }
-            closeUnbindModal();
-          }}
-        >
-          <div
-            className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
-            onClick={(e) => e.stopPropagation()}
+      <AnimatePresence>
+        {unbindModalProvider ? (
+          <motion.div
+            key={`account-unbind-${unbindModalProvider}`}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="unbind-modal-title"
+            onClick={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (
+                unbindVerifyingFor === unbindModalProvider ||
+                unbindSendingFor === unbindModalProvider
+              ) {
+                return;
+              }
+              closeUnbindModal();
+            }}
+            {...uiModalBackdrop}
           >
+            <motion.div
+              className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#ebe8e3] bg-white shadow-[0_8px_40px_rgba(0,0,0,0.12)]"
+              onClick={(e) => e.stopPropagation()}
+              {...uiModalPanel}
+            >
             <button
               type="button"
               className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none"
@@ -850,9 +861,11 @@ export function AccountTab() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </motion.div>
+        </motion.div>
+        ) : null}
+      </AnimatePresence>
+
     </div>
   );
 }

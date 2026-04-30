@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AnimatePresence, motion } from "framer-motion";
 import { AppLogo } from "@/components/brand/AppLogo";
 import {
   Plus,
@@ -14,6 +15,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import type { ServerConversation } from "@/types/chat";
+import { uiDropdownBelow } from "@/lib/ui-motion";
 
 type ChatHeaderProps = {
   token: string | null;
@@ -339,29 +341,36 @@ export function ChatHeader({
             >
               <MoreVertical className="w-5 h-5" />
             </button>
-            {headerMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-36 bg-white rounded-lg shadow-lg border border-[#e5e5e5] py-1 z-50">
-                <button
-                  onClick={onEditTitle}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100/80"
+            <AnimatePresence>
+              {headerMenuOpen && (
+                <motion.div
+                  key="chat-header-conv-menu"
+                  style={{ transformOrigin: "top right" }}
+                  className="absolute right-0 top-full mt-1 w-36 rounded-lg border border-[#e5e5e5] bg-white py-1 shadow-lg z-50"
+                  {...uiDropdownBelow}
                 >
-                  <Edit2 className="w-4 h-4" /> 编辑标题
-                </button>
-                <button
-                  onClick={onExportHistory}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100/80"
-                >
-                  <Download className="w-4 h-4" /> 导出会话
-                </button>
-                <div className="my-1 border-t border-gray-100" />
-                <button
-                  onClick={onDeleteConversation}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100/60"
-                >
-                  <Trash2 className="w-4 h-4" /> 删除会话
-                </button>
-              </div>
-            )}
+                  <button
+                    onClick={onEditTitle}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100/80"
+                  >
+                    <Edit2 className="w-4 h-4" /> 编辑标题
+                  </button>
+                  <button
+                    onClick={onExportHistory}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:bg-gray-100/80"
+                  >
+                    <Download className="w-4 h-4" /> 导出会话
+                  </button>
+                  <div className="my-1 border-t border-gray-100" />
+                  <button
+                    onClick={onDeleteConversation}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100/60"
+                  >
+                    <Trash2 className="w-4 h-4" /> 删除会话
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 
@@ -388,8 +397,7 @@ export function ChatHeader({
                 P
               </span>
             </button>
-            <div className="absolute right-0 top-full mt-2 w-32 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-              <div className="bg-white rounded-lg shadow-lg border border-[#e5e5e5] py-1">
+            <div className="absolute right-0 top-full z-50 mt-2 w-32 origin-top-right rounded-lg border border-[#e5e5e5] bg-white py-1 shadow-lg opacity-0 scale-[0.98] translate-y-[-6px] pointer-events-none invisible transition-[opacity,transform,visibility] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 group-hover:visible group-hover:pointer-events-auto">
                 <button
                   onClick={onLogout}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100/50 transition-colors"
@@ -397,7 +405,6 @@ export function ChatHeader({
                   <LogOut className="w-4 h-4" />
                   退出登录
                 </button>
-              </div>
             </div>
           </div>
         ) : (

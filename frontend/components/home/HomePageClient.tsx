@@ -21,7 +21,8 @@ import { downloadConversationMarkdown } from "@/lib/conversation-export";
 import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtils";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
-import type { ServerConversation } from "@/types/chat";
+import type { ChatMessage, ServerConversation } from "@/types/chat";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 import { WelcomeHero } from "./WelcomeHero";
 
 const messageTransition = { type: "spring" as const, stiffness: 200, damping: 28, mass: 0.6 };
@@ -101,6 +102,12 @@ export function HomePageClient() {
     chatModelOptions,
     selectedChatModelId,
     setSelectedChatModelId,
+    pendingImageUrls,
+    attachmentUploadBusy,
+    attachmentUploadSkeletonCount,
+    attachmentUploadSlotProgress,
+    pushImageAttachments,
+    removePendingImageUrlAt,
     handleStop,
     handleRegenerateAssistant,
     handleNewChat,
@@ -118,19 +125,19 @@ export function HomePageClient() {
   } = chat;
 
   const inputBarModelCaps = useMemo(() => {
-    const defaults = {
-      attachmentDisabled: false,
+    const noListOrUnknownModel = {
+      attachmentDisabled: true,
       deepThinkDisabledByModel: false,
       webSearchDisabledByModel: false,
     };
-    if (chatModelOptions.length === 0) return defaults;
+    if (chatModelOptions.length === 0) return noListOrUnknownModel;
     const effectiveId =
       selectedChatModelId.trim() ||
       chatModelOptions.find((o) => o.default)?.id ||
       chatModelOptions[0]?.id ||
       "";
     const row = chatModelOptions.find((x) => x.id === effectiveId);
-    if (!row) return defaults;
+    if (!row) return noListOrUnknownModel;
     const input = row.capabilities?.input;
     const hasImage = Array.isArray(input) && input.includes("image");
     const tools = row.capabilities?.supports_tool_calling !== false;
@@ -141,6 +148,14 @@ export function HomePageClient() {
       webSearchDisabledByModel: !tools,
     };
   }, [chatModelOptions, selectedChatModelId]);
+
+  const attachmentDisabledReason = useMemo(() => {
+    if (!inputBarModelCaps.attachmentDisabled) return undefined;
+    if (chatModelOptions.length === 0) {
+      return "未获取到可选模型列表，无法上传图片（请检查接口与网络后刷新）";
+    }
+    return "当前模型不支持图片，请切换到带「图片」能力的多模态模型";
+  }, [inputBarModelCaps.attachmentDisabled, chatModelOptions.length]);
 
   const scopedConversations = useMemo(() => {
     if (!token) return [];
@@ -378,6 +393,14 @@ export function HomePageClient() {
     await chat.handleSend(input, setInput);
   }, [chat, input]);
 
+  /** 附图快捷话术：直接使用文案发送，并附带当前 pending 图片（由 useChat.handleSend 清空列表） */
+  const handleSendImageQuickPrompt = useCallback(
+    async (prompt: string) => {
+      await chat.handleSend(prompt, setInput);
+    },
+    [chat]
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -481,18 +504,15 @@ export function HomePageClient() {
       <AnimatePresence>
         {renameConvModal && (
           <motion.div
-            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setRenameConvModal(null)}
+            key="rename-conv"
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && setRenameConvModal(null)}
+            {...uiModalBackdrop}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
               className="w-full max-w-md rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-lg"
               onClick={(e) => e.stopPropagation()}
+              {...uiModalPanel}
             >
               <h2 className="text-lg font-semibold text-gray-900">编辑会话名称</h2>
               <input
@@ -532,18 +552,15 @@ export function HomePageClient() {
       <AnimatePresence>
         {newGroupModalOpen && (
           <motion.div
-            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setNewGroupModalOpen(false)}
+            key="new-group"
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && setNewGroupModalOpen(false)}
+            {...uiModalBackdrop}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
               className="w-full max-w-md rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-lg"
               onClick={(e) => e.stopPropagation()}
+              {...uiModalPanel}
             >
               <h2 className="text-lg font-semibold text-gray-900">新建分组</h2>
               <input
@@ -582,18 +599,15 @@ export function HomePageClient() {
       <AnimatePresence>
         {renameFolderModal && (
           <motion.div
-            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setRenameFolderModal(null)}
+            key={`rename-folder-${renameFolderModal.id}`}
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && setRenameFolderModal(null)}
+            {...uiModalBackdrop}
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
               className="w-full max-w-md rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-lg"
               onClick={(e) => e.stopPropagation()}
+              {...uiModalPanel}
             >
               <h2 className="text-lg font-semibold text-gray-900">重命名分组</h2>
               <input
@@ -742,8 +756,11 @@ export function HomePageClient() {
                 ref={scrollViewportRef}
                 onScroll={updateScrollState}
                 className={`chat-scroll-area no-scrollbar flex-1 overflow-y-auto ${
-                  !hasStarted && !viewingGroupLanding
-                    ? "flex min-h-0 flex-col pb-[clamp(15rem,38vh,23rem)] md:pb-[clamp(16rem,36vh,22rem)]"
+                  !viewingGroupLanding
+                    ? [
+                        !hasStarted ? "flex min-h-0 flex-col" : "",
+                        "pb-[clamp(8.5rem,20vh,13.5rem)] md:pb-[clamp(9rem,18vh,12.5rem)]",
+                      ].join(" ")
                     : ""
                 }`}
               >
@@ -754,7 +771,7 @@ export function HomePageClient() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.3 }}
-                  className="pt-8 pb-6 md:pb-8"
+                  className="pt-8 pb-4 md:pb-5"
                 >
                   {messages.map((msg, idx) => {
                     const prevMsg = messages[idx - 1];
@@ -770,6 +787,11 @@ export function HomePageClient() {
                           <MessageBubble
                             role={msg.role!}
                             content={msg.content!}
+                            userImageUrls={
+                              msg.type === "message" && msg.role === "user"
+                                ? (msg as ChatMessage).imageUrls
+                                : undefined
+                            }
                             modelName={msg.modelName}
                             noTopPad={afterTrace && msg.role === "assistant"}
                             interrupted={msg.interrupted}
@@ -898,8 +920,16 @@ export function HomePageClient() {
             selectedModelId={selectedChatModelId}
             onSelectModel={setSelectedChatModelId}
             attachmentDisabled={inputBarModelCaps.attachmentDisabled}
+            attachmentDisabledReason={attachmentDisabledReason}
             deepThinkDisabledByModel={inputBarModelCaps.deepThinkDisabledByModel}
             webSearchDisabledByModel={inputBarModelCaps.webSearchDisabledByModel}
+            pendingImageUrls={pendingImageUrls}
+            onRemovePendingImage={removePendingImageUrlAt}
+            onImageFilesSelected={(files) => void pushImageAttachments(files)}
+            attachmentUploadBusy={attachmentUploadBusy}
+            attachmentUploadSkeletonCount={attachmentUploadSkeletonCount}
+            attachmentUploadSlotProgress={attachmentUploadSlotProgress}
+            onSendWithImagePrompt={handleSendImageQuickPrompt}
             placeholder={
               viewingGroupLanding ? "在这里提问，新建对话" : undefined
             }

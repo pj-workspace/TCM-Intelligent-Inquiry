@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { forwardRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
   AlertCircle,
   BookOpen,
@@ -16,6 +17,7 @@ import { API_BASE, apiJsonHeaders } from "@/lib/api";
 import { buildToolInvokeInitialValues } from "@/lib/builtin-tool-demo-values";
 import { useAuth } from "@/contexts/auth-context";
 import type { BuiltinToolInfo, ToolCategory } from "@/types/tool";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 
 const CATEGORY_META: Record<ToolCategory, { color: string; bg: string; Icon: React.ElementType }> =
   {
@@ -30,7 +32,8 @@ interface ToolInvokeModalProps {
   onClose: () => void;
 }
 
-export function ToolInvokeModal({ tool, onClose }: ToolInvokeModalProps) {
+export const ToolInvokeModal = forwardRef<HTMLDivElement, ToolInvokeModalProps>(
+  function ToolInvokeModal({ tool, onClose }, ref) {
   const { token } = useAuth();
   const meta = CATEGORY_META[tool.category] ?? CATEGORY_META.system;
   const { Icon } = meta;
@@ -81,11 +84,17 @@ export function ToolInvokeModal({ tool, onClose }: ToolInvokeModalProps) {
   };
 
   return (
-    <div
+    <motion.div
+      ref={ref}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
+      {...uiModalBackdrop}
     >
-      <div className="flex h-[88vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">
+      <motion.div
+        className="flex h-[88vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        {...uiModalPanel}
+      >
         {/* ── 头部 ── */}
         <div className="flex items-start justify-between border-b border-gray-100 px-6 py-5">
           <div className="flex items-center gap-3">
@@ -296,7 +305,9 @@ export function ToolInvokeModal({ tool, onClose }: ToolInvokeModalProps) {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
-}
+});
+
+ToolInvokeModal.displayName = "ToolInvokeModal";

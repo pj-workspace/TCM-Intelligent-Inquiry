@@ -1,3 +1,54 @@
+/* ── Radix Dropdown / Select 浮现（与全局弹窗体感一致）─────────────────────── */
+:root {
+  --ui-ease-pop: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 在触发器下方展开：应从略偏高位置下落，而非自下而上滑入 */
+@keyframes ui-radix-float-in-open-below {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 在触发器上方展开：从略偏低位置上移 */
+@keyframes ui-radix-float-in-open-above {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/**
+ * 加到 DropdownMenu.Content / SubContent / Select.Content 外层 class 上；
+ * origin 由各组件注入的 Radix CSS 变量决定。
+ */
+.ui-radix-floating {
+  transform-origin: var(
+    --radix-dropdown-menu-content-transform-origin,
+    var(--radix-dropdown-menu-sub-content-transform-origin),
+    var(--radix-select-content-transform-origin),
+    top left
+  );
+}
+
+/* Radix Popper 会写 data-side；默认同「在下方展开」 */
+.ui-radix-floating[data-state="open"] {
+  animation: ui-radix-float-in-open-below 0.24s var(--ui-ease-pop) both;
+}
+
+.ui-radix-floating[data-side="top"][data-state="open"] {
+  animation-name: ui-radix-float-in-open-above;
+}
+
 /* 骨架屏：文字条的高光扫过动效 */
 @keyframes skeleton-shimmer {
   0% {
@@ -19,6 +70,20 @@
   );
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+/* 聊天附件上传占位：较慢扫光（与文字骨架区分） */
+.attachment-upload-skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f4f4f5 0%,
+    #f4f4f5 40%,
+    #e4e4e7 50%,
+    #f4f4f5 60%,
+    #f4f4f5 100%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 2.85s ease-in-out infinite;
 }
 
 /* 标题出现：文字本身渐显，同时一道高光扫过 */

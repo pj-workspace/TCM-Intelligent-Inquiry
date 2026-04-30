@@ -194,7 +194,7 @@ export function Sidebar({
                       </DropdownMenu.Trigger>
                       <DropdownMenu.Portal>
                         <DropdownMenu.Content
-                          className="z-[300] min-w-[9rem] rounded-lg border border-[#e5e5e5] bg-white py-1 text-sm shadow-lg"
+                          className="ui-radix-floating z-[300] min-w-[9rem] rounded-lg border border-[#e5e5e5] bg-white py-1 text-sm shadow-lg"
                           align="end"
                           sideOffset={4}
                         >
@@ -367,7 +367,7 @@ export function Sidebar({
                             </DropdownMenu.Trigger>
                           <DropdownMenu.Portal>
                             <DropdownMenu.Content
-                              className="z-[300] min-w-[13rem] rounded-lg border border-[#e5e5e5] bg-white py-1 text-sm shadow-lg"
+                              className="ui-radix-floating z-[300] min-w-[13rem] rounded-lg border border-[#e5e5e5] bg-white py-1 text-sm shadow-lg"
                               align="end"
                               sideOffset={4}
                               onCloseAutoFocus={(e) => e.preventDefault()}
@@ -390,7 +390,7 @@ export function Sidebar({
                                 </DropdownMenu.SubTrigger>
                                 <DropdownMenu.Portal>
                                   <DropdownMenu.SubContent
-                                    className="z-[301] max-h-[min(60vh,16rem)] min-w-[10rem] overflow-y-auto rounded-lg border border-[#e5e5e5] bg-white py-1 text-sm shadow-lg"
+                                    className="ui-radix-floating z-[301] max-h-[min(60vh,16rem)] min-w-[10rem] overflow-y-auto rounded-lg border border-[#e5e5e5] bg-white py-1 text-sm shadow-lg"
                                     sideOffset={4}
                                   >
                                     <DropdownMenu.Item

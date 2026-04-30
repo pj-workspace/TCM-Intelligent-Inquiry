@@ -10,7 +10,12 @@ import {
   mapApiRowToMessage,
   sumThinkingDurations,
 } from "@/lib/chatUtils";
+import { toast } from "sonner";
+import { uploadOssChatImageWithProgress } from "@/lib/ossUpload";
+import { CHAT_PENDING_ATTACHMENT_MAX, CHAT_IMAGE_MIN_EDGE_PX } from "@/lib/chatAttachmentConstants";
+import { measureImageMinEdgePx, imageMinEdgeOkForChatVl } from "@/lib/chatImageDimensions";
 import type {
+  ChatMessage,
   Message,
   TraceMessage,
   ApiMessageRow,
@@ -28,6 +33,30 @@ const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
 const QWEN_CHAT_MODEL_LS_KEY = "tcm_qwen_chat_model";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * abort() + body stream 在读时中止时，不一定是 `Error/DOMException` 且 `.name=== "AbortError"`；
+ * Next/部分浏览器会直接报 network / stream premature close。
+ */
+function isLikelyUserAbort(err: unknown, signal: AbortSignal): boolean {
+  if (signal.aborted) return true;
+  if (
+    typeof DOMException !== "undefined" &&
+    err instanceof DOMException &&
+    err.name === "AbortError"
+  ) {
+    return true;
+  }
+  if (err instanceof Error && err.name === "AbortError") return true;
+  const msg =
+    typeof err === "object" &&
+    err !== null &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+      ? (err as { message: string }).message
+      : "";
+  return /aborted|The operation was aborted|premature close|ERR_STREAM_/i.test(msg);
+}
 
 export function useChat(opts: {
   autoFollowMainRef: React.MutableRefObject<boolean>;
@@ -77,6 +106,23 @@ export function useChat(opts: {
 
   const [chatModelOptions, setChatModelOptions] = useState<ModelOption[]>([]);
   const [selectedChatModelId, setSelectedChatModelIdState] = useState("");
+
+  /** 已上传待发送的图片 URL（OSS 签名） */
+  const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([]);
+  const [attachmentUploadBusy, setAttachmentUploadBusy] = useState(false);
+  /** 本次选择、正在上传的文件个数，用于骨架占位 */
+  const [attachmentUploadSkeletonCount, setAttachmentUploadSkeletonCount] = useState(0);
+  /** 与骨架一一对应，各文件上传进度 0~1（XHR 每次 onprogress 即时更新） */
+  const [attachmentUploadSlotProgress, setAttachmentUploadSlotProgress] = useState<number[]>([]);
+
+  const attachmentUploadSlotProgressRef = useRef<number[]>([]);
+
+  const cancelAttachmentUploadAnimations = useCallback(() => {
+    attachmentUploadSlotProgressRef.current = [];
+    setAttachmentUploadSlotProgress([]);
+    setAttachmentUploadBusy(false);
+    setAttachmentUploadSkeletonCount(0);
+  }, []);
 
   const setSelectedChatModelId = useCallback((id: string) => {
     setSelectedChatModelIdState(id);
@@ -263,7 +309,7 @@ export function useChat(opts: {
     async (
       userText: string,
       appendUserMessage: boolean,
-      streamOpts?: { regenerateLastReply?: boolean }
+      streamOpts?: { regenerateLastReply?: boolean; imageUrls?: string[] }
     ) => {
       if (!token) return;
 
@@ -273,9 +319,16 @@ export function useChat(opts: {
 
       if (appendUserMessage) {
         const userMsgId = Date.now().toString();
+        const imgs = streamOpts?.imageUrls?.filter((u) => u.trim()) ?? [];
         setMessages((prev) => [
           ...prev,
-          { id: userMsgId, role: "user", type: "message", content: userText },
+          {
+            id: userMsgId,
+            role: "user",
+            type: "message",
+            content: userText,
+            ...(imgs.length ? { imageUrls: imgs } : {}),
+          },
         ]);
       }
 
@@ -309,6 +362,9 @@ export function useChat(opts: {
             web_search_mode: webSearchMode,
             ...(effectiveChatModelForRequest
               ? { chat_model: effectiveChatModelForRequest }
+              : {}),
+            ...(streamOpts?.imageUrls?.length
+              ? { image_urls: streamOpts.imageUrls }
               : {}),
           }),
           signal: abortController.signal,
@@ -591,53 +647,67 @@ export function useChat(opts: {
         finalizeThinkingStep(currentTraceId, openThinkingStepId);
         if (currentTraceId) finalizeTrace(currentTraceId, false);
         await refreshServerConversations();
-        setGenState("idle");
+        if (!abortController.signal.aborted) {
+          setGenState("idle");
+        }
       } catch (error) {
-        // 用户主动终止：不显示错误，仅标记最后一条助手消息为已中断
-        if (error instanceof Error && error.name === "AbortError") {
+        // 真实网络/解析错误（用户主动中止在 finally 中收口，避免出现「伪网络错误」气泡）
+        if (!isLikelyUserAbort(error, abortController.signal)) {
+          console.error("Chat error:", error);
+          finalizeThinkingStep(currentTraceId, openThinkingStepId);
+          if (currentTraceId) finalizeTrace(currentTraceId, false);
+          thinkingStepStartedAt.current = {};
+          traceStartedAt.current = {};
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              role: "assistant",
+              type: "message",
+              content: "**网络错误**：无法连接到服务器，请确保后端服务已启动。",
+            },
+          ]);
+          setGenState("idle");
+        }
+      } finally {
+        if (abortController.signal.aborted) {
           finalizeThinkingStep(currentTraceId, openThinkingStepId);
           if (currentTraceId) finalizeTrace(currentTraceId, false);
           setMessages((prev) => {
             const lastAi = [...prev]
               .reverse()
-              .find((m) => m.type === "message" && m.role === "assistant");
+              .find((m): m is ChatMessage => m.type === "message" && m.role === "assistant");
             if (lastAi) {
+              if (lastAi.interrupted) return prev;
               return prev.map((m) =>
                 m.id === lastAi.id && m.type === "message" && m.role === "assistant"
                   ? { ...m, interrupted: true }
                   : m
               );
             }
+            const tail = prev[prev.length - 1];
+            if (
+              tail &&
+              tail.type === "message" &&
+              tail.role === "assistant" &&
+              tail.interrupted &&
+              !(tail.content || "").trim()
+            ) {
+              return prev;
+            }
             return [
               ...prev,
               {
-                id: Date.now().toString() + "-interrupted",
-                role: "assistant" as const,
-                type: "message" as const,
+                id: `${Date.now()}-interrupted`,
+                role: "assistant",
+                type: "message",
                 content: "",
                 interrupted: true,
               },
             ];
           });
           setGenState("idle");
-          return;
         }
-        console.error("Chat error:", error);
-        finalizeThinkingStep(currentTraceId, openThinkingStepId);
-        if (currentTraceId) finalizeTrace(currentTraceId, false);
-        thinkingStepStartedAt.current = {};
-        traceStartedAt.current = {};
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            role: "assistant",
-            type: "message",
-            content: "**网络错误**：无法连接到服务器，请确保后端服务已启动。",
-          },
-        ]);
-        setGenState("idle");
-      } finally {
         abortControllerRef.current = null;
         setIsGeneratingTitle(false);
       }
@@ -660,7 +730,7 @@ export function useChat(opts: {
   // ── Public handlers ────────────────────────────────────────────────────────
   const handleSend = useCallback(
     async (input: string, setInput: (v: string) => void) => {
-      if (!input.trim() || genState !== "idle") return;
+      if ((!input.trim() && pendingImageUrls.length === 0) || genState !== "idle") return;
       if (authLoading) return;
       if (!token) {
         try {
@@ -671,14 +741,168 @@ export function useChat(opts: {
         router.push("/login");
         return;
       }
-      const userText = input.trim();
+      const urlsSnap = [...pendingImageUrls];
+      const trimmed = input.trim();
+      const userText = trimmed || (urlsSnap.length > 0 ? "（附图）" : "");
       setInput("");
+      setPendingImageUrls([]);
       setHasStarted(true);
       autoFollowMainRef.current = true;
-      await runChatStream(userText, true);
+      try {
+        await runChatStream(userText, true, {
+          ...(urlsSnap.length ? { imageUrls: urlsSnap } : {}),
+        });
+      } catch {
+        setPendingImageUrls(urlsSnap);
+        setInput(trimmed);
+      }
     },
-    [genState, authLoading, token, router, autoFollowMainRef, runChatStream]
+    [
+      pendingImageUrls,
+      genState,
+      authLoading,
+      token,
+      router,
+      autoFollowMainRef,
+      runChatStream,
+    ]
   );
+
+  const pushImageAttachments = useCallback(
+    async (fileList: FileList | null) => {
+      if (!fileList?.length) return;
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+      const files = Array.from(fileList);
+      const bad = files.find((f) => !f.type.startsWith("image/"));
+      if (bad != null || files.length === 0) {
+        toast.error("请选择图片格式（JPEG/PNG/WebP/GIF）");
+        return;
+      }
+      const room = CHAT_PENDING_ATTACHMENT_MAX - pendingImageUrls.length;
+      if (room <= 0) {
+        toast.error(`最多可同时添加 ${CHAT_PENDING_ATTACHMENT_MAX} 个附件`);
+        return;
+      }
+      if (files.length > room) {
+        toast.error(
+          `最多 ${CHAT_PENDING_ATTACHMENT_MAX} 个，当前还可再选 ${room} 张`
+        );
+        return;
+      }
+
+      setAttachmentUploadBusy(true);
+      try {
+        const measured = await Promise.all(
+          files.map(async (file) => ({
+            file,
+            minEdge: await measureImageMinEdgePx(file),
+          }))
+        );
+
+        const skippedTooSmall = measured.filter(
+          (x) => !imageMinEdgeOkForChatVl(x.minEdge)
+        ).length;
+
+        const toUpload = measured
+          .filter((x) => imageMinEdgeOkForChatVl(x.minEdge))
+          .map((x) => x.file);
+
+        if (toUpload.length === 0) {
+          toast.error(
+            skippedTooSmall === files.length
+              ? `所选图片均小于 ${CHAT_IMAGE_MIN_EDGE_PX}×${CHAT_IMAGE_MIN_EDGE_PX} 像素（多模态要求宽、高均须大于 10px），已全部跳过。`
+              : "没有可上传的图片。"
+          );
+          return;
+        }
+
+        const m = toUpload.length;
+        const zeros = Array<number>(m).fill(0);
+        attachmentUploadSlotProgressRef.current = zeros.slice();
+        setAttachmentUploadSlotProgress(zeros);
+        setAttachmentUploadSkeletonCount(m);
+
+        const settled = await Promise.allSettled(
+          toUpload.map((file, i) =>
+            uploadOssChatImageWithProgress(token, file, (frac) => {
+              const buf = attachmentUploadSlotProgressRef.current;
+              if (buf.length !== m) return;
+              buf[i] = frac;
+              setAttachmentUploadSlotProgress((prev) => {
+                if (prev.length !== m) return prev;
+                const next = prev.slice();
+                next[i] = frac;
+                return next;
+              });
+            })
+          )
+        );
+
+        const okUrls: string[] = [];
+        const failedLines: string[] = [];
+        for (let i = 0; i < settled.length; i++) {
+          const r = settled[i];
+          if (r.status === "fulfilled") {
+            okUrls.push(r.value);
+            continue;
+          }
+          const name = toUpload[i]?.name?.trim();
+          const reason =
+            r.reason instanceof Error && r.reason.message
+              ? r.reason.message
+              : "上传失败";
+          failedLines.push(name ? `「${name}」${reason}` : reason);
+        }
+
+        if (okUrls.length > 0) {
+          setPendingImageUrls((prev) => [...prev, ...okUrls]);
+        }
+
+        const hintParts: string[] = [];
+        if (skippedTooSmall > 0) {
+          hintParts.push(
+            `已自动跳过 ${skippedTooSmall} 张尺寸过小（每张宽、高须≥${CHAT_IMAGE_MIN_EDGE_PX}px）的图片`
+          );
+        }
+        if (failedLines.length > 0) {
+          hintParts.push(
+            failedLines.length === 1
+              ? failedLines[0]!
+              : `${failedLines.length} 张未上传成功（${failedLines[0]} 等）`
+          );
+        }
+        if (hintParts.length > 0) {
+          const text = hintParts.join("；");
+          if (okUrls.length > 0) {
+            toast.warning(text, { duration: 5200 });
+          } else {
+            toast.error(text, { duration: 6200 });
+          }
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error && err.message
+            ? err.message
+            : "图片上传失败，请检查 OSS 配置与登录状态";
+        toast.error(msg, { duration: 5200 });
+      } finally {
+        cancelAttachmentUploadAnimations();
+      }
+    },
+    [
+      token,
+      router,
+      pendingImageUrls.length,
+      cancelAttachmentUploadAnimations,
+    ]
+  );
+
+  const removePendingImageUrlAt = useCallback((index: number) => {
+    setPendingImageUrls((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -693,11 +917,14 @@ export function useChat(opts: {
       let userText: string | null = null;
       for (let i = idx - 1; i >= 0; i--) {
         const m = messages[i];
-        if (m.type === "message" && m.role === "user" && m.content) {
-          userText = m.content;
-          userIdx = i;
-          break;
-        }
+        if (m.type !== "message" || m.role !== "user") continue;
+        const um = m as ChatMessage;
+        const hasTxt = !!(um.content || "").trim();
+        const hasPic = (um.imageUrls?.length ?? 0) > 0;
+        if (!hasTxt && !hasPic) continue;
+        userText = hasTxt ? um.content.trim() : "（附图）";
+        userIdx = i;
+        break;
       }
       if (!userText || userIdx < 0) return;
       setMessages((prev) => {
@@ -728,8 +955,15 @@ export function useChat(opts: {
     setHasStarted(false);
     setGenState("idle");
     setIsGeneratingTitle(false);
+    setPendingImageUrls([]);
+    cancelAttachmentUploadAnimations();
     if (token) void refreshServerConversations();
-  }, [token, refreshServerConversations, onNewChatScrollReset]);
+  }, [
+    token,
+    refreshServerConversations,
+    onNewChatScrollReset,
+    cancelAttachmentUploadAnimations,
+  ]);
 
   const handleSelectConversation = useCallback(
     async (id: string) => {
@@ -962,9 +1196,11 @@ export function useChat(opts: {
     setHasStarted(false);
     setGenState("idle");
     setIsGeneratingTitle(false);
+    setPendingImageUrls([]);
+    cancelAttachmentUploadAnimations();
     thinkingStepStartedAt.current = {};
     traceStartedAt.current = {};
-  }, [authLoading, token]);
+  }, [authLoading, token, cancelAttachmentUploadAnimations]);
 
   return {
     // state
@@ -992,6 +1228,12 @@ export function useChat(opts: {
     chatModelOptions,
     selectedChatModelId,
     setSelectedChatModelId,
+    pendingImageUrls,
+    attachmentUploadBusy,
+    attachmentUploadSkeletonCount,
+    attachmentUploadSlotProgress,
+    pushImageAttachments,
+    removePendingImageUrlAt,
     // handlers
     handleSend,
     handleStop,

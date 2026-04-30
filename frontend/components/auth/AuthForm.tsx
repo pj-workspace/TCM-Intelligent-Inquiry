@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense, forwardRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { Sun } from "lucide-react";
 import { toast } from "sonner";
 import { API_BASE, parseApiError } from "@/lib/api";
 import { useCooldownTimer } from "@/hooks/useCooldownTimer";
+import { AnimatePresence, motion } from "framer-motion";
+import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 
 type AuthFormProps = {
   onAuthenticated: () => void;
@@ -34,17 +36,15 @@ function OAuthIconGitHub() {
   );
 }
 
-function ThirdFlowModal({
-  provider,
-  flowId,
-  onClose,
-  finishLogin,
-}: {
-  provider: string;
-  flowId: string;
-  onClose: () => void;
-  finishLogin: (token: string) => void | Promise<void>;
-}) {
+const ThirdFlowModal = forwardRef<
+  HTMLDivElement,
+  {
+    provider: string;
+    flowId: string;
+    onClose: () => void;
+    finishLogin: (token: string) => void | Promise<void>;
+  }
+>(function ThirdFlowModal({ provider, flowId, onClose, finishLogin }, ref) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -134,8 +134,16 @@ function ThirdFlowModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-[#e5e5e5]">
+    <motion.div
+      ref={ref}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      {...uiModalBackdrop}
+    >
+      <motion.div
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-[#e5e5e5]"
+        onClick={(e) => e.stopPropagation()}
+        {...uiModalPanel}
+      >
         <h2 className="text-lg font-semibold mb-1">绑定邮箱</h2>
         <p className="text-sm text-gray-500 mb-4">
           请在下方填写邮箱并完成验证，以继续使用 {provider} 登录。
@@ -224,10 +232,12 @@ function ThirdFlowModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
-}
+});
+
+ThirdFlowModal.displayName = "ThirdFlowModal";
 
 function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
   const { login, register, loginWithToken, loginWithEmailCode } = useAuth();
@@ -783,9 +793,26 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
         </div>
       </form>
 
-      {showForgot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-[#e5e5e5]">
+      <AnimatePresence mode="sync">
+        {showForgot && (
+        <motion.div
+          key="auth-forgot"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (forgotMailBusy || forgotResetBusy) return;
+            setShowForgot(false);
+            setForgotStep("email");
+            setForgotCode("");
+            setNewPw("");
+          }}
+          {...uiModalBackdrop}
+        >
+          <motion.div
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-[#e5e5e5]"
+            onClick={(e) => e.stopPropagation()}
+            {...uiModalPanel}
+          >
             <h3 className="text-base font-semibold mb-1">忘记密码</h3>
             <p className="text-sm text-gray-500 mb-4">
               {forgotStep === "email"
@@ -872,25 +899,27 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
             >
               关闭
             </button>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        </motion.div>
+        )}
 
-      {thirdModal && (
-        <ThirdFlowModal
-          provider={thirdModal.provider}
-          flowId={thirdModal.flowId}
-          onClose={() => {
-            setThirdModal(null);
-            router.replace("/login");
-          }}
-          finishLogin={async (at: string) => {
-            await loginWithToken(at);
-            setThirdModal(null);
-            onAuthenticated();
-          }}
-        />
-      )}
+        {thirdModal && (
+          <ThirdFlowModal
+            key={thirdModal.flowId}
+            provider={thirdModal.provider}
+            flowId={thirdModal.flowId}
+            onClose={() => {
+              setThirdModal(null);
+              router.replace("/login");
+            }}
+            finishLogin={async (at: string) => {
+              await loginWithToken(at);
+              setThirdModal(null);
+              onAuthenticated();
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

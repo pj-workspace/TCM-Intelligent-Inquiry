@@ -85,7 +85,7 @@ export function Select({
         <Content
           position="popper"
           sideOffset={4}
-          className="z-[100] max-h-60 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-gray-200 bg-white py-1 shadow-md"
+          className="ui-radix-floating z-[100] max-h-60 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-gray-200 bg-white py-1 shadow-md"
         >
           <Viewport className="max-h-52 overflow-y-auto p-0.5">
             {options.map((opt) => {
