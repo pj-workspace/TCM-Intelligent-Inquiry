@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ from app.chat.schemas import (
     ConversationGroupRename,
     ConversationGroupAssign,
 )
+from app.chat.turn_resolve import resolve_chat_turn
 from app.chat.service import stream_chat
 from app.core.database import async_session_factory, get_session
 
@@ -53,6 +54,15 @@ async def chat(
             )
             await session.commit()
 
+    try:
+        resolved = resolve_chat_turn(
+            chat_model_body=req.chat_model,
+            deep_think=req.deep_think,
+            web_search_enabled=req.web_search_enabled,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     return StreamingResponse(
         stream_chat(
             req.message,
@@ -62,13 +72,36 @@ async def chat(
             user,
             req.anon_session_secret,
             req.regenerate_last_reply,
-            deep_think=req.deep_think,
-            web_search_enabled=req.web_search_enabled,
+            resolved=resolved,
             web_search_mode=req.web_search_mode,
             group_id=req.group_id,
         ),
         media_type="text/event-stream",
     )
+
+
+@router.get(
+    "/model-options",
+    summary="Qwen 可选对话模型与能力（未配置 OPTIONS 返回空数组）",
+)
+async def chat_model_options():
+    from app.core.config import get_settings, list_qwen_chat_model_option_rows
+
+    s = get_settings()
+    if (s.llm_provider or "").strip().lower() != "qwen":
+        return []
+    rows = list_qwen_chat_model_option_rows(s)
+    if not rows:
+        return []
+    return [
+        {
+            "id": r.id,
+            "label": r.label,
+            "capabilities": r.api_capabilities,
+            "default": r.default,
+        }
+        for r in rows
+    ]
 
 
 @router.get(

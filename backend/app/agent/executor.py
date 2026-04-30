@@ -4,6 +4,8 @@
 - agent_id 非空：从数据库加载 AgentRecord，按配置组装工具与提示（每请求构建）。
 """
 
+from __future__ import annotations
+
 import hashlib
 from collections import OrderedDict
 from typing import Literal
@@ -13,7 +15,12 @@ from langgraph.prebuilt import create_react_agent
 
 from app.agent.tools.loader import ensure_tools_loaded
 from app.agent.tools.registry import tool_registry
-from app.core.config import get_settings
+from app.core.config import (
+    get_settings,
+    list_qwen_chat_model_option_rows,
+    primary_qwen_chat_model,
+    qwen_option_for_model_id,
+)
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.safety import append_tcm_safety_to_system_prompt
@@ -39,6 +46,14 @@ _RAW_DEFAULT_SYSTEM_PROMPT = """\
 
 _DEFAULT_SYSTEM_PROMPT = append_tcm_safety_to_system_prompt(_RAW_DEFAULT_SYSTEM_PROMPT)
 
+_RAW_CHAT_ONLY_SYSTEM_PROMPT = """\
+你是面向中医领域的对话助手（当前模式不启用任何外部工具）。
+- 请仅凭自身知识作答，不要使用或假设已调用检索、方剂库或联网搜索。
+- 回答需严谨、符合中医科普与合规要求；若不足以判断请明确说明并及时建议就医。\
+"""
+
+_CHAT_ONLY_SYSTEM_PROMPT = append_tcm_safety_to_system_prompt(_RAW_CHAT_ONLY_SYSTEM_PROMPT)
+
 _WEB_SEARCH_TOOL_NAME = "searx_web_search"
 
 _DEEP_THINK_SUFFIX = """\
@@ -61,14 +76,14 @@ _WEB_SEARCH_AUTO_SUFFIX = """\
 
 
 def _dynamic_prompt_suffix(
-    deep_think: bool,
-    web_search_enabled: bool,
+    effective_deep_think: bool,
+    effective_web_search: bool,
     web_search_mode: Literal["auto", "force"],
 ) -> str:
     parts: list[str] = []
-    if deep_think:
+    if effective_deep_think:
         parts.append(_DEEP_THINK_SUFFIX)
-    if web_search_enabled:
+    if effective_web_search:
         parts.append(
             _WEB_SEARCH_FORCE_SUFFIX
             if web_search_mode == "force"
@@ -86,11 +101,48 @@ def _load_all_tools(*, web_search_enabled: bool = True):
     return tools
 
 
+def _primary_supports_tool_calling_cached() -> bool:
+    """与默认/有名编译缓存对齐的 primary 工具能力（OPTIONS 无时恒为 True）。"""
+    s = get_settings()
+    if (s.llm_provider or "").strip().lower() != "qwen":
+        return True
+    opts = list_qwen_chat_model_option_rows(s)
+    if not opts:
+        return True
+    row = qwen_option_for_model_id(primary_qwen_chat_model(s), settings=s)
+    if row is None:
+        return True
+    return row.supports_tool_calling
+
+
 def _default_graph_fingerprint() -> str:
     """LLM 相关配置 + 工具集变化时指纹变，用于热切换后换新图。"""
     ensure_tools_loaded()
     tool_names = tuple(sorted(tool_registry.names()))
     s = get_settings()
+    lp = (s.llm_provider or "qwen").strip().lower()
+    opts = list_qwen_chat_model_option_rows(s)
+
+    if lp == "qwen" and opts:
+        pid = primary_qwen_chat_model(s)
+        tc = _primary_supports_tool_calling_cached()
+        raw_sign = (
+            _RAW_DEFAULT_SYSTEM_PROMPT if tc else _RAW_CHAT_ONLY_SYSTEM_PROMPT
+        )
+        ph = hashlib.sha256(raw_sign.encode("utf-8")).hexdigest()[:16]
+        blob = repr(
+            (
+                "qwen_opts_v3",
+                pid,
+                "with_tools" if tc else "chat_only",
+                ph,
+                s.dashscope_api_key,
+                s.dashscope_base_url,
+                tool_names,
+            )
+        )
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
     blob = repr(
         (
             s.llm_provider,
@@ -109,7 +161,6 @@ def _default_graph_fingerprint() -> str:
             s.deepseek_base_url,
             s.deepseek_chat_model,
             tool_names,
-            # 默认系统提示变更须使缓存失效（指纹不含数据库 Agent 自定义提示）
             hashlib.sha256(_RAW_DEFAULT_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16],
         )
     )
@@ -122,10 +173,15 @@ def get_default_graph() -> CompiledStateGraph:
     if cached is not None:
         return cached
     llm = get_chat_model()
-    # 默认图不开放联网搜索工具——必须由用户显式开启才会加入工具列表
-    tools = _load_all_tools(web_search_enabled=False)
-    logger.info("创建默认 ReAct Agent，工具: %s", [t.name for t in tools])
-    graph = create_react_agent(llm, tools, prompt=_DEFAULT_SYSTEM_PROMPT)
+    primary_tc = _primary_supports_tool_calling_cached()
+    if primary_tc:
+        tools = _load_all_tools(web_search_enabled=False)
+        prompt = _DEFAULT_SYSTEM_PROMPT
+    else:
+        tools = []
+        prompt = _CHAT_ONLY_SYSTEM_PROMPT
+    logger.info("创建默认 ReAct Agent（primary_tools=%s），工具: %s", primary_tc, [t.name for t in tools])
+    graph = create_react_agent(llm, tools, prompt=prompt)
     _default_graph_by_fp[fp] = graph
     while len(_default_graph_by_fp) > _MAX_DEFAULT_GRAPHS:
         _default_graph_by_fp.pop(next(iter(_default_graph_by_fp)))
@@ -148,6 +204,8 @@ def invalidate_agent_graph_cache(agent_id: str | None = None) -> None:
 
 async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
     """构建 LangGraph Agent；无 agent_id 时返回缓存的默认图。"""
+    primary_tc = _primary_supports_tool_calling_cached()
+
     if not agent_id:
         return get_default_graph()
 
@@ -164,30 +222,41 @@ async def build_agent_graph(agent_id: str | None) -> CompiledStateGraph:
             logger.warning("Agent id=%s 不存在，回退默认 Agent", agent_id)
             return get_default_graph()
 
-        ensure_tools_loaded()
-        names = row.tool_names or []
-        if names:
-            tools = tool_registry.get(names)
-            if len(tools) != len(names):
-                found = {t.name for t in tools}
-                missing = [n for n in names if n not in found]
-                logger.warning("Agent 工具部分缺失，已忽略: %s", missing)
-        else:
-            tools = tool_registry.all()
-
-        if not tools:
-            tools = tool_registry.all()
-
         llm = get_chat_model()
-        base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
-        prompt = append_tcm_safety_to_system_prompt(base)
-        logger.info(
-            "创建 Agent id=%s name=%s tools=%s",
-            row.id,
-            row.name,
-            [t.name for t in tools],
-        )
-        graph = create_react_agent(llm, tools, prompt=prompt)
+        if primary_tc:
+            ensure_tools_loaded()
+            names = row.tool_names or []
+            if names:
+                tools = tool_registry.get(names)
+                if len(tools) != len(names):
+                    found = {t.name for t in tools}
+                    missing = [n for n in names if n not in found]
+                    logger.warning("Agent 工具部分缺失，已忽略: %s", missing)
+            else:
+                tools = tool_registry.all()
+
+            if not tools:
+                tools = tool_registry.all()
+
+            base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
+            prompt = append_tcm_safety_to_system_prompt(base)
+            logger.info(
+                "创建 Agent id=%s name=%s tools=%s",
+                row.id,
+                row.name,
+                [t.name for t in tools],
+            )
+            graph = create_react_agent(llm, tools, prompt=prompt)
+        else:
+            tools = []
+            prompt = _CHAT_ONLY_SYSTEM_PROMPT
+            logger.info(
+                "创建 Agent id=%s name=%s（primary 关闭工具挂载，仅用纯聊提示）tools=[]",
+                row.id,
+                row.name,
+            )
+            graph = create_react_agent(llm, tools, prompt=prompt)
+
         _named_agent_graphs[agent_id] = graph
         _named_agent_graphs.move_to_end(agent_id)
         while len(_named_agent_graphs) > _MAX_NAMED_AGENT_GRAPHS:
@@ -199,27 +268,37 @@ async def _build_ephemeral_agent_graph(
     agent_id: str | None,
     suffix: str,
     *,
-    deep_think: bool = False,
-    web_search_enabled: bool = False,
+    effective_deep_think: bool = False,
+    effective_web_search: bool = False,
+    chat_model_override: str,
+    effective_tool_calling: bool,
 ) -> CompiledStateGraph:
-    """不缓存；用于本轮带有深度思考 / 联网策略等动态系统提示后缀。
-
-    deep_think=True 时对支持思考通道的模型（如 Qwen DashScope）注入 enable_thinking。
-    web_search_enabled=False 时从工具列表中移除 searx_web_search，确保模型无法调用。
-    """
-    ensure_tools_loaded()
-    llm = get_chat_model(enable_thinking=deep_think)
+    mid = chat_model_override.strip()
+    llm = get_chat_model(
+        enable_thinking=effective_deep_think,
+        chat_model_override=mid,
+    )
     extra = suffix.strip()
+
     if not agent_id:
-        tools = _load_all_tools(web_search_enabled=web_search_enabled)
-        raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
-        prompt = append_tcm_safety_to_system_prompt(raw)
-        logger.info(
-            "创建临时 ReAct Agent（动态提示，enable_thinking=%s，web_search=%s），工具: %s",
-            deep_think,
-            web_search_enabled,
-            [t.name for t in tools],
-        )
+        if not effective_tool_calling:
+            tools: list = []
+            raw = _RAW_CHAT_ONLY_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+            prompt = append_tcm_safety_to_system_prompt(raw)
+            logger.info(
+                "临时 ReAct Agent（默认、纯聊、thinking=%s）tools=[]",
+                effective_deep_think,
+            )
+        else:
+            tools = _load_all_tools(web_search_enabled=effective_web_search)
+            raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+            prompt = append_tcm_safety_to_system_prompt(raw)
+            logger.info(
+                "临时 ReAct Agent（默认），thinking=%s web=%s tools=%s",
+                effective_deep_think,
+                effective_web_search,
+                [t.name for t in tools],
+            )
         return create_react_agent(llm, tools, prompt=prompt)
 
     from app.agent.models import AgentRecord
@@ -227,16 +306,38 @@ async def _build_ephemeral_agent_graph(
     async with async_session_factory() as session:
         row = await session.get(AgentRecord, agent_id)
         if row is None:
-            tools = _load_all_tools(web_search_enabled=web_search_enabled)
-            raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+            if not effective_tool_calling:
+                tools = []
+                raw = _RAW_CHAT_ONLY_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+                prompt = append_tcm_safety_to_system_prompt(raw)
+                logger.warning(
+                    "Agent id=%s 不存在，临时纯聊兜底 tools=[]",
+                    agent_id,
+                )
+            else:
+                tools = _load_all_tools(web_search_enabled=effective_web_search)
+                raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
+                prompt = append_tcm_safety_to_system_prompt(raw)
+                logger.warning(
+                    "Agent id=%s 不存在，使用默认提示 + 动态后缀；tools=%s",
+                    agent_id,
+                    [t.name for t in tools],
+                )
+            return create_react_agent(llm, tools, prompt=prompt)
+
+        if not effective_tool_calling:
+            tools = []
+            raw = _RAW_CHAT_ONLY_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
             prompt = append_tcm_safety_to_system_prompt(raw)
-            logger.warning(
-                "Agent id=%s 不存在，使用默认配置 + 动态后缀；工具: %s",
-                agent_id,
-                [t.name for t in tools],
+            logger.info(
+                "临时 Agent id=%s name=%s 纯聊 tools=[] thinking=%s",
+                row.id,
+                row.name,
+                effective_deep_think,
             )
             return create_react_agent(llm, tools, prompt=prompt)
 
+        ensure_tools_loaded()
         names = row.tool_names or []
         if names:
             tools = tool_registry.get(names)
@@ -248,20 +349,20 @@ async def _build_ephemeral_agent_graph(
             tools = tool_registry.all()
         if not tools:
             tools = tool_registry.all()
-        # 无论 AgentRecord 工具列表如何，联网工具仍受用户开关约束
-        if not web_search_enabled:
+        if not effective_web_search:
             tools = [t for t in tools if t.name != _WEB_SEARCH_TOOL_NAME]
 
         base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
         raw = base + ("\n\n" + extra if extra else "")
         prompt = append_tcm_safety_to_system_prompt(raw)
         logger.info(
-            "创建临时 Agent id=%s name=%s tools=%s（动态提示，enable_thinking=%s，web_search=%s）",
+            "临时 Agent id=%s name=%s tools=%s thinking=%s web=%s model=%s",
             row.id,
             row.name,
             [t.name for t in tools],
-            deep_think,
-            web_search_enabled,
+            effective_deep_think,
+            effective_web_search,
+            mid,
         )
         return create_react_agent(llm, tools, prompt=prompt)
 
@@ -269,22 +370,51 @@ async def _build_ephemeral_agent_graph(
 async def build_agent_graph_for_chat_request(
     agent_id: str | None,
     *,
-    deep_think: bool = False,
-    web_search_enabled: bool = False,
+    chat_model_override: str,
+    effective_deep_think: bool,
+    effective_web_search: bool,
     web_search_mode: Literal["auto", "force"] = "force",
+    effective_tool_calling: bool,
 ) -> CompiledStateGraph:
-    """按本轮选项拼接系统提示；无选项时走缓存的 build_agent_graph。
+    """按本轮 effective 模型与能力构图；仅当满足缓存充要条件时命中 default/named 编译缓存。"""
+    s = get_settings()
+    lp = (s.llm_provider or "").strip().lower()
 
-    深度思考 / 联网搜索完全由前端按钮控制（deep_think / web_search_enabled），
-    不再依赖全局配置覆盖，逻辑更清晰。
-    """
-    suffix = _dynamic_prompt_suffix(deep_think, web_search_enabled, web_search_mode)
-    if not suffix and not deep_think:
-        # 无动态选项，但仍需确保默认图剔除了联网工具
+    suffix = _dynamic_prompt_suffix(
+        effective_deep_think,
+        effective_web_search,
+        web_search_mode,
+    )
+
+    if lp != "qwen":
+        if not suffix and not effective_deep_think:
+            return await build_agent_graph(agent_id)
+        return await _build_ephemeral_agent_graph(
+            agent_id,
+            suffix,
+            effective_deep_think=effective_deep_think,
+            effective_web_search=effective_web_search,
+            chat_model_override=chat_model_override,
+            effective_tool_calling=effective_tool_calling,
+        )
+
+    primary_mid = primary_qwen_chat_model(s)
+    primary_tc = _primary_supports_tool_calling_cached()
+
+    hits_cache = (
+        (chat_model_override or "").strip() == primary_mid.strip()
+        and not suffix
+        and effective_tool_calling == primary_tc
+    )
+
+    if hits_cache:
         return await build_agent_graph(agent_id)
+
     return await _build_ephemeral_agent_graph(
         agent_id,
         suffix,
-        deep_think=deep_think,
-        web_search_enabled=web_search_enabled,
+        effective_deep_think=effective_deep_think,
+        effective_web_search=effective_web_search,
+        chat_model_override=chat_model_override,
+        effective_tool_calling=effective_tool_calling,
     )

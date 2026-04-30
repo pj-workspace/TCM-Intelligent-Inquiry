@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
-from app.core.config import get_settings
+from app.core.config import get_settings, primary_qwen_chat_model
 
 # 嵌入模型按「Key + 模型名」指纹缓存，避免每次检索新建客户端；配置变更后自动换新实例
 _emb_fp: str | None = None
@@ -64,15 +64,19 @@ class DashScopeChatOpenAI(ChatOpenAI):
         return gen
 
 
-def build_qwen_chat(enable_thinking: bool = False) -> ChatOpenAI:
+def build_qwen_chat(
+    enable_thinking: bool = False,
+    chat_model_override: str | None = None,
+) -> ChatOpenAI:
     s = get_settings()
     key = (s.dashscope_api_key or "").strip()
     if not key:
         raise ValueError("llm_provider=qwen 时请配置 DASHSCOPE_API_KEY")
-    # DashScope 兼容 OpenAI 接口：深度思考需 extra_body（与官方 SDK chat.completions.create 一致）
-    # enable_thinking 优先级：调用方显式传 True（用户点击深度思考）> .env QWEN_ENABLE_THINKING 全局开关
+    model_name = (
+        (chat_model_override or "").strip() or primary_qwen_chat_model(s)
+    )
     kwargs: dict = {
-        "model": s.qwen_chat_model,
+        "model": model_name,
         "api_key": key,
         "base_url": s.dashscope_base_url,
         "temperature": 0.2,

@@ -8,6 +8,8 @@ import asyncio
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any, Literal
 
+from app.chat.turn_resolve import ResolvedChatTurn
+
 from app.agent.executor import build_agent_graph_for_chat_request
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -20,13 +22,22 @@ from app.chat.schemas import ChatMessage
 from app.core.chat_context import chat_agent_kb_id, chat_user_id
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
-from app.core.config import active_chat_model_label
+from app.core.config import active_chat_model_label, get_settings, primary_qwen_chat_model
 from app.core.safety import STREAM_SAFETY_NOTICE
 
 if TYPE_CHECKING:
     from app.auth.models import UserRecord
 
 logger = get_logger(__name__)
+
+
+def _meta_chat_model_label(rt: ResolvedChatTurn) -> str:
+    s = get_settings()
+    if (s.llm_provider or "").strip().lower() != "qwen":
+        return active_chat_model_label()
+    mid = (rt.llm_chat_model_id or "").strip()
+    return active_chat_model_label(mid or None)
+
 
 _TOOL_IO_MAX = 8000
 _THINKING_MAX = 16000
@@ -185,16 +196,31 @@ async def _messages_to_lc(session: AsyncSession, conversation_id: str) -> list[H
     return out
 
 
-async def _generate_title_async(msg_in: str, conv_id: str) -> str:
+async def _generate_title_async(
+    msg_in: str,
+    conv_id: str,
+    *,
+    chat_model_id: str | None = None,
+) -> str:
     """异步生成标题并更新到数据库"""
     from app.llm.chat_factory import build_chat_model
+
     from sqlalchemy import update
 
     fallback_title = _truncate(msg_in, 10)
     title = fallback_title
 
     try:
-        model = build_chat_model()
+        s = get_settings()
+        ov: str | None = None
+        if (s.llm_provider or "").strip().lower() == "qwen":
+            qs = primary_qwen_chat_model(s)
+            ov = ((chat_model_id or "").strip() or qs)
+
+        model = build_chat_model(
+            enable_thinking=False,
+            chat_model_override=ov,
+        )
         prompt = (
             "请根据用户的首条消息，总结出一个简短的会话标题（10个字以内）。"
             "只输出标题文本，不要包含任何标点符号、引号或额外解释。\n\n"
@@ -242,8 +268,7 @@ async def stream_chat(
     anon_session_secret: str | None = None,
     regenerate_last_reply: bool = False,
     *,
-    deep_think: bool = False,
-    web_search_enabled: bool = False,
+    resolved: ResolvedChatTurn,
     web_search_mode: Literal["force", "auto"] = "force",
     group_id: str | None = None,
 ) -> AsyncIterator[str]:
@@ -367,13 +392,15 @@ async def stream_chat(
             lc_messages = prior + [HumanMessage(content=msg_in)]
             
             # 开启异步标题生成任务
-            title_task = asyncio.create_task(_generate_title_async(msg_in, conv_id))
+            title_task = asyncio.create_task(
+                _generate_title_async(msg_in, conv_id, chat_model_id=resolved.llm_chat_model_id)
+            )
 
         meta_out: dict[str, Any] = {
             "type": "meta",
             "conversationId": conv_id,
             "agentId": agent_id,
-            "chatModel": active_chat_model_label(),
+            "chatModel": _meta_chat_model_label(resolved),
             "safetyNotice": STREAM_SAFETY_NOTICE,
         }
         if anon_sec:
@@ -392,9 +419,11 @@ async def stream_chat(
 
         graph = await build_agent_graph_for_chat_request(
             effective_agent_id,
-            deep_think=deep_think,
-            web_search_enabled=web_search_enabled,
+            chat_model_override=resolved.llm_chat_model_id,
+            effective_deep_think=resolved.effective_deep_think,
+            effective_web_search=resolved.effective_web_search,
             web_search_mode=web_search_mode,
+            effective_tool_calling=resolved.effective_tool_calling,
         )
 
         assistant_parts: list[str] = []
@@ -542,7 +571,7 @@ async def stream_chat(
 
         await flush_thinking_segment()
         assistant_text = "".join(assistant_parts)
-        _model_label = active_chat_model_label()
+        _model_label = _meta_chat_model_label(resolved)
         async with async_session_factory() as session:
             session.add(
                 MessageRecord(
@@ -589,7 +618,7 @@ async def stream_chat(
                             conversation_id=conv_id,
                             role="assistant",
                             content="（回复生成中断，请稍后重试。）",
-                            model_name=active_chat_model_label(),
+                            model_name=_meta_chat_model_label(resolved),
                         )
                     )
                     await session.commit()

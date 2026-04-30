@@ -98,6 +98,9 @@ export function HomePageClient() {
     setWebSearchEnabled,
     webSearchMode,
     setWebSearchMode,
+    chatModelOptions,
+    selectedChatModelId,
+    setSelectedChatModelId,
     handleStop,
     handleRegenerateAssistant,
     handleNewChat,
@@ -113,6 +116,31 @@ export function HomePageClient() {
     togglePinConversation,
     deleteConversationsBulk,
   } = chat;
+
+  const inputBarModelCaps = useMemo(() => {
+    const defaults = {
+      attachmentDisabled: false,
+      deepThinkDisabledByModel: false,
+      webSearchDisabledByModel: false,
+    };
+    if (chatModelOptions.length === 0) return defaults;
+    const effectiveId =
+      selectedChatModelId.trim() ||
+      chatModelOptions.find((o) => o.default)?.id ||
+      chatModelOptions[0]?.id ||
+      "";
+    const row = chatModelOptions.find((x) => x.id === effectiveId);
+    if (!row) return defaults;
+    const input = row.capabilities?.input;
+    const hasImage = Array.isArray(input) && input.includes("image");
+    const tools = row.capabilities?.supports_tool_calling !== false;
+    const deep = row.capabilities?.supports_deep_think !== false;
+    return {
+      attachmentDisabled: !hasImage,
+      deepThinkDisabledByModel: !deep,
+      webSearchDisabledByModel: !tools,
+    };
+  }, [chatModelOptions, selectedChatModelId]);
 
   const scopedConversations = useMemo(() => {
     if (!token) return [];
@@ -866,6 +894,12 @@ export function HomePageClient() {
               setWebSearchEnabled(true);
               setWebSearchMode(mode);
             }}
+            modelOptions={chatModelOptions}
+            selectedModelId={selectedChatModelId}
+            onSelectModel={setSelectedChatModelId}
+            attachmentDisabled={inputBarModelCaps.attachmentDisabled}
+            deepThinkDisabledByModel={inputBarModelCaps.deepThinkDisabledByModel}
+            webSearchDisabledByModel={inputBarModelCaps.webSearchDisabledByModel}
             placeholder={
               viewingGroupLanding ? "在这里提问，新建对话" : undefined
             }

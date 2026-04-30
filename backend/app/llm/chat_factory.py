@@ -6,14 +6,20 @@ from langchain_openai import ChatOpenAI
 from app.core.config import get_settings
 
 
-def build_chat_model(enable_thinking: bool = False) -> BaseChatModel:
+def build_chat_model(
+    enable_thinking: bool = False,
+    chat_model_override: str | None = None,
+) -> BaseChatModel:
     s = get_settings()
     p = (s.llm_provider or "qwen").strip().lower()
 
     if p == "qwen":
         from app.llm.providers.qwen import build_qwen_chat
 
-        return build_qwen_chat(enable_thinking=enable_thinking)
+        return build_qwen_chat(
+            enable_thinking=enable_thinking,
+            chat_model_override=chat_model_override,
+        )
 
     if p == "openai":
         key = (s.openai_api_key or "").strip()

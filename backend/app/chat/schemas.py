@@ -50,6 +50,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="仅在新建会话（未传 conversation_id）时生效：将把会话归入该分组，须为当前用户的分组 ID。",
     )
+    chat_model: str | None = Field(
+        default=None,
+        description="仅 llm_provider=qwen 且配置了 QWEN_CHAT_MODEL_OPTIONS 时有效；DashScope model id。",
+    )
 
 
 class ConversationItem(BaseModel):

@@ -19,10 +19,13 @@ import type {
   ToolStep,
   ConversationFolder,
 } from "@/types/chat";
+import type { ModelOption } from "@/types/models";
 
 const PINNED_IDS_KEY = "tcm_pinned_conversation_ids";
 
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
+
+const QWEN_CHAT_MODEL_LS_KEY = "tcm_qwen_chat_model";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -71,6 +74,83 @@ export function useChat(opts: {
   const [deepThinkEnabled, setDeepThinkEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [webSearchMode, setWebSearchMode] = useState<"force" | "auto">("force");
+
+  const [chatModelOptions, setChatModelOptions] = useState<ModelOption[]>([]);
+  const [selectedChatModelId, setSelectedChatModelIdState] = useState("");
+
+  const setSelectedChatModelId = useCallback((id: string) => {
+    setSelectedChatModelIdState(id);
+    try {
+      if (id.trim()) localStorage.setItem(QWEN_CHAT_MODEL_LS_KEY, id.trim());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const effectiveChatModelForRequest = useMemo(() => {
+    if (chatModelOptions.length === 0) return undefined as string | undefined;
+    const primary =
+      chatModelOptions.find((o) => o.default)?.id ??
+      chatModelOptions[0]?.id ??
+      "";
+    const sid = selectedChatModelId.trim();
+    return sid || primary;
+  }, [chatModelOptions, selectedChatModelId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/chat/model-options`);
+        if (!r.ok) throw new Error(String(r.status));
+        const raw = (await r.json()) as unknown;
+        if (!Array.isArray(raw)) throw new Error("invalid shape");
+        const data = raw as ModelOption[];
+        if (cancelled) return;
+        setChatModelOptions(data);
+        if (data.length === 0) {
+          setSelectedChatModelIdState("");
+          return;
+        }
+        const primaryId = data.find((o) => o.default === true)?.id ?? data[0]?.id ?? "";
+        let pick = primaryId;
+        try {
+          const ls = localStorage.getItem(QWEN_CHAT_MODEL_LS_KEY)?.trim();
+          if (ls && data.some((o) => o.id === ls)) pick = ls;
+          else localStorage.removeItem(QWEN_CHAT_MODEL_LS_KEY);
+        } catch {
+          /* ignore */
+        }
+        setSelectedChatModelIdState(pick);
+        try {
+          localStorage.setItem(QWEN_CHAT_MODEL_LS_KEY, pick);
+        } catch {
+          /* ignore */
+        }
+      } catch (e) {
+        console.warn(
+          "[useChat] GET /api/chat/model-options 失败，不向请求写入 chat_model，由服务端默认主模型兜底",
+          e
+        );
+        if (!cancelled) {
+          setChatModelOptions([]);
+          setSelectedChatModelIdState("");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const o = chatModelOptions.find((x) => x.id === selectedChatModelId);
+    if (!o || chatModelOptions.length === 0) return;
+    const deepOk = o.capabilities?.supports_deep_think !== false;
+    const toolOk = o.capabilities?.supports_tool_calling !== false;
+    if (!deepOk) setDeepThinkEnabled(false);
+    if (!toolOk) setWebSearchEnabled(false);
+  }, [selectedChatModelId, chatModelOptions]);
 
   // ── Computed ───────────────────────────────────────────────────────────────
   const lastAssistantMessageId = useMemo(() => {
@@ -227,7 +307,9 @@ export function useChat(opts: {
             deep_think: deepThinkEnabled,
             web_search_enabled: webSearchEnabled,
             web_search_mode: webSearchMode,
-            ...(preferredGid ? { group_id: preferredGid } : {}),
+            ...(effectiveChatModelForRequest
+              ? { chat_model: effectiveChatModelForRequest }
+              : {}),
           }),
           signal: abortController.signal,
         });
@@ -566,6 +648,7 @@ export function useChat(opts: {
       deepThinkEnabled,
       webSearchEnabled,
       webSearchMode,
+      effectiveChatModelForRequest,
       autoFollowMainRef,
       finalizeThinkingStep,
       finalizeTrace,
@@ -906,6 +989,9 @@ export function useChat(opts: {
     setWebSearchEnabled,
     webSearchMode,
     setWebSearchMode,
+    chatModelOptions,
+    selectedChatModelId,
+    setSelectedChatModelId,
     // handlers
     handleSend,
     handleStop,

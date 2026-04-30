@@ -1,7 +1,14 @@
+from __future__ import annotations
+
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.qwen_chat_options import (
+    QwenChatModelOptionRow,
+    parse_qwen_chat_model_options,
+)
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -33,6 +40,10 @@ class Settings(BaseSettings):
     )
     qwen_chat_model: str = Field(
         default="qwen-plus", description="对话模型名（兼容 OpenAI 接口）"
+    )
+    qwen_chat_model_options: str = Field(
+        default="",
+        description="可选：单行 JSON 数组；非空时必须合法且恰好一项 default:true（见 README）",
     )
     qwen_embedding_model: str = Field(
         default="text-embedding-v3", description="DashScope 向量模型名"
@@ -222,11 +233,26 @@ class Settings(BaseSettings):
 
     # ── 服务 ──────────────────────────────────────────────────────────────────
     cors_origins: str = Field(
-        default="http://localhost:3000", description="逗号分隔的允许跨域来源"
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        description="逗号分隔的允许跨域来源（开发时 localhost 与 127.0.0.1 均需列入，否则另一侧无法拉模型列表）",
     )
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @field_validator("qwen_chat_model_options", mode="before")
+    @classmethod
+    def _coerce_qwen_options_blank(cls, v: object) -> object:
+        if v is None:
+            return ""
+        return v
+
+    @model_validator(mode="after")
+    def _validate_qwen_options_json(self) -> Settings:
+        raw = (self.qwen_chat_model_options or "").strip()
+        if raw:
+            parse_qwen_chat_model_options(raw)
+        return self
 
     def database_url_sync(self) -> str:
         """供 Alembic / 同步脚本使用（psycopg2）。"""
@@ -241,18 +267,65 @@ def get_settings() -> Settings:
     return Settings()
 
 
-def active_chat_model_label() -> str:
-    """当前 LLM_PROVIDER 下实际用于对话的模型名（供前端展示）。"""
+def list_qwen_chat_model_option_rows(settings: Settings | None = None) -> list[QwenChatModelOptionRow]:
+    s = settings or get_settings()
+    return parse_qwen_chat_model_options(s.qwen_chat_model_options)
+
+
+def primary_qwen_chat_model(settings: Settings | None = None) -> str:
+    """配置了 OPTIONS 时取唯一 default:true 的 id，否则退回 QWEN_CHAT_MODEL。"""
+    s = settings or get_settings()
+    opts = list_qwen_chat_model_option_rows(s)
+    if opts:
+        for row in opts:
+            if row.default:
+                return row.id
+        return opts[0].id
+    return (s.qwen_chat_model or "").strip()
+
+
+def qwen_option_for_model_id(
+    model_id: str,
+    *,
+    settings: Settings | None = None,
+) -> QwenChatModelOptionRow | None:
+    mid = (model_id or "").strip()
+    if not mid:
+        return None
+    for row in list_qwen_chat_model_option_rows(settings):
+        if row.id == mid:
+            return row
+    return None
+
+
+def active_chat_model_label(chat_model_id: str | None = None) -> str:
+    """展示用标签：传入本轮 effective id 时对 qwen+OPTIONS 返回 label；不传则环境与旧版一致。"""
     s = get_settings()
     p = (s.llm_provider or "qwen").strip().lower()
-    if p == "qwen":
+
+    def _fallback_non_qwen() -> str:
+        if p == "openai":
+            return s.openai_chat_model
+        if p == "anthropic":
+            return s.anthropic_chat_model
+        if p == "glm":
+            return s.glm_chat_model
+        if p == "deepseek":
+            return s.deepseek_chat_model
         return s.qwen_chat_model
-    if p == "openai":
-        return s.openai_chat_model
-    if p == "anthropic":
-        return s.anthropic_chat_model
-    if p == "glm":
-        return s.glm_chat_model
-    if p == "deepseek":
-        return s.deepseek_chat_model
+
+    if p != "qwen":
+        return _fallback_non_qwen()
+
+    opts = list_qwen_chat_model_option_rows(s)
+    mid = chat_model_id
+    if mid is None:
+        mid = primary_qwen_chat_model(s)
+
+    if opts:
+        hit = qwen_option_for_model_id(mid, settings=s)
+        if hit is not None:
+            return hit.label
+        return mid
+
     return s.qwen_chat_model

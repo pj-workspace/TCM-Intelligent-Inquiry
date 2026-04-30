@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.config import get_settings
+from app.core.config import get_settings, primary_qwen_chat_model, list_qwen_chat_model_option_rows
 from app.core.exceptions import AppError, app_error_handler
 from app.core.logging import configure_logging, get_logger
 from app.core.database import init_db
@@ -51,6 +51,20 @@ async def lifespan(_: FastAPI):
         emb_p,
         emb_model,
     )
+    if (
+        (s.llm_provider or "").strip().lower() == "qwen"
+        and list_qwen_chat_model_option_rows(s)
+    ):
+        prim = primary_qwen_chat_model(s)
+        if (s.qwen_chat_model or "").strip() != prim:
+            logger.warning(
+                "QWEN_CHAT_MODEL=%s 与 QWEN_CHAT_MODEL_OPTIONS 中 default id=%s 不一致，请将二者对齐以利缓存与运维预期",
+                (s.qwen_chat_model or "").strip(),
+                prim,
+            )
+        from app.agent.executor import invalidate_default_graph_cache
+
+        invalidate_default_graph_cache()
     probe_task: asyncio.Task | None = None
     if s.mcp_probe_interval_seconds > 0:
         from app.mcp.health import run_mcp_probe_loop

@@ -15,7 +15,7 @@
 | **方剂库** | PostgreSQL 结构化存储（与向量知识库分离）；Agent 工具 **`formula_lookup`**（方名）、**`recommend_formulas`**（症状/证型线索）；种子见 `backend/data/formulas_seed.json`；推荐融合 **关键词分 + `pg_trgm` 相似度 + `simple` 全文 OR**；同义词组见 `backend/data/symptom_synonyms.json`（不改表结构） |
 | **MCP** | 注册 MCP 服务（Streamable HTTP / SSE）；工具自动包装为 LangChain 工具（`mcp_*` 前缀）挂入 Agent |
 | **异步入库** | 可选 **Celery** 执行大文件入库；或 `CELERY_INGEST_ENABLED=false` 使用 FastAPI `BackgroundTasks` |
-| **多模型** | 通过 `LLM_PROVIDER` 切换：`qwen` / `openai` / `anthropic` / `glm` / `deepseek`（OpenAI 兼容接口用统一 `ChatOpenAI`） |
+| **多模型** | 通过 `LLM_PROVIDER` 切换：`qwen` / `openai` / `anthropic` / `glm` / `deepseek`（OpenAI 兼容接口用统一 `ChatOpenAI`）；**Qwen** 可选用 `QWEN_CHAT_MODEL_OPTIONS` 做多模型与白名单 |
 | **安全提示** | 系统提示与流式首包携带中医咨询**合规提示**（非诊疗声明） |
 | **配置热切换** | 修改 `backend/.env` 后，**下一轮 API 请求**会重新读取 LLM / 重排等配置（无需重启 uvicorn）；数据库连接串、Redis 客户端、Celery worker 等仍以进程启动时为准，变更后需重启对应进程 |
 
@@ -118,6 +118,14 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 健康检查：`GET http://localhost:8000/health`，依赖检查：`GET http://localhost:8000/health/deps`。
 
+#### Qwen 多模型与白名单（`QWEN_CHAT_MODEL_OPTIONS`，可选）
+
+若 `LLM_PROVIDER=qwen` 且配置了单行 JSON **`QWEN_CHAT_MODEL_OPTIONS`**（示例见 **`backend/.env.example`**），则前端可下拉切换模型，服务端对白名单 **`chat_model`** 做校验。要点：
+
+- **`QWEN_CHAT_MODEL`** 须与 OPTIONS 中带 **`"default": true`** 的 **`id`** 一致（否则运行时 **warning**）。未启用 OPTIONS（空数组或留空）时仍只使用 **`QWEN_CHAT_MODEL`**，并忽略请求体里的 **`chat_model`**。
+- **`capabilities`**：**`supports_tool_calling: false`** 时不挂载任何工具（含联网 `searx_web_search`/知识库/MCP）；联网有效条件为 **`web_search_enabled ∧ supports_tool_calling`**。**`supports_deep_think`** 决定是否允许深度思考。**`vendor_native_online_search`** 若存在仅占位。**`input`** 含 **`image`** 时前端放开附件占位，否则禁用（本条仅 UI；多模态进模型后续可做）。
+- 同一会话内可随时改下拉再发下一条；**重新生成**使用**当下**所选模型，不按消息历史存档。**`GET /api/chat/model-options`** 可不携带 JWT。**非法 JSON** 或「非空 OPTIONS 但并非恰好一项 `default:true`」将导致 **Settings 校验失败**，无法在无效配置下启动。
+
 ### 5.（可选）启动 Celery Worker（异步入库）
 
 ```bash
@@ -140,7 +148,7 @@ docker compose --profile worker up -d worker
 核心变量见 **`backend/.env.example`**，主要包括：
 
 - **`LLM_PROVIDER`**：`qwen` | `openai` | `anthropic` | `glm` | `deepseek`  
-- **DashScope**：`DASHSCOPE_API_KEY`、`QWEN_CHAT_MODEL`、`QWEN_EMBEDDING_MODEL`、`DASHSCOPE_BASE_URL`  
+- **DashScope**：`DASHSCOPE_API_KEY`、`QWEN_CHAT_MODEL`、`QWEN_CHAT_MODEL_OPTIONS`（可选）、`QWEN_EMBEDDING_MODEL`、`DASHSCOPE_BASE_URL`  
 - **检索重排序**：`RERANK_ENABLED`、`DASHSCOPE_RERANK_MODEL`、`RERANK_CANDIDATE_MULTIPLIER`、`RERANK_MAX_CANDIDATES`  
 - **异步入库**：`CELERY_INGEST_ENABLED`  
 - **JWT / CORS / 默认知识库 ID** 等  
@@ -154,7 +162,8 @@ docker compose --profile worker up -d worker
 | 前缀 | 说明 |
 |------|------|
 | `POST /api/auth/register`、`/login`、`GET /api/auth/me` | 注册、登录、当前用户 |
-| `POST /api/chat` | 流式对话（SSE） |
+| `POST /api/chat` | 流式对话（SSE）；可选 `chat_model`、`deep_think`、`web_search_*` |
+| `GET /api/chat/model-options` | Qwen 配置了 `QWEN_CHAT_MODEL_OPTIONS` 时返回模型与 capabilities |
 | `GET /api/chat/conversations`、`.../messages` | 会话与消息列表 |
 | `GET/POST /api/knowledge` 等 | 知识库与上传、检索、`ingest-async`、任务状态 |
 | `GET/POST /api/mcp` 等 | MCP 服务注册、刷新工具、删除 |
