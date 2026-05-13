@@ -113,10 +113,10 @@ alembic upgrade head
 
 ```bash
 cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-健康检查：`GET http://localhost:8000/health`，依赖检查：`GET http://localhost:8000/health/deps`。
+健康检查：`GET http://localhost:8001/health`，依赖检查：`GET http://localhost:8001/health/deps`。
 
 #### Qwen 多模型与白名单（`QWEN_CHAT_MODEL_OPTIONS`，可选）
 

@@ -18,7 +18,7 @@
 
 - **Node.js**：建议使用当前 LTS（例如 20.x），与团队 CI 一致即可。
 - **包管理**：任选 `npm` / `pnpm` / `yarn` / `bun`（下文以 `npm` 为例）。
-- **后端**：本地需可访问 FastAPI（默认 `http://127.0.0.1:8000`），且后端 `CORS_ORIGINS` 包含前端源（如 `http://localhost:3000`）。
+- **后端**：本地需可访问 FastAPI（默认 `http://127.0.0.1:8001`），且后端 `CORS_ORIGINS` 包含前端源（如 `http://localhost:3000`）。
 
 ---
 
@@ -48,7 +48,7 @@ npm run dev
 
 | 变量 | 说明 |
 |------|------|
-| `NEXT_PUBLIC_API_BASE_URL` | API 根 URL，**无尾部斜杠**。默认 `http://127.0.0.1:8000`。 |
+| `NEXT_PUBLIC_API_BASE_URL` | API 根 URL，**无尾部斜杠**。默认 `http://127.0.0.1:8001`。 |
 | `NEXT_PUBLIC_API_KEY` | 与后端 `API_KEY` 一致；后端启用 API Key 时，浏览器请求需带 `X-API-Key`，由 `lib/api.ts` 注入。 |
 
 修改以 `NEXT_PUBLIC_` 开头的变量后需**重启** `next dev`，以便重新注入到客户端包。

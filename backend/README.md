@@ -45,7 +45,7 @@
 alembic upgrade head
 
 # 启动 API
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
 
 # 单元 / 集成测试（依赖本机 Postgres、Redis、Qdrant 及有效 .env，见根 README）
 pytest
@@ -77,7 +77,7 @@ celery -A celery_app worker -l info -Q tcm
 
 启动服务后：
 
-- Swagger UI：`http://127.0.0.1:8000/docs`
-- OpenAPI JSON：`http://127.0.0.1:8000/openapi.json`
+- Swagger UI：`http://127.0.0.1:8001/docs`
+- OpenAPI JSON：`http://127.0.0.1:8001/openapi.json`
 
 与手写文档不一致时，以 OpenAPI 为准。

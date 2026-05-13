@@ -159,13 +159,13 @@ class Settings(BaseSettings):
     github_client_id: str = Field(default="", description="GitHub OAuth Client ID")
     github_client_secret: str = Field(default="", description="GitHub OAuth Client Secret")
     github_redirect_uri: str = Field(
-        default="http://localhost:8000/api/auth/oauth/github/callback",
+        default="http://localhost:8001/api/auth/oauth/github/callback",
         description="须与 GitHub OAuth App Authorization callback URL 完全一致（开发与文档常用 localhost，勿与 127.0.0.1 混用）",
     )
     gitee_client_id: str = Field(default="", description="Gitee OAuth Client ID")
     gitee_client_secret: str = Field(default="", description="Gitee OAuth Client Secret")
     gitee_redirect_uri: str = Field(
-        default="http://localhost:8000/api/auth/oauth/gitee/callback",
+        default="http://localhost:8001/api/auth/oauth/gitee/callback",
         description="须与 Gitee 应用回调地址完全一致（开发与文档常用 localhost）",
     )
 

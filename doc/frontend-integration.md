@@ -2,7 +2,7 @@
 
 ```yaml
 scope: Web/移动端调用本仓库 FastAPI 后端
-base_url_example: http://127.0.0.1:8000
+base_url_example: http://127.0.0.1:8001
 note: BASE_URL 以实际部署为准；下文用 {BASE} 表示
 openapi: "{BASE}/openapi.json"
 ```
