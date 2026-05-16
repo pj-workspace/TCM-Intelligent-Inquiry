@@ -13,6 +13,8 @@ import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 type AuthFormProps = {
   onAuthenticated: () => void;
   compact?: boolean;
+  /** 首次渲染时的 Tab（用于 `/register` 等直达页） */
+  initialMode?: "login" | "register";
 };
 
 function OAuthIconGitee() {
@@ -239,11 +241,15 @@ const ThirdFlowModal = forwardRef<
 
 ThirdFlowModal.displayName = "ThirdFlowModal";
 
-function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
+function AuthFormInner({
+  onAuthenticated,
+  compact,
+  initialMode = "login",
+}: AuthFormProps) {
   const { login, register, loginWithToken, loginWithEmailCode } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [username, setUsername] = useState("");
   const [emailReg, setEmailReg] = useState("");
   const [regVerifyCode, setRegVerifyCode] = useState("");
@@ -522,6 +528,16 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
     }
   };
 
+  const fieldShell =
+    "rounded-xl border border-[#e5e5e5] bg-[#fafafa] outline-none focus:border-gray-400 focus:bg-white transition-colors";
+  /** 紧凑页登录 / 注册共用同一套控件尺寸，避免 Tab 切换时跳变 */
+  const fieldSize = "py-2.5 text-[15px]";
+  const inpFull = `w-full px-3 ${fieldShell} ${fieldSize}`;
+  const inpFlex = `min-w-0 flex-1 px-3 ${fieldShell} ${fieldSize}`;
+  const lb = "mb-1.5";
+  const compactBtn =
+    "shrink-0 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2.5 text-[13px] font-medium whitespace-nowrap text-[#374151] hover:bg-gray-50 disabled:opacity-50";
+
   return (
     <div className="relative">
       {!compact && (
@@ -531,7 +547,9 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
         </div>
       )}
 
-      <div className="flex rounded-xl bg-[#f4f4f5] p-1 mb-6">
+      <div
+        className={`flex rounded-xl bg-[#f4f4f5] p-1 ${compact ? "mb-4" : "mb-6"}`}
+      >
         <button
           type="button"
           onClick={() => {
@@ -563,7 +581,10 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
         </button>
       </div>
 
-      <form onSubmit={submit} className="space-y-5">
+      <form
+        onSubmit={submit}
+        className={compact ? "space-y-4" : "space-y-5"}
+      >
         {/* 验证码登录时在顶部给出返回，避免两套「块状 Tab」并排显得笨重 */}
         {mode === "login" && loginMethod === "email_code" && (
           <div className="flex justify-start">
@@ -584,7 +605,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
 
         {(mode === "register" || (mode === "login" && loginMethod === "password")) && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">
+            <label className={`block text-xs font-medium text-gray-500 ${lb}`}>
               {mode === "login" ? "用户名或邮箱" : "用户名"}
             </label>
             <input
@@ -592,7 +613,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] text-[15px] outline-none focus:border-gray-400 focus:bg-white transition-colors"
+              className={inpFull}
               placeholder={
                 mode === "register" ? "至少 2 个字符" : "用户名或邮箱"
               }
@@ -607,7 +628,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
         {mode === "register" && (
           <>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">
+              <label className={`block text-xs font-medium text-gray-500 ${lb}`}>
                 邮箱
               </label>
               <input
@@ -615,13 +636,13 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
                 autoComplete="email"
                 value={emailReg}
                 onChange={(e) => setEmailReg(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] text-[15px] outline-none focus:border-gray-400 focus:bg-white transition-colors"
+                className={inpFull}
                 placeholder="请输入邮箱"
                 required
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">
+              <label className={`block text-xs font-medium text-gray-500 ${lb}`}>
                 验证码
               </label>
               <div className="flex gap-2">
@@ -631,7 +652,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
                   autoComplete="one-time-code"
                   value={regVerifyCode}
                   onChange={(e) => setRegVerifyCode(e.target.value)}
-                  className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] text-[15px] tracking-[0.35em]"
+                  className={`${inpFlex} tracking-[0.35em]`}
                   placeholder="6 位数字"
                   required
                   minLength={6}
@@ -641,7 +662,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
                   type="button"
                   disabled={registerCd.left > 0 || registerSendBusy || pending}
                   onClick={() => void sendRegisterCode()}
-                  className="shrink-0 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2.5 text-[13px] font-medium whitespace-nowrap text-[#374151] hover:bg-gray-50 disabled:opacity-50"
+                  className={compactBtn}
                 >
                   {registerSendBusy
                     ? "发送中…"
@@ -657,19 +678,19 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
         {mode === "login" && loginMethod === "email_code" && (
           <>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">邮箱</label>
+              <label className={`block text-xs font-medium text-gray-500 ${lb}`}>邮箱</label>
               <input
                 type="email"
                 autoComplete="email"
                 value={emailLogin}
                 onChange={(e) => setEmailLogin(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] text-[15px] outline-none focus:border-gray-400 focus:bg-white transition-colors"
+                className={inpFull}
                 placeholder="请输入邮箱"
                 required
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">
+              <label className={`block text-xs font-medium text-gray-500 ${lb}`}>
                 邮箱验证码
               </label>
               <div className="flex gap-2">
@@ -681,7 +702,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
                   onChange={(e) =>
                     setLoginOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))
                   }
-                  className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] text-[15px] tracking-[0.35em]"
+                  className={`${inpFlex} tracking-[0.35em]`}
                   placeholder="6 位数字"
                   required={mode === "login" && loginMethod === "email_code"}
                   maxLength={6}
@@ -690,7 +711,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
                   type="button"
                   disabled={loginCd.left > 0 || loginSendBusy || pending}
                   onClick={() => void sendLoginEmailCode()}
-                  className="shrink-0 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2.5 text-[13px] font-medium whitespace-nowrap text-[#374151] hover:bg-gray-50 disabled:opacity-50"
+                  className={compactBtn}
                 >
                   {loginSendBusy
                     ? "发送中…"
@@ -705,7 +726,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
 
         {(mode === "register" || (mode === "login" && loginMethod === "password")) && (
           <div>
-            <div className="flex justify-between items-center mb-1.5">
+            <div className={`flex justify-between items-center ${lb}`}>
               <label className="block text-xs font-medium text-gray-500">
                 {mode === "login" ? "密码" : "设置密码"}
               </label>
@@ -727,7 +748,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] text-[15px] outline-none focus:border-gray-400 focus:bg-white transition-colors"
+              className={inpFull}
               placeholder={mode === "register" ? "至少 6 位" : ""}
               required={
                 mode === "register" || (mode === "login" && loginMethod === "password")
@@ -746,7 +767,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
         <button
           type="submit"
           disabled={pending}
-          className="w-full rounded-xl bg-orange-700 py-3 text-[15px] font-semibold text-white shadow-sm ring-1 ring-orange-800/30 transition-colors hover:bg-orange-800 disabled:pointer-events-none disabled:opacity-50"
+          className={`w-full rounded-xl bg-orange-700 text-[15px] font-semibold text-white shadow-sm ring-1 ring-orange-800/30 transition-colors hover:bg-orange-800 disabled:pointer-events-none disabled:opacity-50 ${compact ? "py-2.5" : "py-3"}`}
         >
           {pending ? "请稍候…" : mode === "register" ? "注册并登录" : "登录"}
         </button>
@@ -768,7 +789,11 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
           </div>
         )}
 
-        <div className="space-y-3 border-t border-[#eae8e4] pt-5">
+        <div
+          className={`border-t border-[#eae8e4] ${
+            compact ? "space-y-3 pt-4" : "space-y-3 pt-5"
+          }`}
+        >
           <p className="text-center text-[11px] font-medium uppercase tracking-wide text-[#b4b4b9]">
             第三方账号
           </p>
@@ -776,7 +801,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
             <button
               type="button"
               onClick={() => startOAuth("github")}
-              className="flex items-center justify-center gap-2 rounded-xl border border-[#e5e5e5] bg-white py-2.5 text-sm font-medium text-[#374151] shadow-sm hover:bg-[#fafafa]"
+              className={`flex items-center justify-center gap-2 rounded-xl border border-[#e5e5e5] bg-white text-sm font-medium text-[#374151] shadow-sm hover:bg-[#fafafa] ${compact ? "py-2" : "py-2.5"}`}
             >
               <OAuthIconGitHub />
               GitHub
@@ -784,7 +809,7 @@ function AuthFormInner({ onAuthenticated, compact }: AuthFormProps) {
             <button
               type="button"
               onClick={() => startOAuth("gitee")}
-              className="flex items-center justify-center gap-2 rounded-xl border border-[#e5e5e5] bg-white py-2.5 text-sm font-medium text-[#C71D23] shadow-sm hover:bg-orange-50/50"
+              className={`flex items-center justify-center gap-2 rounded-xl border border-[#e5e5e5] bg-white text-sm font-medium text-[#C71D23] shadow-sm hover:bg-orange-50/50 ${compact ? "py-2" : "py-2.5"}`}
             >
               <OAuthIconGitee />
               Gitee

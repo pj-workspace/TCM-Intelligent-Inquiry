@@ -472,13 +472,21 @@ export function Sidebar({
           {loading ? (
             <div className="h-10 w-full rounded-lg bg-gray-200/60 animate-pulse" aria-hidden />
           ) : !token ? (
-            <Link
-              href="/login"
-              className="flex w-full items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-white bg-[#1a1a1a] rounded-lg hover:bg-gray-800 transition-colors"
-            >
-              <LogIn className="w-4 h-4" />
-              登录 / 注册
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                href="/login"
+                className="flex flex-1 items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-white bg-[#1a1a1a] rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                <LogIn className="w-4 h-4 shrink-0" />
+                登录
+              </Link>
+              <Link
+                href="/register"
+                className="flex flex-1 items-center justify-center px-3 py-2.5 text-sm font-medium text-[#1a1a1a] bg-white border border-[#e5e5e5] rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                注册
+              </Link>
+            </div>
           ) : null}
           <Link
             href="/settings"

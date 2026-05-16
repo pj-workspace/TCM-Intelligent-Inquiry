@@ -56,6 +56,7 @@ _CHAT_ONLY_SYSTEM_PROMPT = append_tcm_safety_to_system_prompt(_RAW_CHAT_ONLY_SYS
 
 _WEB_SEARCH_TOOL_NAME = "searx_web_search"
 
+
 _DEEP_THINK_SUFFIX = """\
 【深度思考模式】
 - 在给出最终回答前，请先充分进行逐步推理：澄清用户意图、相关中医理论要点、是否需要工具及调用顺序。
@@ -272,12 +273,9 @@ async def _build_ephemeral_agent_graph(
     effective_web_search: bool = False,
     chat_model_override: str,
     effective_tool_calling: bool,
+    llm_provider: str | None = None,
 ) -> CompiledStateGraph:
     mid = chat_model_override.strip()
-    llm = get_chat_model(
-        enable_thinking=effective_deep_think,
-        chat_model_override=mid,
-    )
     extra = suffix.strip()
 
     if not agent_id:
@@ -285,6 +283,11 @@ async def _build_ephemeral_agent_graph(
             tools: list = []
             raw = _RAW_CHAT_ONLY_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
             prompt = append_tcm_safety_to_system_prompt(raw)
+            llm = get_chat_model(
+                enable_thinking=effective_deep_think,
+                chat_model_override=mid,
+                llm_provider=llm_provider,
+            )
             logger.info(
                 "临时 ReAct Agent（默认、纯聊、thinking=%s）tools=[]",
                 effective_deep_think,
@@ -293,6 +296,11 @@ async def _build_ephemeral_agent_graph(
             tools = _load_all_tools(web_search_enabled=effective_web_search)
             raw = _RAW_DEFAULT_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
             prompt = append_tcm_safety_to_system_prompt(raw)
+            llm = get_chat_model(
+                enable_thinking=effective_deep_think,
+                chat_model_override=mid,
+                llm_provider=llm_provider,
+            )
             logger.info(
                 "临时 ReAct Agent（默认），thinking=%s web=%s tools=%s",
                 effective_deep_think,
@@ -323,12 +331,22 @@ async def _build_ephemeral_agent_graph(
                     agent_id,
                     [t.name for t in tools],
                 )
+            llm = get_chat_model(
+                enable_thinking=effective_deep_think,
+                chat_model_override=mid,
+                llm_provider=llm_provider,
+            )
             return create_react_agent(llm, tools, prompt=prompt)
 
         if not effective_tool_calling:
             tools = []
             raw = _RAW_CHAT_ONLY_SYSTEM_PROMPT + ("\n\n" + extra if extra else "")
             prompt = append_tcm_safety_to_system_prompt(raw)
+            llm = get_chat_model(
+                enable_thinking=effective_deep_think,
+                chat_model_override=mid,
+                llm_provider=llm_provider,
+            )
             logger.info(
                 "临时 Agent id=%s name=%s 纯聊 tools=[] thinking=%s",
                 row.id,
@@ -355,6 +373,11 @@ async def _build_ephemeral_agent_graph(
         base = (row.system_prompt or "").strip() or _RAW_DEFAULT_SYSTEM_PROMPT
         raw = base + ("\n\n" + extra if extra else "")
         prompt = append_tcm_safety_to_system_prompt(raw)
+        llm = get_chat_model(
+            enable_thinking=effective_deep_think,
+            chat_model_override=mid,
+            llm_provider=llm_provider,
+        )
         logger.info(
             "临时 Agent id=%s name=%s tools=%s thinking=%s web=%s model=%s",
             row.id,
@@ -370,6 +393,7 @@ async def _build_ephemeral_agent_graph(
 async def build_agent_graph_for_chat_request(
     agent_id: str | None,
     *,
+    llm_provider_effective: str,
     chat_model_override: str,
     effective_deep_think: bool,
     effective_web_search: bool,
@@ -378,7 +402,8 @@ async def build_agent_graph_for_chat_request(
 ) -> CompiledStateGraph:
     """按本轮 effective 模型与能力构图；仅当满足缓存充要条件时命中 default/named 编译缓存。"""
     s = get_settings()
-    lp = (s.llm_provider or "").strip().lower()
+    lp_eff = (llm_provider_effective or "qwen").strip().lower()
+    lp_settings = (s.llm_provider or "qwen").strip().lower()
 
     suffix = _dynamic_prompt_suffix(
         effective_deep_think,
@@ -386,8 +411,27 @@ async def build_agent_graph_for_chat_request(
         web_search_mode,
     )
 
-    if lp != "qwen":
-        if not suffix and not effective_deep_think:
+    if lp_eff != lp_settings:
+        return await _build_ephemeral_agent_graph(
+            agent_id,
+            suffix,
+            effective_deep_think=effective_deep_think,
+            effective_web_search=effective_web_search,
+            chat_model_override=chat_model_override,
+            effective_tool_calling=effective_tool_calling,
+            llm_provider=lp_eff,
+        )
+
+    if lp_eff != "qwen":
+        deepseek_override_differs = False
+        if lp_eff == "deepseek":
+            from app.core.deepseek_chat_options import primary_deepseek_chat_model_id
+
+            pid = primary_deepseek_chat_model_id(settings=s)
+            ov = (chat_model_override or "").strip()
+            deepseek_override_differs = bool(ov and ov != pid)
+
+        if not suffix and not effective_deep_think and not deepseek_override_differs:
             return await build_agent_graph(agent_id)
         return await _build_ephemeral_agent_graph(
             agent_id,
@@ -396,6 +440,7 @@ async def build_agent_graph_for_chat_request(
             effective_web_search=effective_web_search,
             chat_model_override=chat_model_override,
             effective_tool_calling=effective_tool_calling,
+            llm_provider=None,
         )
 
     primary_mid = primary_qwen_chat_model(s)
@@ -417,4 +462,5 @@ async def build_agent_graph_for_chat_request(
         effective_web_search=effective_web_search,
         chat_model_override=chat_model_override,
         effective_tool_calling=effective_tool_calling,
+        llm_provider=None,
     )

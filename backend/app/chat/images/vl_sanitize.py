@@ -152,3 +152,52 @@ def sanitize_messages_for_vl_images(
         else:
             out.append(m)
     return out
+
+
+# 无视觉（文本）模型：送入 API 前移除 image_url，避免 DeepSeek 等非多模态报错
+TEXT_ONLY_MODEL_IMAGE_OMITTED_NOTE = "（当前对话模型不支持图像，附图已从上下文省略。）"
+
+
+def strip_human_message_image_blocks_for_text_only(msg: HumanMessage) -> HumanMessage:
+    """移除 image_url 块；若曾含图则在正文末追加说明。"""
+    c = msg.content
+    if not isinstance(c, list):
+        return msg
+
+    had_image = False
+    new_blocks: list[dict | str] = []
+    for block in c:
+        if isinstance(block, dict) and block.get("type") == "image_url":
+            had_image = True
+            continue
+        new_blocks.append(block)
+
+    if not had_image:
+        return msg
+
+    has_text = any(
+        isinstance(b, dict) and b.get("type") == "text" and str(b.get("text", "")).strip()
+        for b in new_blocks
+    )
+    note = TEXT_ONLY_MODEL_IMAGE_OMITTED_NOTE
+    if has_text:
+        for i, b in enumerate(new_blocks):
+            if isinstance(b, dict) and b.get("type") == "text":
+                t = str(b.get("text", ""))
+                sep = "\n" if t.strip() else ""
+                new_blocks[i] = {"type": "text", "text": f"{t.rstrip()}{sep}{note}"}
+                break
+        return HumanMessage(content=new_blocks)
+    return HumanMessage(content=[{"type": "text", "text": note}])
+
+
+def sanitize_messages_for_text_only_images(
+    messages: list[HumanMessage | AIMessage],
+) -> list[HumanMessage | AIMessage]:
+    out: list[HumanMessage | AIMessage] = []
+    for m in messages:
+        if isinstance(m, HumanMessage):
+            out.append(strip_human_message_image_blocks_for_text_only(m))
+        else:
+            out.append(m)
+    return out

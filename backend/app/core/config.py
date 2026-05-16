@@ -27,10 +27,11 @@ class Settings(BaseSettings):
         default="qwen",
         description="qwen | openai | anthropic | glm | deepseek",
     )
-    # 向量嵌入可独立指定；空字符串表示与 llm_provider 一致（向后兼容）
+    # 向量嵌入可独立指定；空字符串时：llm 为 qwen/openai 则与其一致，
+    # 为 deepseek/glm/anthropic 时自动选用 qwen（有 DASHSCOPE_API_KEY）或 openai（有 OPENAI_API_KEY）
     embedding_provider: str = Field(
         default="",
-        description="qwen | openai；留空则与 LLM_PROVIDER 一致",
+        description="qwen | openai；留空则按 LLM_PROVIDER 解析（非 qwen/openai 时自动回落到可用的嵌入厂商）",
     )
 
     # ── 阿里云 DashScope（通义千问对话 + 默认向量嵌入）──────────────────────────
@@ -112,7 +113,10 @@ class Settings(BaseSettings):
         default="https://api.deepseek.com/v1",
         description="DeepSeek Base URL",
     )
-    deepseek_chat_model: str = Field(default="deepseek-chat", description="对话模型名")
+    deepseek_chat_model: str = Field(
+        default="deepseek-v4-flash",
+        description="对话模型 id（如 deepseek-v4-flash / deepseek-v4-pro）；须在服务端内置清单内",
+    )
 
     # ── 基础设施（docker-compose 默认值见 .env.example）──────────────────────
     database_url: str = Field(
@@ -340,10 +344,25 @@ def qwen_option_for_model_id(
     return None
 
 
-def active_chat_model_label(chat_model_id: str | None = None) -> str:
-    """展示用标签：传入本轮 effective id 时对 qwen+OPTIONS 返回 label；不传则环境与旧版一致。"""
+def active_chat_model_label(
+    chat_model_id: str | None = None,
+    *,
+    llm_provider: str | None = None,
+) -> str:
+    """展示用标签：qwen / deepseek 传入本轮 effective id 时返回 OPTIONS / 内置清单对应 label。"""
     s = get_settings()
-    p = (s.llm_provider or "qwen").strip().lower()
+    p = (llm_provider or "").strip().lower() or (s.llm_provider or "qwen").strip().lower()
+
+    if p == "deepseek":
+        from app.core.deepseek_chat_options import deepseek_option_for_model_id
+
+        mid = (chat_model_id or "").strip()
+        if not mid:
+            mid = (s.deepseek_chat_model or "").strip() or "deepseek-v4-flash"
+        hit = deepseek_option_for_model_id(mid)
+        if hit is not None:
+            return hit.label
+        return mid
 
     def _fallback_non_qwen() -> str:
         if p == "openai":
@@ -352,11 +371,12 @@ def active_chat_model_label(chat_model_id: str | None = None) -> str:
             return s.anthropic_chat_model
         if p == "glm":
             return s.glm_chat_model
-        if p == "deepseek":
-            return s.deepseek_chat_model
         return s.qwen_chat_model
 
     if p != "qwen":
+        mid = (chat_model_id or "").strip()
+        if mid:
+            return mid
         return _fallback_non_qwen()
 
     opts = list_qwen_chat_model_option_rows(s)
@@ -367,7 +387,9 @@ def active_chat_model_label(chat_model_id: str | None = None) -> str:
     if opts:
         hit = qwen_option_for_model_id(mid, settings=s)
         if hit is not None:
-            return hit.label
+            from app.chat.model_display import short_model_list_label
+
+            return short_model_list_label("qwen", hit.label, mid)
         return mid
 
     return s.qwen_chat_model

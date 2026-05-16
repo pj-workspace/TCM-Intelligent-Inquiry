@@ -15,7 +15,7 @@
 | **方剂库** | PostgreSQL 结构化存储（与向量知识库分离）；Agent 工具 **`formula_lookup`**（方名）、**`recommend_formulas`**（症状/证型线索）；种子见 `backend/data/formulas_seed.json`；推荐融合 **关键词分 + `pg_trgm` 相似度 + `simple` 全文 OR**；同义词组见 `backend/data/symptom_synonyms.json`（不改表结构） |
 | **MCP** | 注册 MCP 服务（Streamable HTTP / SSE）；工具自动包装为 LangChain 工具（`mcp_*` 前缀）挂入 Agent |
 | **异步入库** | 可选 **Celery** 执行大文件入库；或 `CELERY_INGEST_ENABLED=false` 使用 FastAPI `BackgroundTasks` |
-| **多模型** | 通过 `LLM_PROVIDER` 切换：`qwen` / `openai` / `anthropic` / `glm` / `deepseek`（OpenAI 兼容接口用统一 `ChatOpenAI`）；**Qwen** 可选用 `QWEN_CHAT_MODEL_OPTIONS` 做多模型与白名单 |
+| **多模型** | 通过 `LLM_PROVIDER` 切换：`qwen` / `openai` / `anthropic` / `glm` / `deepseek`。**Qwen** 可选用 `QWEN_CHAT_MODEL_OPTIONS` 做多模型与白名单；**DeepSeek** 在 `LLM_PROVIDER=deepseek` 时内置 `deepseek-v4-flash` / `deepseek-v4-pro`（OpenAI 兼容，`GET /api/chat/model-options`），旧版 `deepseek-chat` / `deepseek-reasoner` 将于 2026-07-24 UTC 后停用（详见 DeepSeek 官方公告） |
 | **安全提示** | 系统提示与流式首包携带中医咨询**合规提示**（非诊疗声明） |
 | **配置热切换** | 修改 `backend/.env` 后，**下一轮 API 请求**会重新读取 LLM / 重排等配置（无需重启 uvicorn）；数据库连接串、Redis 客户端、Celery worker 等仍以进程启动时为准，变更后需重启对应进程 |
 
@@ -125,6 +125,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8001
 - **`QWEN_CHAT_MODEL`** 须与 OPTIONS 中带 **`"default": true`** 的 **`id`** 一致（否则运行时 **warning**）。未启用 OPTIONS（空数组或留空）时仍只使用 **`QWEN_CHAT_MODEL`**，并忽略请求体里的 **`chat_model`**。
 - **`capabilities`**：**`supports_tool_calling: false`** 时不挂载任何工具（含联网 `searx_web_search`/知识库/MCP）；联网有效条件为 **`web_search_enabled ∧ supports_tool_calling`**。**`supports_deep_think`** 决定是否允许深度思考。**`vendor_native_online_search`** 若存在仅占位。**`input`** 含 **`image`** 时前端放开附件占位，否则禁用（本条仅 UI；多模态进模型后续可做）。
 - 同一会话内可随时改下拉再发下一条；**重新生成**使用**当下**所选模型，不按消息历史存档。**`GET /api/chat/model-options`** 可不携带 JWT。**非法 JSON** 或「非空 OPTIONS 但并非恰好一项 `default:true`」将导致 **Settings 校验失败**，无法在无效配置下启动。
+- 前端 **`GET /api/chat/model-options`** 聚合展示 **Qwen / DeepSeek / OpenAI / Claude / GLM**：未配置 Key 的厂商 **`configured=false`**（灰色不可选）；发起对话时可同时传 **`llm_provider`** + **`chat_model`**，无需临时改 **`LLM_PROVIDER`**。
 
 ### 5.（可选）启动 Celery Worker（异步入库）
 
@@ -149,6 +150,7 @@ docker compose --profile worker up -d worker
 
 - **`LLM_PROVIDER`**：`qwen` | `openai` | `anthropic` | `glm` | `deepseek`  
 - **DashScope**：`DASHSCOPE_API_KEY`、`QWEN_CHAT_MODEL`、`QWEN_CHAT_MODEL_OPTIONS`（可选）、`QWEN_EMBEDDING_MODEL`、`DASHSCOPE_BASE_URL`  
+- **DeepSeek（V4）**：`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_CHAT_MODEL`（默认 `deepseek-v4-flash`；可选 `deepseek-v4-pro`）；非多模态，附图快捷话术不会调用 VL；开启深度思考时由服务端映射 `thinking` / `reasoning_effort`（见 `.env.example`）  
 - **检索重排序**：`RERANK_ENABLED`、`DASHSCOPE_RERANK_MODEL`、`RERANK_CANDIDATE_MULTIPLIER`、`RERANK_MAX_CANDIDATES`  
 - **异步入库**：`CELERY_INGEST_ENABLED`  
 - **JWT / CORS / 默认知识库 ID** 等  
@@ -162,8 +164,8 @@ docker compose --profile worker up -d worker
 | 前缀 | 说明 |
 |------|------|
 | `POST /api/auth/register`、`/login`、`GET /api/auth/me` | 注册、登录、当前用户 |
-| `POST /api/chat` | 流式对话（SSE）；可选 `chat_model`、`deep_think`、`web_search_*` |
-| `GET /api/chat/model-options` | Qwen 配置了 `QWEN_CHAT_MODEL_OPTIONS` 时返回模型与 capabilities |
+| `POST /api/chat` | 流式对话（SSE）；可选 **`llm_provider`**、**`chat_model`**、`deep_think`、`web_search_*` |
+| `GET /api/chat/model-options` | 返回全厂商分组目录（`providers[].models[]` 含 `description`/`capabilities`）；已配置 Key 的厂商 `configured=true`，可与请求体 `llm_provider` + `chat_model` 组合切换 |
 | `GET /api/chat/conversations`、`.../messages` | 会话与消息列表 |
 | `GET/POST /api/knowledge` 等 | 知识库与上传、检索、`ingest-async`、任务状态 |
 | `GET/POST /api/mcp` 等 | MCP 服务注册、刷新工具、删除 |

@@ -6,26 +6,30 @@ import { motion } from "framer-motion";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { AppLogo } from "@/components/brand/AppLogo";
 
-export function LoginPageClient() {
+export function LoginPageClient({
+  initialMode = "login",
+}: Readonly<{ initialMode?: "login" | "register" }>) {
   const router = useRouter();
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#fdfdfc] px-4">
-      <main className="flex flex-1 flex-col justify-center py-10 sm:py-12">
+    <div className="bg-[#fdfdfc] px-4 py-8 sm:py-10">
+      <main className="mx-auto w-full max-w-md">
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mx-auto w-full max-w-md shrink-0"
+          className="w-full shrink-0"
         >
-          <div className="rounded-2xl border border-[#e5e5e5] bg-white p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <div className="mb-8 flex flex-col items-center gap-3 text-center">
-              <AppLogo size={72} className="rounded-2xl shadow-sm ring-1 ring-black/[0.06]" priority />
+          <div className="rounded-2xl border border-[#e5e5e5] bg-white p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] sm:p-7">
+            <div className="mb-5 flex flex-col items-center gap-2 text-center">
+              <AppLogo size={64} className="rounded-2xl shadow-sm ring-1 ring-black/[0.06]" priority />
               <div>
                 <h1 className="text-lg font-semibold tracking-tight text-gray-900">中医智询</h1>
-                <p className="mt-1 text-sm text-gray-500">TCM Intelligent Inquiry</p>
+                <p className="mt-0.5 text-sm text-gray-500">TCM Intelligent Inquiry</p>
               </div>
             </div>
             <AuthForm
+              compact
+              initialMode={initialMode}
               onAuthenticated={() => {
                 router.push("/");
                 router.refresh();
@@ -33,7 +37,7 @@ export function LoginPageClient() {
             />
           </div>
 
-          <p className="mt-8 text-center">
+          <p className="mt-5 text-center">
             <Link
               href="/"
               className="text-sm text-gray-500 underline-offset-4 hover:text-gray-800 hover:underline"

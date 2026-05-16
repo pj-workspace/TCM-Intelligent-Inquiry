@@ -64,6 +64,7 @@ async def chat(
 
     try:
         resolved = resolve_chat_turn(
+            llm_provider_body=req.llm_provider,
             chat_model_body=req.chat_model,
             deep_think=req.deep_think,
             web_search_enabled=req.web_search_enabled,
@@ -148,26 +149,12 @@ async def attachment_suggestions_route(
 
 @router.get(
     "/model-options",
-    summary="Qwen 可选对话模型与能力（未配置 OPTIONS 返回空数组）",
+    summary="可选对话模型目录（全厂商分组；未配置 Key 的厂商 configured=false）",
 )
 async def chat_model_options():
-    from app.core.config import get_settings, list_qwen_chat_model_option_rows
+    from app.chat.catalog import build_chat_model_catalog
 
-    s = get_settings()
-    if (s.llm_provider or "").strip().lower() != "qwen":
-        return []
-    rows = list_qwen_chat_model_option_rows(s)
-    if not rows:
-        return []
-    return [
-        {
-            "id": r.id,
-            "label": r.label,
-            "capabilities": r.api_capabilities,
-            "default": r.default,
-        }
-        for r in rows
-    ]
+    return build_chat_model_catalog()
 
 
 @router.get(

@@ -408,12 +408,20 @@ export function ChatHeader({
             </div>
           </div>
         ) : (
-          <Link
-            href="/login"
-            className="text-sm text-gray-600 px-2 py-1 md:px-3 md:py-1.5 rounded-md hover:bg-gray-100"
-          >
-            登录
-          </Link>
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Link
+              href="/login"
+              className="text-sm text-gray-600 px-2 py-1 md:px-3 md:py-1.5 rounded-md hover:bg-gray-100"
+            >
+              登录
+            </Link>
+            <Link
+              href="/register"
+              className="text-sm text-gray-500 px-2 py-1 md:px-3 md:py-1.5 rounded-md hover:bg-gray-100"
+            >
+              注册
+            </Link>
+          </div>
         )}
       </div>
     </header>

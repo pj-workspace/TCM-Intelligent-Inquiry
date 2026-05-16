@@ -51,11 +51,10 @@ def _current_embedding_info() -> tuple[str, str, int]:
     返回元组 ``(provider, model, dim)``；调用 ``embed_query("ping")`` 真实读取维度。
     """
     from app.core.config import get_settings
-    from app.llm.registry import get_embeddings
+    from app.llm.registry import get_embeddings, resolved_embedding_provider
 
     s = get_settings()
-    raw = (s.embedding_provider or "").strip().lower()
-    provider = raw if raw else (s.llm_provider or "qwen").strip().lower()
+    provider = resolved_embedding_provider()
     if provider == "qwen":
         model = s.qwen_embedding_model
     elif provider == "openai":

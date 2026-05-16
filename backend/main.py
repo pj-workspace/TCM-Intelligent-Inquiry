@@ -41,7 +41,9 @@ async def lifespan(_: FastAPI):
         logger.warning(
             "JWT_SECRET 过短或为开发默认值，生产环境请替换为至少 32 字节的高强度随机串",
         )
-    emb_p = (s.embedding_provider or s.llm_provider or "qwen").strip().lower()
+    from app.llm.registry import resolved_embedding_provider
+
+    emb_p = resolved_embedding_provider()
     emb_model = (
         s.openai_embedding_model if emb_p == "openai" else s.qwen_embedding_model
     )

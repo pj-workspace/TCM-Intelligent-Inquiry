@@ -25,13 +25,96 @@ import type {
   ToolStep,
   ConversationFolder,
 } from "@/types/chat";
-import type { ModelOption } from "@/types/models";
+import type { ChatModelCatalogResponse } from "@/types/models";
 
 const PINNED_IDS_KEY = "tcm_pinned_conversation_ids";
 
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
 
-const QWEN_CHAT_MODEL_LS_KEY = "tcm_qwen_chat_model";
+/** 迁移用：旧版仅缓存模型 id */
+const CHAT_MODEL_LS_KEY = "tcm_chat_model";
+
+/** 所选厂商 + 模型 id（JSON） */
+const CHAT_PICK_LS_KEY = "tcm_chat_pick";
+
+function readStoredPick(): { providerId: string; modelId: string } | null {
+  try {
+    const raw = localStorage.getItem(CHAT_PICK_LS_KEY)?.trim();
+    if (!raw) return null;
+    const j = JSON.parse(raw) as { providerId?: unknown; modelId?: unknown };
+    if (typeof j.providerId !== "string" || typeof j.modelId !== "string") return null;
+    return { providerId: j.providerId.trim(), modelId: j.modelId.trim() };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPick(p: { providerId: string; modelId: string }) {
+  try {
+    localStorage.setItem(CHAT_PICK_LS_KEY, JSON.stringify(p));
+  } catch {
+    /* ignore */
+  }
+}
+
+function resolveInitialPick(catalog: ChatModelCatalogResponse): {
+  providerId: string;
+  modelId: string;
+} {
+  const stored = readStoredPick();
+  let legacyMid = "";
+  try {
+    legacyMid = localStorage.getItem(CHAT_MODEL_LS_KEY)?.trim() ?? "";
+  } catch {
+    /* ignore */
+  }
+
+  const defaultPid = catalog.default_llm_provider;
+  const providers = catalog.providers;
+  const firstConfigured =
+    providers.find((p) => p.configured) ?? providers[0] ?? null;
+  if (!firstConfigured || !firstConfigured.models.length) {
+    return { providerId: defaultPid, modelId: "" };
+  }
+
+  let pid =
+    stored?.providerId && providers.some((p) => p.id === stored.providerId)
+      ? stored.providerId
+      : defaultPid;
+  let prov = providers.find((p) => p.id === pid) ?? firstConfigured;
+
+  let mid =
+    stored?.modelId && prov.models.some((m) => m.id === stored.modelId)
+      ? stored.modelId
+      : "";
+
+  if (!mid && legacyMid) {
+    const hitProvider = providers.find((p) =>
+      p.models.some((m) => m.id === legacyMid),
+    );
+    if (hitProvider?.configured) {
+      pid = hitProvider.id;
+      prov = hitProvider;
+      mid = legacyMid;
+    } else if (prov.models.some((m) => m.id === legacyMid)) {
+      mid = legacyMid;
+    }
+  }
+
+  if (!mid) {
+    mid =
+      prov.models.find((m) => m.default)?.id ?? prov.models[0]?.id ?? "";
+  }
+
+  if (!prov.configured && firstConfigured) {
+    prov = firstConfigured;
+    pid = prov.id;
+    mid =
+      prov.models.find((m) => m.default)?.id ?? prov.models[0]?.id ?? "";
+  }
+
+  return { providerId: pid, modelId: mid };
+}
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -142,7 +225,10 @@ export function useChat(opts: {
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [webSearchMode, setWebSearchMode] = useState<"force" | "auto">("force");
 
-  const [chatModelOptions, setChatModelOptions] = useState<ModelOption[]>([]);
+  const [modelCatalog, setModelCatalog] = useState<ChatModelCatalogResponse | null>(
+    null,
+  );
+  const [selectedProviderId, setSelectedProviderIdState] = useState("");
   const [selectedChatModelId, setSelectedChatModelIdState] = useState("");
 
   /** 已上传待发送的图片 URL（OSS 签名） */
@@ -302,24 +388,20 @@ export function useChat(opts: {
     [authLoading, token],
   );
 
-  const setSelectedChatModelId = useCallback((id: string) => {
-    setSelectedChatModelIdState(id);
-    try {
-      if (id.trim()) localStorage.setItem(QWEN_CHAT_MODEL_LS_KEY, id.trim());
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const effectiveChatModelForRequest = useMemo(() => {
-    if (chatModelOptions.length === 0) return undefined as string | undefined;
-    const primary =
-      chatModelOptions.find((o) => o.default)?.id ??
-      chatModelOptions[0]?.id ??
+  const effectiveLlmPick = useMemo(() => {
+    if (!modelCatalog?.providers?.length) return null;
+    const pid =
+      selectedProviderId.trim() || modelCatalog.default_llm_provider;
+    const prov = modelCatalog.providers.find((x) => x.id === pid);
+    if (!prov?.configured) return null;
+    const mid =
+      selectedChatModelId.trim() ||
+      prov.models.find((m) => m.default)?.id ||
+      prov.models[0]?.id ||
       "";
-    const sid = selectedChatModelId.trim();
-    return sid || primary;
-  }, [chatModelOptions, selectedChatModelId]);
+    if (!mid || !prov.models.some((m) => m.id === mid)) return null;
+    return { llm_provider: prov.id, chat_model: mid };
+  }, [modelCatalog, selectedProviderId, selectedChatModelId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -328,36 +410,38 @@ export function useChat(opts: {
         const r = await fetch(`${API_BASE}/api/chat/model-options`);
         if (!r.ok) throw new Error(String(r.status));
         const raw = (await r.json()) as unknown;
-        if (!Array.isArray(raw)) throw new Error("invalid shape");
-        const data = raw as ModelOption[];
+        if (
+          !raw ||
+          typeof raw !== "object" ||
+          !Array.isArray((raw as ChatModelCatalogResponse).providers)
+        ) {
+          throw new Error("invalid catalog shape");
+        }
+        const catalog = raw as ChatModelCatalogResponse;
         if (cancelled) return;
-        setChatModelOptions(data);
-        if (data.length === 0) {
-          setSelectedChatModelIdState("");
-          return;
-        }
-        const primaryId = data.find((o) => o.default === true)?.id ?? data[0]?.id ?? "";
-        let pick = primaryId;
-        try {
-          const ls = localStorage.getItem(QWEN_CHAT_MODEL_LS_KEY)?.trim();
-          if (ls && data.some((o) => o.id === ls)) pick = ls;
-          else localStorage.removeItem(QWEN_CHAT_MODEL_LS_KEY);
-        } catch {
-          /* ignore */
-        }
-        setSelectedChatModelIdState(pick);
-        try {
-          localStorage.setItem(QWEN_CHAT_MODEL_LS_KEY, pick);
-        } catch {
-          /* ignore */
+        setModelCatalog(catalog);
+        const pick = resolveInitialPick(catalog);
+        setSelectedProviderIdState(pick.providerId);
+        setSelectedChatModelIdState(pick.modelId);
+        if (pick.providerId && pick.modelId) {
+          writeStoredPick({
+            providerId: pick.providerId,
+            modelId: pick.modelId,
+          });
+          try {
+            localStorage.removeItem(CHAT_MODEL_LS_KEY);
+          } catch {
+            /* ignore */
+          }
         }
       } catch (e) {
         console.warn(
-          "[useChat] GET /api/chat/model-options 失败，不向请求写入 chat_model，由服务端默认主模型兜底",
+          "[useChat] GET /api/chat/model-options 失败，不向请求写入 llm_provider/chat_model，由服务端默认兜底",
           e
         );
         if (!cancelled) {
-          setChatModelOptions([]);
+          setModelCatalog(null);
+          setSelectedProviderIdState("");
           setSelectedChatModelIdState("");
         }
       }
@@ -368,13 +452,22 @@ export function useChat(opts: {
   }, []);
 
   useEffect(() => {
-    const o = chatModelOptions.find((x) => x.id === selectedChatModelId);
-    if (!o || chatModelOptions.length === 0) return;
+    const prov = modelCatalog?.providers.find((x) => x.id === selectedProviderId);
+    const o = prov?.models.find((x) => x.id === selectedChatModelId);
+    if (!o) return;
     const deepOk = o.capabilities?.supports_deep_think !== false;
     const toolOk = o.capabilities?.supports_tool_calling !== false;
     if (!deepOk) setDeepThinkEnabled(false);
     if (!toolOk) setWebSearchEnabled(false);
-  }, [selectedChatModelId, chatModelOptions]);
+  }, [selectedProviderId, selectedChatModelId, modelCatalog]);
+
+  const setModelPick = useCallback((providerId: string, modelId: string) => {
+    const pid = providerId.trim();
+    const mid = modelId.trim();
+    setSelectedProviderIdState(pid);
+    setSelectedChatModelIdState(mid);
+    if (pid && mid) writeStoredPick({ providerId: pid, modelId: mid });
+  }, []);
 
   // ── Computed ───────────────────────────────────────────────────────────────
   const lastAssistantMessageId = useMemo(() => {
@@ -530,8 +623,11 @@ export function useChat(opts: {
             deep_think: deepThinkEnabled,
             web_search_enabled: webSearchEnabled,
             web_search_mode: webSearchMode,
-            ...(effectiveChatModelForRequest
-              ? { chat_model: effectiveChatModelForRequest }
+            ...(effectiveLlmPick
+              ? {
+                  llm_provider: effectiveLlmPick.llm_provider,
+                  chat_model: effectiveLlmPick.chat_model,
+                }
               : {}),
             ...(streamOpts?.imageUrls?.length
               ? { image_urls: streamOpts.imageUrls }
@@ -872,15 +968,36 @@ export function useChat(opts: {
                   finalizeTrace(currentTraceId, false);
                   currentTraceId = null;
                 }
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now().toString(),
-                    role: "assistant",
-                    type: "message",
-                    content: `**Error:** ${data.message}`,
-                  },
-                ]);
+                const errLine = `**Error:** ${data.message}`;
+                setMessages((prev) => {
+                  let lastAiIdx = -1;
+                  for (let i = prev.length - 1; i >= 0; i--) {
+                    const row = prev[i];
+                    if (row.type === "message" && row.role === "assistant") {
+                      lastAiIdx = i;
+                      break;
+                    }
+                  }
+                  if (lastAiIdx !== -1) {
+                    const row = prev[lastAiIdx] as ChatMessage;
+                    const prefix = (row.content || "").trim();
+                    const nextContent = prefix ? `${prefix}\n\n${errLine}` : errLine;
+                    return prev.map((x, i) =>
+                      i === lastAiIdx && x.type === "message"
+                        ? { ...(x as ChatMessage), content: nextContent }
+                        : x
+                    );
+                  }
+                  return [
+                    ...prev,
+                    {
+                      id: Date.now().toString(),
+                      role: "assistant",
+                      type: "message",
+                      content: errLine,
+                    },
+                  ];
+                });
               }
             } catch (e) {
               console.error("Error parsing SSE data", e);
@@ -977,7 +1094,7 @@ export function useChat(opts: {
       deepThinkEnabled,
       webSearchEnabled,
       webSearchMode,
-      effectiveChatModelForRequest,
+      effectiveLlmPick,
       autoFollowMainRef,
       finalizeThinkingStep,
       finalizeTrace,
@@ -1512,9 +1629,10 @@ export function useChat(opts: {
     setWebSearchEnabled,
     webSearchMode,
     setWebSearchMode,
-    chatModelOptions,
+    chatModelCatalog: modelCatalog,
+    selectedProviderId,
     selectedChatModelId,
-    setSelectedChatModelId,
+    setModelPick,
     pendingImageUrls,
     attachmentUploadBusy,
     attachmentUploadSkeletonCount,

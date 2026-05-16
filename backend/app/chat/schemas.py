@@ -52,7 +52,14 @@ class ChatRequest(BaseModel):
     )
     chat_model: str | None = Field(
         default=None,
-        description="仅 llm_provider=qwen 且配置了 QWEN_CHAT_MODEL_OPTIONS 时有效；DashScope model id。",
+        description="可选对话模型 id：llm_provider=qwen 且配置了 QWEN_CHAT_MODEL_OPTIONS 时为 DashScope model id；"
+        "llm_provider=deepseek 时为内置清单（deepseek-v4-flash / deepseek-v4-pro）；"
+        "openai/glm/anthropic 须与环境变量中的单一 *_CHAT_MODEL 一致；可与 llm_provider 同时指定以切换厂商。",
+    )
+    llm_provider: str | None = Field(
+        default=None,
+        description="可选：显式指定本轮对话厂商（qwen | deepseek | openai | anthropic | glm），须在服务端已配置对应 API Key；"
+        "不传时使用环境变量 LLM_PROVIDER。",
     )
     image_urls: list[str] = Field(
         default_factory=list,

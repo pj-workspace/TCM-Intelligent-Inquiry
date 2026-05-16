@@ -10,10 +10,12 @@ def build_chat_model(
     enable_thinking: bool = False,
     chat_model_override: str | None = None,
     *,
+    llm_provider: str | None = None,
     response_format_json_object: bool = False,
 ) -> BaseChatModel:
     s = get_settings()
-    p = (s.llm_provider or "qwen").strip().lower()
+    raw_lp = llm_provider if isinstance(llm_provider, str) and llm_provider.strip() else None
+    p = (raw_lp.strip().lower() if raw_lp else (s.llm_provider or "qwen")).strip().lower()
 
     if p == "qwen":
         from app.llm.providers.qwen import build_qwen_chat
@@ -75,21 +77,13 @@ def build_chat_model(
         return ChatOpenAI(**kw)
 
     if p == "deepseek":
-        key = (s.deepseek_api_key or "").strip()
-        if not key:
-            raise ValueError("llm_provider=deepseek 时请配置 DEEPSEEK_API_KEY")
-        base = (s.deepseek_base_url or "").strip() or "https://api.deepseek.com/v1"
-        # deepseek-reasoner 是独立的推理模型，深度思考时自动切换
-        model = "deepseek-reasoner" if enable_thinking else s.deepseek_chat_model
-        kw: dict = {
-            "model": model,
-            "api_key": key,
-            "base_url": base.rstrip("/"),
-            "temperature": 0.2,
-        }
-        if response_format_json_object:
-            kw["model_kwargs"] = {"response_format": {"type": "json_object"}}
-        return ChatOpenAI(**kw)
+        from app.llm.providers.deepseek import build_deepseek_chat
+
+        return build_deepseek_chat(
+            enable_thinking=enable_thinking,
+            chat_model_override=chat_model_override,
+            response_format_json_object=response_format_json_object,
+        )
 
     raise ValueError(
         f"不支持的 llm_provider: {p!r}，可选: qwen, openai, anthropic, glm, deepseek"

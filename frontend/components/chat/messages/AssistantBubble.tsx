@@ -71,6 +71,8 @@ interface AssistantBubbleProps {
   menuRef: RefObject<HTMLDivElement | null>;
   /** 最后一条助手：生成中用与工具栏等高的占位，避免 idle 时出现条儿时正文整体猛跳 */
   assistantToolbarReserve?: boolean;
+  /** 工具调用拆段时隐藏中间段的复制/朗读等，仅在末段展示 */
+  suppressAssistantToolbar?: boolean;
 }
 
 /** 近似 3 条追问骨架/按钮纵向占位，仅在追问展示期间起效，减少对贴底滚动时的视感位移 */
@@ -94,6 +96,7 @@ export function AssistantBubble({
   onMenuToggle,
   menuRef,
   assistantToolbarReserve,
+  suppressAssistantToolbar,
 }: AssistantBubbleProps) {
   const showFollowUpRegion = !!(
     followUpItems &&
@@ -130,7 +133,8 @@ export function AssistantBubble({
         </div>
 
         <div className="flex w-full flex-col items-start gap-2">
-          {showToolbarReserve ? (
+          {!suppressAssistantToolbar &&
+            (showToolbarReserve ? (
             <div
               aria-hidden
               className="pointer-events-none mt-0.5 min-h-[2.375rem] w-full shrink-0"
@@ -212,9 +216,12 @@ export function AssistantBubble({
                   <div className="flex items-start gap-2 px-3 py-2.5 text-gray-500">
                     <Sparkles className="w-4 h-4 shrink-0 mt-0.5 opacity-70" />
                     <div>
-                      <div className="text-xs text-gray-400 mb-0.5">模型</div>
+                      <div className="text-xs text-gray-400 mb-0.5">本回复所用模型</div>
                       <div className="text-[13px] text-gray-800 font-medium leading-snug break-all">
                         {modelName?.trim() || "—"}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-snug text-gray-400">
+                        切换模型请在输入栏左侧选择
                       </div>
                     </div>
                   </div>
@@ -222,7 +229,7 @@ export function AssistantBubble({
               )}
             </div>
           </div>
-          ) : null}
+          ) : null)}
 
           <AnimatePresence initial={false}>
             {showFollowUpRegion ? (

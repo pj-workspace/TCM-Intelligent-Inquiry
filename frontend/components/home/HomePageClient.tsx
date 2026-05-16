@@ -21,12 +21,24 @@ import { downloadConversationMarkdown } from "@/lib/conversation-export";
 import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtils";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
-import type { ChatMessage, ServerConversation } from "@/types/chat";
+import type { ChatMessage, Message, ServerConversation } from "@/types/chat";
 import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 import { WelcomeHero } from "./WelcomeHero";
 
 const messageTransition = { type: "spring" as const, stiffness: 200, damping: 28, mass: 0.6 };
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
+
+/** 工具调用会在 trace 前后拆出多条助手消息：只在「该轮最后一次助手分段」显示工具栏，避免像两段独立对话 */
+function assistantSegmentShowsToolbar(messages: Message[], index: number): boolean {
+  const cur = messages[index];
+  if (cur?.type !== "message" || cur.role !== "assistant") return true;
+  for (let j = index + 1; j < messages.length; j++) {
+    const m = messages[j];
+    if (m.type === "message" && m.role === "user") break;
+    if (m.type === "message" && m.role === "assistant") return false;
+  }
+  return true;
+}
 
 export function HomePageClient() {
   const { token, loading: authLoading, logout } = useAuth();
@@ -101,9 +113,10 @@ export function HomePageClient() {
     setWebSearchEnabled,
     webSearchMode,
     setWebSearchMode,
-    chatModelOptions,
+    chatModelCatalog,
+    selectedProviderId,
     selectedChatModelId,
-    setSelectedChatModelId,
+    setModelPick,
     pendingImageUrls,
     attachmentUploadBusy,
     attachmentUploadSkeletonCount,
@@ -144,13 +157,17 @@ export function HomePageClient() {
       deepThinkDisabledByModel: false,
       webSearchDisabledByModel: false,
     };
-    if (chatModelOptions.length === 0) return noListOrUnknownModel;
-    const effectiveId =
+    if (!chatModelCatalog?.providers?.length) return noListOrUnknownModel;
+    const pid =
+      selectedProviderId.trim() || chatModelCatalog.default_llm_provider;
+    const prov = chatModelCatalog.providers.find((x) => x.id === pid);
+    if (!prov?.configured) return noListOrUnknownModel;
+    const effectiveModelId =
       selectedChatModelId.trim() ||
-      chatModelOptions.find((o) => o.default)?.id ||
-      chatModelOptions[0]?.id ||
+      prov.models.find((o) => o.default)?.id ||
+      prov.models[0]?.id ||
       "";
-    const row = chatModelOptions.find((x) => x.id === effectiveId);
+    const row = prov.models.find((x) => x.id === effectiveModelId);
     if (!row) return noListOrUnknownModel;
     const input = row.capabilities?.input;
     const hasImage = Array.isArray(input) && input.includes("image");
@@ -161,15 +178,31 @@ export function HomePageClient() {
       deepThinkDisabledByModel: !deep,
       webSearchDisabledByModel: !tools,
     };
-  }, [chatModelOptions, selectedChatModelId]);
+  }, [
+    chatModelCatalog,
+    selectedProviderId,
+    selectedChatModelId,
+  ]);
 
   const attachmentDisabledReason = useMemo(() => {
-    if (!inputBarModelCaps.attachmentDisabled) return undefined;
-    if (chatModelOptions.length === 0) {
-      return "未获取到可选模型列表，无法上传图片（请检查接口与网络后刷新）";
+    if (!chatModelCatalog?.providers?.length) {
+      return "未获取到模型目录（请检查接口与网络后刷新）";
     }
-    return "当前模型不支持图片，请切换到带「图片」能力的多模态模型";
-  }, [inputBarModelCaps.attachmentDisabled, chatModelOptions.length]);
+    const pid =
+      selectedProviderId.trim() || chatModelCatalog.default_llm_provider;
+    const prov = chatModelCatalog.providers.find((x) => x.id === pid);
+    if (!prov?.configured) {
+      return "当前所选厂商未配置 API Key，请在服务端 .env 填写对应 Key";
+    }
+    if (inputBarModelCaps.attachmentDisabled) {
+      return "当前模型不支持图片，请切换到带附图能力的多模态模型";
+    }
+    return undefined;
+  }, [
+    chatModelCatalog,
+    selectedProviderId,
+    inputBarModelCaps.attachmentDisabled,
+  ]);
 
   const scopedConversations = useMemo(() => {
     if (!token) return [];
@@ -854,6 +887,11 @@ export function HomePageClient() {
                                 ? () => handleRegenerateAssistant(msg.id)
                                 : undefined
                             }
+                            suppressAssistantToolbar={
+                              msg.role === "assistant"
+                                ? !assistantSegmentShowsToolbar(messages, idx)
+                                : undefined
+                            }
                             onUserEdit={
                               msg.role === "user"
                                 ? (text, imageUrls) => {
@@ -973,9 +1011,10 @@ export function HomePageClient() {
               setWebSearchEnabled(true);
               setWebSearchMode(mode);
             }}
-            modelOptions={chatModelOptions}
+            modelCatalog={chatModelCatalog}
+            selectedProviderId={selectedProviderId}
             selectedModelId={selectedChatModelId}
-            onSelectModel={setSelectedChatModelId}
+            onSelectModel={(providerId, modelId) => setModelPick(providerId, modelId)}
             attachmentDisabled={inputBarModelCaps.attachmentDisabled}
             attachmentDisabledReason={attachmentDisabledReason}
             deepThinkDisabledByModel={inputBarModelCaps.deepThinkDisabledByModel}

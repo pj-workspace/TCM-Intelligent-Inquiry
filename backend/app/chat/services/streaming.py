@@ -18,8 +18,10 @@ from app.chat.images.vl_sanitize import (
     collect_unique_image_urls_from_messages,
     ensure_urls_probed,
     filter_image_urls_by_probe_cache,
+    sanitize_messages_for_text_only_images,
     sanitize_messages_for_vl_images,
 )
+from app.chat.model_display import sse_reply_model_label
 from app.chat.models import ConversationRecord, MessageRecord
 from app.chat.policy.turns import ResolvedChatTurn
 from app.chat.schemas import ChatMessage
@@ -36,6 +38,7 @@ from app.core.ai_chat_trace import (
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.core.config import active_chat_model_label, get_settings, primary_qwen_chat_model
+from app.core.deepseek_chat_options import primary_deepseek_chat_model_id
 from app.core.safety import STREAM_SAFETY_NOTICE
 
 if TYPE_CHECKING:
@@ -45,11 +48,9 @@ logger = get_logger(__name__)
 
 
 def _meta_chat_model_label(rt: ResolvedChatTurn) -> str:
-    s = get_settings()
-    if (s.llm_provider or "").strip().lower() != "qwen":
-        return active_chat_model_label()
     mid = (rt.llm_chat_model_id or "").strip()
-    return active_chat_model_label(mid or None)
+    short = active_chat_model_label(mid or None, llm_provider=rt.effective_llm_provider)
+    return sse_reply_model_label(rt.effective_llm_provider, mid, short)
 
 
 _TOOL_IO_MAX = 8000
@@ -272,6 +273,7 @@ async def _generate_title_async(
     conv_id: str,
     *,
     chat_model_id: str | None = None,
+    llm_provider: str | None = None,
 ) -> str:
     """异步生成标题并更新到数据库"""
     from app.llm.chat_factory import build_chat_model
@@ -283,14 +285,25 @@ async def _generate_title_async(
 
     try:
         s = get_settings()
+        lp_eff = (llm_provider or "").strip().lower() or (s.llm_provider or "qwen").strip().lower()
         ov: str | None = None
-        if (s.llm_provider or "").strip().lower() == "qwen":
+        if lp_eff == "qwen":
             qs = primary_qwen_chat_model(s)
             ov = ((chat_model_id or "").strip() or qs)
+        elif lp_eff == "deepseek":
+            qs = primary_deepseek_chat_model_id(settings=s)
+            ov = ((chat_model_id or "").strip() or qs)
+        elif lp_eff == "openai":
+            ov = ((chat_model_id or "").strip() or (s.openai_chat_model or "").strip())
+        elif lp_eff == "glm":
+            ov = ((chat_model_id or "").strip() or (s.glm_chat_model or "").strip())
+        elif lp_eff == "anthropic":
+            ov = ((chat_model_id or "").strip() or (s.anthropic_chat_model or "").strip())
 
         model = build_chat_model(
             enable_thinking=False,
             chat_model_override=ov,
+            llm_provider=lp_eff,
         )
         prompt = (
             "请根据用户的首条消息，总结出一个简短的会话标题（10个字以内）。"
@@ -500,7 +513,12 @@ async def stream_chat(
 
             # 开启异步标题生成任务
             title_task = asyncio.create_task(
-                _generate_title_async(msg_in, conv_id, chat_model_id=resolved.llm_chat_model_id)
+                _generate_title_async(
+                    msg_in,
+                    conv_id,
+                    chat_model_id=resolved.llm_chat_model_id,
+                    llm_provider=resolved.effective_llm_provider,
+                )
             )
 
         meta_out: dict[str, Any] = {
@@ -526,6 +544,7 @@ async def stream_chat(
 
         graph = await build_agent_graph_for_chat_request(
             effective_agent_id,
+            llm_provider_effective=resolved.effective_llm_provider,
             chat_model_override=resolved.llm_chat_model_id,
             effective_deep_think=resolved.effective_deep_think,
             effective_web_search=resolved.effective_web_search,
@@ -536,6 +555,8 @@ async def stream_chat(
         uniq_in_messages = collect_unique_image_urls_from_messages(lc_messages)
         await ensure_urls_probed(uniq_in_messages, ok_cache=vl_ok_cache)
         lc_messages = sanitize_messages_for_vl_images(lc_messages, vl_ok_cache)
+        if (resolved.effective_llm_provider or "").strip().lower() == "deepseek":
+            lc_messages = sanitize_messages_for_text_only_images(lc_messages)
 
         chat_trace = bool(get_settings().ai_chat_trace_log)
         if chat_trace:

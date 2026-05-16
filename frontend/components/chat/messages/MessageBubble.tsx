@@ -29,6 +29,8 @@ interface MessageBubbleProps {
   interrupted?: boolean;
   /** 最后一条助手气泡：生成中预留与工具栏同高的占位，避免出现条后再占位导致整块上跳 */
   assistantToolbarReserve?: boolean;
+  /** 同一轮里工具调用会把正文拆成多条助手消息；仅在「最后一段」展示工具栏 */
+  suppressAssistantToolbar?: boolean;
 }
 
 export function MessageBubble({
@@ -45,6 +47,7 @@ export function MessageBubble({
   noBottomPad,
   interrupted,
   assistantToolbarReserve,
+  suppressAssistantToolbar,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const [menuOpen, setMenuOpen] = useState(false);
@@ -154,6 +157,7 @@ export function MessageBubble({
       onMenuToggle={() => setMenuOpen((o) => !o)}
       menuRef={menuRef}
       assistantToolbarReserve={assistantToolbarReserve}
+      suppressAssistantToolbar={suppressAssistantToolbar}
     />
   );
 }

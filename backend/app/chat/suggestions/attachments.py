@@ -77,6 +77,9 @@ async def generate_attachment_suggestions(
 
     s = get_settings()
     p = (s.llm_provider or "qwen").strip().lower()
+    if p == "deepseek":
+        logger.info("attachment suggestions skipped: llm_provider=%s (no vision)", p)
+        return []
     if p not in _JSON_OBJECT_PROVIDERS:
         logger.info("attachment suggestions skipped: llm_provider=%s", p)
         return []
