@@ -17,7 +17,7 @@ export type ChatMessage = {
 
 export type ThinkingStep = Extract<BrainstormStep, { type: "thinking" }>;
 export type ToolStep = Extract<BrainstormStep, { type: "tool" }>;
-export type FlatMessage = ChatMessage | ThinkingStep | ToolStep;
+export type FlatMessage = ChatMessage | ThinkingStep | ToolStep | WidgetMessage;
 
 export type TraceMessage = {
   id: string;
@@ -28,7 +28,21 @@ export type TraceMessage = {
   collapsed: boolean;
 };
 
-export type Message = ChatMessage | TraceMessage;
+/** AI 发送的交互控件（目前仅支持选择框） */
+export type WidgetMessage = {
+  id: string;
+  type: "widget";
+  widgetType: "choice";
+  question: string;
+  choices: string[];
+  allowFreeText: boolean;
+  /** 用户作答后填入 */
+  answer?: string;
+  /** 用户点击跳过后为 true */
+  dismissed?: boolean;
+};
+
+export type Message = ChatMessage | TraceMessage | WidgetMessage;
 
 export type ApiMessageRow = {
   id: string;

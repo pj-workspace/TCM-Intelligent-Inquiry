@@ -13,6 +13,7 @@ import {
   MessageBubble,
   Sidebar,
 } from "@/components/chat";
+import { WidgetCard } from "@/components/chat/messages/WidgetCard";
 import type { SidebarFilter } from "@/components/chat/sidebar/Sidebar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useAuth } from "@/contexts/auth-context";
@@ -21,7 +22,7 @@ import { downloadConversationMarkdown } from "@/lib/conversation-export";
 import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtils";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
-import type { ChatMessage, Message, ServerConversation } from "@/types/chat";
+import type { ChatMessage, Message, ServerConversation, WidgetMessage } from "@/types/chat";
 import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 import { WelcomeHero } from "./WelcomeHero";
 
@@ -36,6 +37,8 @@ function assistantSegmentShowsToolbar(messages: Message[], index: number): boole
     const m = messages[j];
     if (m.type === "message" && m.role === "user") break;
     if (m.type === "message" && m.role === "assistant") return false;
+    // widget 在同一段内说明本段 AI 还在问问题、未真正完成，抑制 toolbar
+    if (m.type === "widget") return false;
   }
   return true;
 }
@@ -127,6 +130,7 @@ export function HomePageClient() {
     fetchAiImageQuickPrompts,
     handleStop,
     handleRegenerateAssistant,
+    handleWidgetAnswer,
     handleNewChat,
     handleSelectConversation,
     openDeleteDialog,
@@ -142,6 +146,18 @@ export function HomePageClient() {
   } = chat;
 
   hasStartedRef.current = hasStarted;
+
+  // 找到最后一个未回答的 widget，用于渲染在底部覆盖输入框
+  const activeWidget = useMemo(
+    () =>
+      [...messages]
+        .reverse()
+        .find(
+          (m): m is WidgetMessage =>
+            m.type === "widget" && !m.answer && !m.dismissed,
+        ) ?? null,
+    [messages],
+  );
 
   const followUpLayoutKey = useMemo(
     () =>
@@ -906,6 +922,16 @@ export function HomePageClient() {
                       );
                     }
                     if (msg.type === "trace") {
+                      const visibleSteps = msg.steps.filter(
+                        (s) =>
+                          !(
+                            s.type === "tool" &&
+                            (s.toolName === "ask_user" ||
+                              (s.outputPreview ?? "").startsWith("[选择框]"))
+                          ),
+                      );
+                      // trace 里全是 ask_user 步骤时整块不渲染（widget 卡片已展示）
+                      if (visibleSteps.length === 0 && msg.status === "done") return null;
                       return (
                         <motion.div
                           key={msg.id}
@@ -914,7 +940,7 @@ export function HomePageClient() {
                           transition={messageTransition}
                         >
                           <BrainstormPanel
-                            steps={msg.steps}
+                            steps={visibleSteps}
                             isStreaming={msg.status === "streaming"}
                             durationSec={msg.totalDurationSec}
                             collapsed={msg.collapsed}
@@ -930,6 +956,31 @@ export function HomePageClient() {
                                 )
                               )
                             }
+                          />
+                        </motion.div>
+                      );
+                    }
+                    if (msg.type === "widget") {
+                      // 未回答的 widget 渲染到底部覆盖层（activeWidget），
+                      // scroll 区内只保留一个空 div 占位以维持滚动高度
+                      if (!msg.answer && !msg.dismissed) {
+                        return <div key={msg.id} aria-hidden />;
+                      }
+                      return (
+                        <motion.div
+                          key={msg.id}
+                          initial={{ opacity: 0, y: 15 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={messageTransition}
+                        >
+                          <WidgetCard
+                            question={msg.question}
+                            choices={msg.choices}
+                            allowFreeText={msg.allowFreeText}
+                            answer={msg.answer}
+                            dismissed={msg.dismissed}
+                            disabled={genState !== "idle"}
+                            onAnswer={(ans) => handleWidgetAnswer(msg.id, ans)}
                           />
                         </motion.div>
                       );
@@ -992,6 +1043,35 @@ export function HomePageClient() {
               onOpenConversation={(id) => void selectConversationSyncSidebar(id)}
             />
           )}
+
+          {/* 未回答的 widget 作为底部覆盖层，盖住 ChatInputBar */}
+          <AnimatePresence>
+            {activeWidget && (
+              <motion.div
+                key={activeWidget.id}
+                initial={{ opacity: 0, y: 28 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20, transition: { duration: 0.15 } }}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+                className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center bg-gradient-to-t from-[#fdfdfc] from-50% via-[#fdfdfc]/90 to-transparent px-4 pb-5 pt-10 md:px-8"
+              >
+                <div className="w-full max-w-3xl lg:max-w-4xl xl:max-w-5xl max-h-[min(75vh,36rem)] overflow-y-auto">
+                  <WidgetCard
+                    question={activeWidget.question}
+                    choices={activeWidget.choices}
+                    allowFreeText={activeWidget.allowFreeText}
+                    answer={activeWidget.answer}
+                    dismissed={activeWidget.dismissed}
+                    disabled={genState !== "idle"}
+                    onAnswer={(ans) => handleWidgetAnswer(activeWidget.id, ans)}
+                  />
+                </div>
+                <p className="mt-2 text-center text-[11px] text-gray-400 select-none">
+                  ↑↓ 导航&nbsp;&nbsp;·&nbsp;&nbsp;Enter 选择&nbsp;&nbsp;·&nbsp;&nbsp;Esc 跳过
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <ChatInputBar
             input={input}

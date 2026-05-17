@@ -579,6 +579,7 @@ async def stream_chat(
         tool_pending_by_run: dict[str, dict[str, Any]] = {}
         tool_pending_fifo: list[dict[str, Any]] = []
         trace_stream_rm_merged: dict[str, Any] = {}
+        _break_after_widget: bool = False
 
         async def flush_thinking_segment() -> None:
             nonlocal thinking_buf, thinking_t0
@@ -722,7 +723,32 @@ async def stream_chat(
             elif etype == "on_tool_end":
                 name = event.get("name") or ""
                 out = data.get("output")
-                preview = _serialize_tool_output(out)
+                # 检查是否是交互控件工具（ask_user）输出
+                _widget_sse: dict[str, Any] | None = None
+                _raw_out_str = ""
+                if isinstance(out, ToolMessage):
+                    _raw_out_str = str(out.content or "")
+                elif isinstance(out, str):
+                    _raw_out_str = out
+                if _raw_out_str:
+                    try:
+                        _wparsed = json.loads(_raw_out_str)
+                        if isinstance(_wparsed, dict) and _wparsed.get("__widget__") is True:
+                            _widget_sse = {
+                                "type": "widget",
+                                "widgetId": str(_wparsed.get("widgetId") or ""),
+                                "widgetType": str(_wparsed.get("widgetType") or "choice"),
+                                "question": str(_wparsed.get("question") or ""),
+                                "choices": [str(c) for c in (_wparsed.get("choices") or [])],
+                                "allowFreeText": bool(_wparsed.get("allowFreeText", True)),
+                            }
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                preview = (
+                    f"[选择框] {_widget_sse['question']}"
+                    if _widget_sse
+                    else _serialize_tool_output(out)
+                )
                 # 从 ToolMessage.status 读取工具真实执行状态，避免前端用正则猜测
                 tool_status: str = "success"
                 if isinstance(out, ToolMessage):
@@ -759,6 +785,31 @@ async def stream_chat(
                         ),
                     )
                 yield _sse(tr)
+                if _widget_sse:
+                    # 先落库 AI 正文（工具调用前那段），再保存 widget 记录，然后中断流
+                    await flush_thinking_segment()
+                    await flush_assistant_segment()
+                    async with async_session_factory() as session:
+                        session.add(
+                            MessageRecord(
+                                id=_widget_sse["widgetId"] or str(uuid.uuid4()),
+                                conversation_id=conv_id,
+                                role="widget",
+                                content=json.dumps(
+                                    {
+                                        "widgetId": _widget_sse["widgetId"],
+                                        "widgetType": _widget_sse["widgetType"],
+                                        "question": _widget_sse["question"],
+                                        "choices": _widget_sse["choices"],
+                                        "allowFreeText": _widget_sse["allowFreeText"],
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
+                        )
+                        await session.commit()
+                    yield _sse(_widget_sse)
+                    _break_after_widget = True
 
                 rec: dict[str, Any] = {"name": tr_name, "outputPreview": preview}
                 if tr_input is not None:
@@ -775,6 +826,10 @@ async def stream_chat(
                         )
                     )
                     await session.commit()
+
+            # widget 已发出，中断 graph 流（避免模型继续生成无用的"请从上方选择"段落）
+            if _break_after_widget:
+                break
 
         await flush_thinking_segment()
         await flush_assistant_segment()

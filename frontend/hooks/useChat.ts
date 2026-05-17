@@ -19,6 +19,7 @@ import type {
   ChatMessage,
   Message,
   TraceMessage,
+  WidgetMessage,
   ApiMessageRow,
   GenerationState,
   ServerConversation,
@@ -603,6 +604,7 @@ export function useChat(opts: {
       let openThinkingStepId: string | null = null;
       let hasAssistantMsg = false;
       let streamEndedWithSSEError = false;
+      let streamEndedWithWidget = false;
       let assistantReplyAccum = "";
 
       try {
@@ -935,6 +937,30 @@ export function useChat(opts: {
                     )
                   );
                 }
+              } else if (data.type === "widget") {
+                const widgetMsg: WidgetMessage = {
+                  id: String(data.widgetId || `w-${Date.now()}`),
+                  type: "widget",
+                  widgetType: "choice",
+                  question: String(data.question || ""),
+                  choices: Array.isArray(data.choices) ? data.choices.map(String) : [],
+                  allowFreeText: data.allowFreeText !== false,
+                };
+                streamEndedWithWidget = true;
+                setMessages((prev) => {
+                  // 移除 insertNewStreamingTrace 在工具调用后插入的空 continuation 气泡，
+                  // 避免空气泡携带 toolbar 和 follow-up 建议显示在 widget 前面
+                  const cleaned = prev.filter(
+                    (m) =>
+                      !(
+                        m.type === "message" &&
+                        m.role === "assistant" &&
+                        m.id === currentAssistantMsgId &&
+                        !(m.content || "").trim()
+                      ),
+                  );
+                  return [...cleaned, widgetMsg];
+                });
               } else if (data.type === "title-updated") {
                 const cid =
                   typeof data.conversationId === "string" ? data.conversationId : null;
@@ -1011,6 +1037,7 @@ export function useChat(opts: {
         if (
           !abortController.signal.aborted &&
           !streamEndedWithSSEError &&
+          !streamEndedWithWidget &&
           hasAssistantMsg &&
           token
         ) {
@@ -1106,6 +1133,26 @@ export function useChat(opts: {
   );
 
   // ── Public handlers ────────────────────────────────────────────────────────
+  /** 用户回答 widget 选择框后调用：标记 widget 已作答并发送答案 */
+  const handleWidgetAnswer = useCallback(
+    (widgetId: string, answer: string | null) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.type === "widget" && m.id === widgetId
+            ? { ...m, answer: answer ?? undefined, dismissed: answer === null }
+            : m
+        )
+      );
+      if (answer !== null) {
+        setHasStarted(true);
+        autoFollowMainRef.current = true;
+        // appendUserMessage=false：答案已显示在 widget 紧凑状态，不再额外显示用户气泡
+        runChatStream(answer, false, {});
+      }
+    },
+    [autoFollowMainRef, runChatStream]
+  );
+
   const handleSend = useCallback(
     async (input: string, setInput: (v: string) => void) => {
       if ((!input.trim() && pendingImageUrls.length === 0) || genState !== "idle") return;
@@ -1642,6 +1689,7 @@ export function useChat(opts: {
     applyComposerAttachmentsFromUserMessage,
     fetchAiImageQuickPrompts,
     // handlers
+    handleWidgetAnswer,
     handleSend,
     handleStop,
     handleRegenerateAssistant,

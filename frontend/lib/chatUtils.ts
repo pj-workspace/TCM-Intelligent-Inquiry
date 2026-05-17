@@ -5,6 +5,7 @@ import type {
   Message,
   TraceMessage,
   ToolStep,
+  WidgetMessage,
 } from "@/types/chat";
 import type { BrainstormStep } from "@/types/brainstorm";
 import { toolActionLabel } from "@/lib/brainstorm-utils";
@@ -53,11 +54,41 @@ export function groupMessagesIntoTraces(items: FlatMessage[]): Message[] {
       grouped.push(item);
       continue;
     }
+    if (item.type === "widget") {
+      if (pendingSteps.length > 0) {
+        flushPendingSteps(true);
+      }
+      grouped.push(item);
+      continue;
+    }
     pendingSteps.push(item);
   }
 
   flushPendingSteps(true);
-  return grouped;
+
+  // 历史加载：根据 widget 后紧跟的第一条用户消息推断答案状态，并将该用户消息从列表中移除
+  // （widget 紧凑状态已展示答案，无需再显示用户气泡，与实时流体验保持一致）
+  const widgetAnswerIndices = new Set<number>();
+  for (let i = 0; i < grouped.length; i++) {
+    const cur = grouped[i];
+    if (cur.type !== "widget" || cur.answer !== undefined || cur.dismissed) continue;
+    let found = false;
+    for (let j = i + 1; j < grouped.length; j++) {
+      const next = grouped[j];
+      if (next.type === "trace") continue;
+      if (next.type === "message" && next.role === "user") {
+        grouped[i] = { ...cur, answer: next.content };
+        widgetAnswerIndices.add(j);
+        found = true;
+      }
+      break;
+    }
+    if (!found) {
+      grouped[i] = { ...cur, dismissed: true };
+    }
+  }
+
+  return grouped.filter((_, idx) => !widgetAnswerIndices.has(idx));
 }
 
 /** 仅从「最后一条」助手气泡取追问（与仅最新消息展示追问的 UI 一致）；无则返回 null */
@@ -150,6 +181,33 @@ export function mapApiRowToMessage(msg: ApiMessageRow): FlatMessage {
         toolName: "tool",
         status: "success",
       } satisfies ToolStep;
+    }
+  }
+  if (msg.role === "widget") {
+    try {
+      const payload = JSON.parse(msg.content) as {
+        widgetType?: string;
+        question?: string;
+        choices?: string[];
+        allowFreeText?: boolean;
+      };
+      return {
+        id: msg.id,
+        type: "widget",
+        widgetType: "choice",
+        question: typeof payload.question === "string" ? payload.question : "",
+        choices: Array.isArray(payload.choices) ? payload.choices.map(String) : [],
+        allowFreeText: payload.allowFreeText !== false,
+      } satisfies WidgetMessage;
+    } catch {
+      return {
+        id: msg.id,
+        type: "widget",
+        widgetType: "choice",
+        question: "",
+        choices: [],
+        allowFreeText: true,
+      } satisfies WidgetMessage;
     }
   }
   if (msg.role === "user") {

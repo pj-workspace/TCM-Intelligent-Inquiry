@@ -13,6 +13,7 @@ _TOOL_MODULES: Final[tuple[str, ...]] = (
     "app.agent.tools.tcm_search",
     "app.agent.tools.formula_lookup",
     "app.agent.tools.searx_web_search",
+    "app.agent.tools.ask_user",
 )
 
 _loaded: bool = False
