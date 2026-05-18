@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowDown } from "lucide-react";
 import {
@@ -25,6 +26,12 @@ import { useChat } from "@/hooks/useChat";
 import type { ChatMessage, Message, ServerConversation, WidgetMessage } from "@/types/chat";
 import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
 import { WelcomeHero } from "./WelcomeHero";
+import {
+  chatPathConversation,
+  chatPathFolder,
+  chatPathNew,
+  parseChatPathname,
+} from "@/lib/chatRoutes";
 
 const messageTransition = { type: "spring" as const, stiffness: 200, damping: 28, mass: 0.6 };
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
@@ -45,6 +52,8 @@ function assistantSegmentShowsToolbar(messages: Message[], index: number): boole
 
 export function HomePageClient() {
   const { token, loading: authLoading, logout } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname() ?? "";
   const [input, setInput] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -88,10 +97,17 @@ export function HomePageClient() {
     return sidebarFilter;
   }, [sidebarFilter]);
 
+  const onNavigateToNewChatSurface = useCallback(() => {
+    if (sidebarFilter === "__ungrouped__") router.push(chatPathNew());
+    else router.push(chatPathFolder(sidebarFilter));
+  }, [router, sidebarFilter]);
+
   const chat = useChat({
     autoFollowMainRef,
     onNewChatScrollReset: resetScrollState,
     getPreferredGroupForNewConversation,
+    chatPathname: pathname,
+    onNavigateToNewChatSurface,
   });
 
   const {
@@ -144,6 +160,7 @@ export function HomePageClient() {
     deleteFolder,
     togglePinConversation,
     deleteConversationsBulk,
+    sseRouteAssignPending,
   } = chat;
 
   hasStartedRef.current = hasStarted;
@@ -229,7 +246,10 @@ export function HomePageClient() {
     });
   }, [token, serverConversations, sidebarFilter]);
 
-  /** 侧栏「聊天」区始终只列出未分组会话；分组会话仅在分组工作台内展示 */
+  /**
+   * 侧栏「聊天」区列出未分组会话。
+   * 若当前打开的是分组内会话（深链/刷新），在未分组列表中插入该行作为锚点，避免「主区域有对话但侧栏空白」。
+   */
   const displayedSidebarConversations = useMemo(() => {
     if (!token) return [];
     const ungrouped = serverConversations.filter((c) => !c.group_id);
@@ -241,8 +261,15 @@ export function HomePageClient() {
       .map((id) => ungrouped.find((c) => c.id === id))
       .filter((c): c is ServerConversation => c != null);
     const rest = ungrouped.filter((c) => !pinSet.has(c.id));
-    return [...pinnedOrdered, ...rest];
-  }, [token, serverConversations, pinnedIds]);
+    const base = [...pinnedOrdered, ...rest];
+
+    if (!conversationId) return base;
+    const activeRow = serverConversations.find((c) => c.id === conversationId);
+    if (!activeRow?.group_id) return base;
+    if (base.some((c) => c.id === conversationId)) return base;
+
+    return [activeRow, ...base];
+  }, [token, serverConversations, pinnedIds, conversationId]);
 
   const conversationGroupTrail = useMemo(() => {
     if (!conversationId || !token) return null;
@@ -272,13 +299,17 @@ export function HomePageClient() {
 
   const selectConversationSyncSidebar = useCallback(
     async (id: string) => {
-      await handleSelectConversation(id);
-      const list = await refreshServerConversations();
-      const row = list?.find((c) => c.id === id);
-      if (row?.group_id) setSidebarFilter(row.group_id);
-      else setSidebarFilter("__ungrouped__");
+      router.push(chatPathConversation(id));
+      try {
+        const list = await refreshServerConversations();
+        const row = list?.find((c) => c.id === id);
+        if (row?.group_id) setSidebarFilter(row.group_id);
+        else setSidebarFilter("__ungrouped__");
+      } catch {
+        /* ignore */
+      }
     },
-    [handleSelectConversation, refreshServerConversations]
+    [router, refreshServerConversations]
   );
 
   /**
@@ -291,9 +322,15 @@ export function HomePageClient() {
         handleNewChat();
         return;
       }
+      if (f === "__ungrouped__") {
+        router.push(chatPathNew());
+        setSidebarFilter("__ungrouped__");
+        return;
+      }
+      router.push(chatPathFolder(f));
       setSidebarFilter(f);
     },
-    [sidebarFilter, conversationId, handleNewChat]
+    [sidebarFilter, conversationId, handleNewChat, router]
   );
 
   /** 顶部「返回分组」：与再次点侧栏文件夹相同 */
@@ -301,16 +338,50 @@ export function HomePageClient() {
     handleNewChat();
   }, [handleNewChat]);
 
-  /** 切换到某分组视图时：若当前打开的是其他分组的会话，则清空并开始该分组工作台 */
+  /** URL 为首要真相源：同步 pathname ↔ 会话与侧栏分组 */
   useEffect(() => {
-    if (sidebarFilter === "__ungrouped__") return;
-    const cid = conversationId;
-    if (!cid) return;
-    const conv = serverConversations.find((c) => c.id === cid);
-    if (!conv || conv.group_id !== sidebarFilter) {
-      handleNewChat();
+    if (authLoading) return;
+    const parsed = parseChatPathname(pathname);
+    if (parsed.kind === "invalid") {
+      router.replace(chatPathNew());
+      return;
     }
-  }, [sidebarFilter, conversationId, serverConversations, handleNewChat]);
+    if (parsed.kind === "folder") {
+      if (!token) {
+        router.replace(chatPathNew());
+        return;
+      }
+      setSidebarFilter(parsed.groupId);
+      if (conversationId) handleNewChat({ skipNavigation: true });
+      return;
+    }
+    if (parsed.kind === "new") {
+      setSidebarFilter("__ungrouped__");
+      if (conversationId && !sseRouteAssignPending) {
+        handleNewChat({ skipNavigation: true });
+      }
+      return;
+    }
+    if (!token) return;
+    const id = parsed.conversationId;
+    if (conversationId === id) {
+      const conv = serverConversations.find((c) => c.id === id);
+      if (conv?.group_id) setSidebarFilter(conv.group_id);
+      else setSidebarFilter("__ungrouped__");
+      return;
+    }
+    void handleSelectConversation(id);
+  }, [
+    pathname,
+    authLoading,
+    token,
+    conversationId,
+    serverConversations,
+    router,
+    handleNewChat,
+    handleSelectConversation,
+    sseRouteAssignPending,
+  ]);
 
   const handleClearSidebarSelection = useCallback(() => {
     setSidebarSelectedIds(new Set());
@@ -381,8 +452,11 @@ export function HomePageClient() {
     const row = await createFolder(newGroupNameDraft);
     setNewGroupModalOpen(false);
     setNewGroupNameDraft("");
-    if (row) setSidebarFilter(row.id);
-  }, [newGroupNameDraft, createFolder]);
+    if (row) {
+      setSidebarFilter(row.id);
+      router.push(chatPathFolder(row.id));
+    }
+  }, [newGroupNameDraft, createFolder, router]);
 
   const submitRenameFolder = useCallback(async () => {
     const m = renameFolderModal;
@@ -398,9 +472,12 @@ export function HomePageClient() {
     const t = deleteFolderConfirm;
     if (!t) return;
     await deleteFolder(t.id);
-    if (sidebarFilter === t.id) setSidebarFilter("__ungrouped__");
+    if (sidebarFilter === t.id) {
+      setSidebarFilter("__ungrouped__");
+      router.push(chatPathNew());
+    }
     setDeleteFolderConfirm(null);
-  }, [deleteFolderConfirm, deleteFolder, sidebarFilter]);
+  }, [deleteFolderConfirm, deleteFolder, sidebarFilter, router]);
 
   const handleExportSidebarConversation = useCallback(
     async (id: string, title: string) => {

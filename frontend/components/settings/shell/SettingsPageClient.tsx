@@ -39,7 +39,7 @@ export function SettingsPageClient() {
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center border-b border-[#e5e5e5] bg-white/80 px-4 backdrop-blur-sm md:px-6">
         <Link
-          href="/"
+          href="/chat"
           className="mr-4 flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
         >
           <ArrowLeft className="h-4 w-4" />

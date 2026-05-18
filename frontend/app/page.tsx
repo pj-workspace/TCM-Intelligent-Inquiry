@@ -1,16 +1,8 @@
-import { HomePageClient } from "@/components/home/HomePageClient";
+import { redirect } from "next/navigation";
 
 /**
- * Next.js 16+：`params` / `searchParams` 为 Promise，须在服务端 await，勿在客户端或未 unwrap 时枚举。
- * 见 https://nextjs.org/docs/messages/sync-dynamic-apis
+ * 应用入口统一到 /chat（next.config 亦有 `/` → `/chat` redirect，双保险）。
  */
-export default async function Page({
-  params,
-  searchParams,
-}: Readonly<{
-  params: Promise<Record<string, string | string[] | undefined>>;
-  searchParams: Promise<Record<string, string | string[] | string[][] | undefined>>;
-}>) {
-  await Promise.all([params, searchParams]);
-  return <HomePageClient />;
+export default function RootPage() {
+  redirect("/chat");
 }

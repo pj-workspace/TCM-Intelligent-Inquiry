@@ -31,7 +31,7 @@ export function LoginPageClient({
               compact
               initialMode={initialMode}
               onAuthenticated={() => {
-                router.push("/");
+                router.push("/chat");
                 router.refresh();
               }}
             />
@@ -39,7 +39,7 @@ export function LoginPageClient({
 
           <p className="mt-5 text-center">
             <Link
-              href="/"
+              href="/chat"
               className="text-sm text-gray-500 underline-offset-4 hover:text-gray-800 hover:underline"
             >
               ← 返回对话

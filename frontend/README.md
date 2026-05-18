@@ -2,6 +2,8 @@
 
 本目录为 **中医智能问询** Web 客户端，基于 **Next.js 16**（App Router）、**React 19**、**Tailwind CSS 4**，通过 HTTP 与 **SSE** 对接同仓库 `backend/` 中的 FastAPI 服务。
 
+**对话入口路径为 `/chat`**；根路径 `/` 会重定向至 `/chat`（见 `next.config` / `app/page.tsx`）。
+
 ---
 
 ## 功能概览
