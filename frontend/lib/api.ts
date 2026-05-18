@@ -1,3 +1,10 @@
+import type {
+  BalanceSnapshotJson,
+  ConversationBillingTotalsResponse,
+  UsageEventsResponse,
+  UsageSummaryResponse,
+} from "@/types/billing";
+
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8001";
 
@@ -36,4 +43,62 @@ export async function parseApiError(res: Response): Promise<string> {
     /* ignore */
   }
   return res.statusText || "请求失败";
+}
+
+export async function fetchBillingUsageSummary(
+  token: string,
+  opts?: { days?: number; providerId?: string | null },
+): Promise<UsageSummaryResponse> {
+  const days = opts?.days ?? 30;
+  const q = new URLSearchParams({ days: String(days) });
+  const pid = opts?.providerId?.trim();
+  if (pid) q.set("provider_id", pid);
+  const res = await fetch(`${API_BASE}/api/chat/billing/usage-summary?${q}`, {
+    headers: apiHeaders(token),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as UsageSummaryResponse;
+}
+
+export async function fetchBillingUsageEvents(
+  token: string,
+  opts?: { limit?: number; offset?: number; providerId?: string | null },
+): Promise<UsageEventsResponse> {
+  const q = new URLSearchParams();
+  if (opts?.limit != null) q.set("limit", String(opts.limit));
+  if (opts?.offset != null) q.set("offset", String(opts.offset));
+  const pid = opts?.providerId?.trim();
+  if (pid) q.set("provider_id", pid);
+  const qs = q.toString();
+  const res = await fetch(
+    `${API_BASE}/api/chat/billing/usage-events${qs ? `?${qs}` : ""}`,
+    { headers: apiHeaders(token) },
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as UsageEventsResponse;
+}
+
+export async function fetchProviderBalance(
+  token: string,
+  providerId: string,
+): Promise<BalanceSnapshotJson> {
+  const pid = providerId.trim().toLowerCase();
+  const res = await fetch(`${API_BASE}/api/chat/providers/${encodeURIComponent(pid)}/balance`, {
+    headers: apiHeaders(token),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as BalanceSnapshotJson;
+}
+
+export async function fetchConversationBillingTotals(
+  token: string,
+  conversationId: string,
+): Promise<ConversationBillingTotalsResponse> {
+  const cid = conversationId.trim();
+  const res = await fetch(
+    `${API_BASE}/api/chat/conversations/${encodeURIComponent(cid)}/billing/usage-summary`,
+    { headers: apiHeaders(token) },
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ConversationBillingTotalsResponse;
 }

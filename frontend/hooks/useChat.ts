@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
-import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
+import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError, fetchConversationBillingTotals } from "@/lib/api";
 import {
   toolIoToPreview,
   groupMessagesIntoTraces,
@@ -168,6 +168,31 @@ function isLikelyUserAbort(err: unknown, signal: AbortSignal): boolean {
   return /aborted|The operation was aborted|premature close|ERR_STREAM_/i.test(msg);
 }
 
+/** SSE `llm-usage` 内 `usage`（normalize_llm_usage）逐项转为非负增量 */
+function normalizedUsageDelta(u: unknown): { prompt: number; completion: number; total: number } {
+  if (!u || typeof u !== "object") return { prompt: 0, completion: 0, total: 0 };
+  const o = u as Record<string, unknown>;
+  const prompt =
+    typeof o.prompt_tokens === "number"
+      ? o.prompt_tokens
+      : typeof o.input_tokens === "number"
+        ? o.input_tokens
+        : 0;
+  const completion =
+    typeof o.completion_tokens === "number"
+      ? o.completion_tokens
+      : typeof o.output_tokens === "number"
+        ? o.output_tokens
+        : 0;
+  let total = typeof o.total_tokens === "number" ? o.total_tokens : 0;
+  if (!total && (prompt > 0 || completion > 0)) total = prompt + completion;
+  return {
+    prompt: Math.max(0, prompt),
+    completion: Math.max(0, completion),
+    total: Math.max(0, total),
+  };
+}
+
 export function useChat(opts: {
   autoFollowMainRef: React.MutableRefObject<boolean>;
   onNewChatScrollReset: () => void;
@@ -237,6 +262,20 @@ export function useChat(opts: {
   const [attachmentUploadBusy, setAttachmentUploadBusy] = useState(false);
   const [attachmentUploadSkeletonCount, setAttachmentUploadSkeletonCount] = useState(0);
   const [attachmentUploadSlotProgress, setAttachmentUploadSlotProgress] = useState<number[]>([]);
+
+  /** 自最近一次发送起的 llm-usage 累计；新发送 / 新会话 / 切换会话时清零 */
+  const [roundTokensUsage, setRoundTokensUsage] = useState<{
+    prompt: number;
+    completion: number;
+    total: number;
+  } | null>(null);
+
+  /** 入库后的本会话累计（刷新页面后由接口恢复） */
+  const [conversationUsageFromDb, setConversationUsageFromDb] = useState<{
+    prompt: number;
+    completion: number;
+    total: number;
+  } | null>(null);
 
   const attachmentUploadSlotProgressRef = useRef<number[]>([]);
 
@@ -479,6 +518,19 @@ export function useChat(opts: {
     return null;
   }, [messages]);
 
+  /** 输入区用量提示：生成中用 SSE「本轮」；空闲时优先本轮残留，否则用库内「本会话」累计 */
+  const inputBarUsageHint = useMemo(() => {
+    const round = roundTokensUsage && roundTokensUsage.total > 0 ? roundTokensUsage : null;
+    const streaming = genState !== "idle";
+    if (streaming) {
+      return round ? { usage: round, variant: "round" as const } : null;
+    }
+    if (round) return { usage: round, variant: "round" as const };
+    const db = conversationUsageFromDb;
+    if (db && db.total > 0) return { usage: db, variant: "conversation" as const };
+    return null;
+  }, [genState, roundTokensUsage, conversationUsageFromDb]);
+
   // ── Server-side conversation list ──────────────────────────────────────────
   const refreshServerConversations = useCallback(async (): Promise<ServerConversation[] | null> => {
     if (!token) return null;
@@ -536,6 +588,23 @@ export function useChat(opts: {
     setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
   }, []);
 
+  const refreshConversationBillingTotals = useCallback(async (cid: string | null) => {
+    if (!token || !cid?.trim()) {
+      setConversationUsageFromDb(null);
+      return;
+    }
+    try {
+      const data = await fetchConversationBillingTotals(token, cid.trim());
+      setConversationUsageFromDb({
+        prompt: data.totals.prompt_tokens,
+        completion: data.totals.completion_tokens,
+        total: data.totals.total_tokens,
+      });
+    } catch {
+      setConversationUsageFromDb(null);
+    }
+  }, [token]);
+
   // ── Thinking / trace finalization ──────────────────────────────────────────
   const finalizeThinkingStep = useCallback((traceId: string | null, stepId: string | null) => {
     if (!traceId || !stepId) return;
@@ -575,6 +644,7 @@ export function useChat(opts: {
       if (!token) return;
 
       resetFollowUpSuggestions();
+      setRoundTokensUsage(null);
 
       pendingChatModelRef.current = undefined;
       const abortController = new AbortController();
@@ -985,6 +1055,19 @@ export function useChat(opts: {
                   });
                 }
                 setIsGeneratingTitle(false);
+              } else if (data.type === "llm-usage") {
+                const add = normalizedUsageDelta(data.usage);
+                const deltaTotal =
+                  add.total > 0 ? add.total : add.prompt + add.completion;
+                if (deltaTotal <= 0 && add.prompt <= 0 && add.completion <= 0) {
+                  /* skip empty */
+                } else {
+                  setRoundTokensUsage((prev) => ({
+                    prompt: (prev?.prompt ?? 0) + add.prompt,
+                    completion: (prev?.completion ?? 0) + add.completion,
+                    total: (prev?.total ?? 0) + deltaTotal,
+                  }));
+                }
               } else if (data.type === "error") {
                 streamEndedWithSSEError = true;
                 console.error("Backend error:", data.message);
@@ -1111,6 +1194,10 @@ export function useChat(opts: {
           });
           setGenState("idle");
         }
+        const cidFin = conversationIdRef.current;
+        if (token && cidFin) {
+          void refreshConversationBillingTotals(cidFin);
+        }
         abortControllerRef.current = null;
         setIsGeneratingTitle(false);
       }
@@ -1129,6 +1216,7 @@ export function useChat(opts: {
       getPreferredGroupForNewConversation,
       resetFollowUpSuggestions,
       enqueueFollowUpsRequest,
+      refreshConversationBillingTotals,
     ]
   );
 
@@ -1395,6 +1483,8 @@ export function useChat(opts: {
     onNewChatScrollReset();
     thinkingStepStartedAt.current = {};
     traceStartedAt.current = {};
+    setRoundTokensUsage(null);
+    setConversationUsageFromDb(null);
     setHasStarted(false);
     setGenState("idle");
     setIsGeneratingTitle(false);
@@ -1415,17 +1505,27 @@ export function useChat(opts: {
       resetFollowUpSuggestions();
       setIsGeneratingTitle(false);
       setMessages([]);
+      setConversationUsageFromDb(null);
+      setRoundTokensUsage(null);
       onNewChatScrollReset();
       setConversationId(id);
       localStorage.setItem("tcm_conversation_id", id);
       setHasStarted(true);
       try {
         await loadMessagesWithToken(id, token);
+        await refreshConversationBillingTotals(id);
       } catch (e) {
         console.error(e);
       }
     },
-    [genState, token, loadMessagesWithToken, onNewChatScrollReset, resetFollowUpSuggestions]
+    [
+      genState,
+      token,
+      loadMessagesWithToken,
+      onNewChatScrollReset,
+      resetFollowUpSuggestions,
+      refreshConversationBillingTotals,
+    ]
   );
 
   const openDeleteDialog = useCallback(
@@ -1621,6 +1721,8 @@ export function useChat(opts: {
         setMessages(grouped);
         const fu = lastAssistantFollowUpFromMessages(grouped);
         setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
+        if (cancelled) return;
+        await refreshConversationBillingTotals(savedId);
       } catch (e) {
         if (process.env.NODE_ENV === "development") {
           console.warn("[useChat] init session:", e);
@@ -1630,7 +1732,7 @@ export function useChat(opts: {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, token, refreshServerConversations]);
+  }, [authLoading, token, refreshServerConversations, refreshConversationBillingTotals]);
 
   /** 未登录：清空服务端会话缓存与本地残留匿名状态 */
   useEffect(() => {
@@ -1646,6 +1748,8 @@ export function useChat(opts: {
     setGenState("idle");
     setIsGeneratingTitle(false);
     setPendingImageUrls([]);
+    setRoundTokensUsage(null);
+    setConversationUsageFromDb(null);
     cancelAttachmentUploadAnimations();
     thinkingStepStartedAt.current = {};
     traceStartedAt.current = {};
@@ -1658,6 +1762,7 @@ export function useChat(opts: {
     hasStarted,
     genState,
     conversationId,
+    inputBarUsageHint,
     serverConversations,
     isGeneratingTitle,
     lastAssistantMessageId,

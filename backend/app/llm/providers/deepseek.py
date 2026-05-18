@@ -133,4 +133,6 @@ def build_deepseek_chat(
             "type": "json_object",
         }
 
+    kwargs["stream_usage"] = True
+
     return DeepSeekChatOpenAI(**kwargs)

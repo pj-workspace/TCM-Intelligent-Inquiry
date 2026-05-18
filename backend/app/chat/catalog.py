@@ -16,6 +16,11 @@ from app.core.qwen_chat_options import QwenChatModelOptionRow
 _LLPM_IDS = frozenset({"qwen", "deepseek", "openai", "anthropic", "glm"})
 
 
+def catalog_provider_ids() -> frozenset[str]:
+    """与前端目录一致的厂商 id 集合（用于路由白名单等）。"""
+    return _LLPM_IDS
+
+
 def provider_has_credentials(s: Settings, provider_id: str) -> bool:
     pid = (provider_id or "").strip().lower()
     if pid == "qwen":

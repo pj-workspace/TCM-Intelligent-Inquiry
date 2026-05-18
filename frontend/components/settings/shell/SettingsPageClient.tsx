@@ -4,14 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
-import { ArrowLeft, Box, Plug, Bot, Database, User } from "lucide-react";
+import { ArrowLeft, Box, Plug, Bot, Database, PieChart, User } from "lucide-react";
 import { BuiltinToolsTab } from "@/components/settings/builtin/BuiltinToolsTab";
 import { McpTab } from "@/components/settings/mcp/McpTab";
 import { AgentsTab } from "@/components/settings/agents/AgentsTab";
 import { KnowledgeTab } from "@/components/settings/knowledge/KnowledgeTab";
 import { AccountTab } from "@/components/settings/account/AccountTab";
+import { BillingTab } from "@/components/settings/billing/BillingTab";
 
-type TabId = "builtin" | "mcp" | "knowledge" | "agents" | "account";
+type TabId = "builtin" | "mcp" | "knowledge" | "agents" | "billing" | "account";
 
 export function SettingsPageClient() {
   const { loading, token } = useAuth();
@@ -97,6 +98,17 @@ export function SettingsPageClient() {
               Agent 管理
             </button>
             <button
+              onClick={() => setActiveTab("billing")}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
+                activeTab === "billing"
+                  ? "bg-white text-orange-600 shadow-sm ring-1 ring-gray-200 hover:bg-orange-50/40"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <PieChart className="h-4 w-4" />
+              计费与用量
+            </button>
+            <button
               onClick={() => setActiveTab("account")}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors active:scale-[0.99] ${
                 activeTab === "account"
@@ -117,6 +129,7 @@ export function SettingsPageClient() {
             {activeTab === "mcp" && <McpTab />}
             {activeTab === "knowledge" && <KnowledgeTab />}
             {activeTab === "agents" && <AgentsTab />}
+            {activeTab === "billing" && <BillingTab />}
             {activeTab === "account" && <AccountTab />}
           </div>
         </main>

@@ -36,6 +36,13 @@ import {
 import type { GenerationState } from "@/types/chat";
 import type { ChatModelCatalogResponse } from "@/types/models";
 import { CHAT_PENDING_ATTACHMENT_MAX } from "@/lib/chatAttachmentConstants";
+import type { RoundTokensUsage } from "@/components/chat/input/RoundTokensHint";
+import { RoundTokensHint } from "@/components/chat/input/RoundTokensHint";
+
+export type ChatInputBarUsageHint = {
+  usage: RoundTokensUsage;
+  variant: "round" | "conversation";
+};
 
 /** Select value 内分隔厂商 id 与模型 id（避免与模型名冲突） */
 const MODEL_PICK_SEP = "\u001f";
@@ -276,6 +283,8 @@ type ChatInputBarProps = {
     signal: AbortSignal,
   ) => Promise<{ label: string; prompt: string }[] | null>;
   placeholder?: string;
+  /** 输入区用量提示（本轮 SSE / 本会话库累计） */
+  usageHint?: ChatInputBarUsageHint | null;
 };
 
 export function ChatInputBar({
@@ -310,6 +319,7 @@ export function ChatInputBar({
   onSendWithImagePrompt,
   fetchAiImageQuickPrompts,
   placeholder = "有问题，尽管问，Shift+Enter 换行",
+  usageHint = null,
 }: ChatInputBarProps) {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const imgSuggestAbortRef = useRef<AbortController | null>(null);
@@ -627,6 +637,9 @@ export function ChatInputBar({
               ) : null}
             </div>
           )}
+          {hasStarted ? (
+            <RoundTokensHint usage={usageHint?.usage ?? null} variant={usageHint?.variant} />
+          ) : null}
           <textarea
             ref={inputRef}
             value={input}

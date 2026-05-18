@@ -100,6 +100,7 @@ export function HomePageClient() {
     hasStarted,
     genState,
     conversationId,
+    inputBarUsageHint,
     serverConversations,
     conversationFolders,
     pinnedIds,
@@ -1110,6 +1111,7 @@ export function HomePageClient() {
             placeholder={
               viewingGroupLanding ? "在这里提问，新建对话" : undefined
             }
+            usageHint={inputBarUsageHint}
           />
         </div>
       </main>

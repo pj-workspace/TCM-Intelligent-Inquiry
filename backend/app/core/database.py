@@ -87,6 +87,7 @@ async def init_db() -> None:
     from app.knowledge import models as _knowledge_models  # noqa: F401
     from app.mcp import models as _mcp_models  # noqa: F401
     from app.agent.tools.formula import models as _formula_models  # noqa: F401
+    from app.llm.billing import models as _billing_models  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -40,6 +40,14 @@ from app.core.logging import get_logger
 from app.core.config import active_chat_model_label, get_settings, primary_qwen_chat_model
 from app.core.deepseek_chat_options import primary_deepseek_chat_model_id
 from app.core.safety import STREAM_SAFETY_NOTICE
+from app.llm.billing.normalize import sanitize_usage_for_json
+from app.llm.billing.persist_usage import insert_llm_usage_event
+from app.llm.billing.usage_from_chunk import (
+    build_usage_emit_signature,
+    maybe_llm_usage_sse_payload,
+    merged_usage_dict,
+    usage_sources_from_chunk,
+)
 
 if TYPE_CHECKING:
     from app.auth.models import UserRecord
@@ -580,6 +588,7 @@ async def stream_chat(
         tool_pending_fifo: list[dict[str, Any]] = []
         trace_stream_rm_merged: dict[str, Any] = {}
         _break_after_widget: bool = False
+        seen_llm_usage_sigs: set[str] = set()
 
         async def flush_thinking_segment() -> None:
             nonlocal thinking_buf, thinking_t0
@@ -682,6 +691,48 @@ async def stream_chat(
                             if chat_trace:
                                 trace_visible_parts.append(delta)
                             yield _sse({"type": "text-delta", "textDelta": delta})
+
+                    eff_pv = (resolved.effective_llm_provider or "").strip().lower()
+                    if eff_pv:
+                        lu_payload = maybe_llm_usage_sse_payload(
+                            provider_id=eff_pv,
+                            graph_run_id=str(run_id) if run_id is not None else None,
+                            chat_model=resolved.llm_chat_model_id,
+                            chunk=chunk,
+                        )
+                        if lu_payload:
+                            merged_u = merged_usage_dict(chunk)
+                            sig_u = build_usage_emit_signature(
+                                str(run_id) if run_id is not None else None,
+                                merged_u,
+                            )
+                            if sig_u not in seen_llm_usage_sigs:
+                                seen_llm_usage_sigs.add(sig_u)
+                                um_u, rm_u = usage_sources_from_chunk(chunk)
+                                raw_u = sanitize_usage_for_json(merged_u)
+                                if not isinstance(raw_u, dict):
+                                    raw_u = {}
+                                lu_out = dict(lu_payload)
+                                try:
+                                    async with async_session_factory() as session_u:
+                                        eid_u = await insert_llm_usage_event(
+                                            session_u,
+                                            user_id=user_id,
+                                            conversation_id=conv_id,
+                                            provider_id=eff_pv,
+                                            chat_model=resolved.llm_chat_model_id,
+                                            graph_run_id=str(run_id)
+                                            if run_id is not None
+                                            else None,
+                                            usage_raw=raw_u,
+                                            usage_meta=um_u,
+                                            response_meta=rm_u,
+                                        )
+                                        await session_u.commit()
+                                    lu_out["usageEventId"] = eid_u
+                                except Exception:
+                                    logger.exception("llm_usage_events persist failed")
+                                yield _sse(lu_out)
 
             elif etype == "on_tool_start":
                 await flush_thinking_segment()
