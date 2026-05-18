@@ -114,14 +114,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_provider_balance_snapshots_user_created", table_name="provider_balance_snapshots")
-    op.drop_index("ix_provider_balance_snapshots_provider_created", table_name="provider_balance_snapshots")
-    op.drop_table("provider_balance_snapshots")
-
-    op.drop_index("ix_llm_usage_events_provider_created", table_name="llm_usage_events")
-    op.drop_index("ix_llm_usage_events_conv_created", table_name="llm_usage_events")
-    op.drop_index("ix_llm_usage_events_user_created", table_name="llm_usage_events")
-    op.drop_index("ix_llm_usage_events_provider_id", table_name="llm_usage_events")
-    op.drop_index("ix_llm_usage_events_conversation_id", table_name="llm_usage_events")
-    op.drop_index("ix_llm_usage_events_user_id", table_name="llm_usage_events")
-    op.drop_table("llm_usage_events")
+    # 与 upgrade 中 CREATE IF NOT EXISTS 对称，避免手工删改过对象时 downgrade 报错
+    for stmt in (
+        "DROP INDEX IF EXISTS ix_provider_balance_snapshots_user_created",
+        "DROP INDEX IF EXISTS ix_provider_balance_snapshots_provider_created",
+        "DROP TABLE IF EXISTS provider_balance_snapshots",
+        "DROP INDEX IF EXISTS ix_llm_usage_events_provider_created",
+        "DROP INDEX IF EXISTS ix_llm_usage_events_conv_created",
+        "DROP INDEX IF EXISTS ix_llm_usage_events_user_created",
+        "DROP INDEX IF EXISTS ix_llm_usage_events_provider_id",
+        "DROP INDEX IF EXISTS ix_llm_usage_events_conversation_id",
+        "DROP INDEX IF EXISTS ix_llm_usage_events_user_id",
+        "DROP TABLE IF EXISTS llm_usage_events",
+    ):
+        op.execute(sa.text(stmt))

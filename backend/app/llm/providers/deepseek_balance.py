@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 
 from app.llm.billing.schemas import BalanceLineItem, BalanceSnapshot
+from app.llm.providers.deepseek_balance_coerce import balance_is_available_field
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -44,9 +45,7 @@ async def fetch_deepseek_balance_snapshot(settings: "Settings") -> BalanceSnapsh
     if not isinstance(data, dict):
         raise RuntimeError("DeepSeek balance 响应非法")
 
-    is_avail = data.get("is_available")
-    if is_avail is not None and not isinstance(is_avail, bool):
-        is_avail = bool(is_avail)
+    is_avail = balance_is_available_field(data.get("is_available"))
 
     balances_out: list[BalanceLineItem] = []
     raw_infos = data.get("balance_infos")
@@ -65,7 +64,7 @@ async def fetch_deepseek_balance_snapshot(settings: "Settings") -> BalanceSnapsh
 
     snap = BalanceSnapshot(
         provider_id="deepseek",
-        is_available=is_avail if isinstance(is_avail, bool) else None,
+        is_available=is_avail,
         balances=balances_out,
         raw=data if isinstance(data, dict) else {},
     )
