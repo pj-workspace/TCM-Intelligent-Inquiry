@@ -397,14 +397,18 @@ export function ChatHeader({
                 P
               </span>
             </button>
-            <div className="absolute right-0 top-full z-50 mt-2 w-32 origin-top-right rounded-lg border border-[#e5e5e5] bg-white py-1 shadow-lg opacity-0 scale-[0.98] translate-y-[-6px] pointer-events-none invisible transition-[opacity,transform,visibility] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 group-hover:visible group-hover:pointer-events-auto">
+            {/* 使用 pt-2 代替菜单 margin-top，避免头像与面板之间的空隙丢失 hover */}
+            <div className="absolute right-0 top-full z-50 flex justify-end pt-2">
+              <div className="w-32 origin-top-right rounded-lg border border-[#e5e5e5] bg-white py-1 shadow-lg opacity-0 scale-[0.98] translate-y-[-6px] pointer-events-none invisible transition-[opacity,transform,visibility] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 group-hover:visible group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:scale-100 group-focus-within:translate-y-0 group-focus-within:visible group-focus-within:pointer-events-auto">
                 <button
+                  type="button"
                   onClick={onLogout}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100/50 transition-colors"
                 >
                   <LogOut className="w-4 h-4" />
                   退出登录
                 </button>
+              </div>
             </div>
           </div>
         ) : (
