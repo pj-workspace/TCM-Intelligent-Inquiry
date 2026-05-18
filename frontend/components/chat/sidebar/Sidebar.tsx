@@ -63,6 +63,8 @@ type SidebarProps = {
   onToggle?: () => void;
   onOpenSearch?: () => void;
   movePendingId?: string | null;
+  /** 悬停会话行时预取 `/chat/:id`，减轻切换卡顿 */
+  onPrefetchConversation?: (id: string) => void;
 };
 
 export function Sidebar({
@@ -97,6 +99,7 @@ export function Sidebar({
   onToggle,
   onOpenSearch,
   movePendingId,
+  onPrefetchConversation,
 }: SidebarProps) {
   const { loading, token } = useAuth();
 
@@ -303,6 +306,11 @@ export function Sidebar({
                           : "text-gray-600 hover:bg-gray-100/85 border border-transparent",
                         batchMode && selectedIds.has(c.id) && "ring-1 ring-orange-300 bg-orange-50/50"
                       )}
+                      onMouseEnter={
+                        !batchMode && onPrefetchConversation && !isGenerating
+                          ? () => onPrefetchConversation(c.id)
+                          : undefined
+                      }
                       onClick={
                         isGenerating
                           ? undefined

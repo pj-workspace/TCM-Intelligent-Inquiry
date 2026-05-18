@@ -297,19 +297,12 @@ export function HomePageClient() {
 
   const showBackToGroupWorkspace = Boolean(token) && activeConvInSidebarGroup;
 
+  /** 仅更新 URL；会话加载与列表刷新由 pathname effect → handleSelectConversation 统一执行，避免二次请求与重复清空消息 */
   const selectConversationSyncSidebar = useCallback(
-    async (id: string) => {
+    (id: string) => {
       router.push(chatPathConversation(id));
-      try {
-        const list = await refreshServerConversations();
-        const row = list?.find((c) => c.id === id);
-        if (row?.group_id) setSidebarFilter(row.group_id);
-        else setSidebarFilter("__ungrouped__");
-      } catch {
-        /* ignore */
-      }
     },
-    [router, refreshServerConversations]
+    [router]
   );
 
   /**
@@ -364,24 +357,41 @@ export function HomePageClient() {
     }
     if (!token) return;
     const id = parsed.conversationId;
-    if (conversationId === id) {
-      const conv = serverConversations.find((c) => c.id === id);
-      if (conv?.group_id) setSidebarFilter(conv.group_id);
-      else setSidebarFilter("__ungrouped__");
-      return;
-    }
+    if (conversationId === id) return;
     void handleSelectConversation(id);
   }, [
     pathname,
     authLoading,
     token,
     conversationId,
-    serverConversations,
     router,
     handleNewChat,
     handleSelectConversation,
     sseRouteAssignPending,
   ]);
+
+  /** 会话已与 URL 对齐后，按列表推导侧栏分组（不依赖本 effect 触发加载，避免列表刷新导致整段路由 effect 重跑） */
+  useEffect(() => {
+    if (authLoading || !token) return;
+    const parsed = parseChatPathname(pathname);
+    if (parsed.kind !== "conversation" || parsed.conversationId !== conversationId || !conversationId) {
+      return;
+    }
+    const conv = serverConversations.find((c) => c.id === conversationId);
+    if (conv?.group_id) setSidebarFilter(conv.group_id);
+    else setSidebarFilter("__ungrouped__");
+  }, [pathname, authLoading, token, conversationId, serverConversations]);
+
+  const prefetchConversationRoute = useCallback(
+    (id: string) => {
+      try {
+        router.prefetch(chatPathConversation(id));
+      } catch {
+        /* ignore */
+      }
+    },
+    [router]
+  );
 
   const handleClearSidebarSelection = useCallback(() => {
     setSidebarSelectedIds(new Set());
@@ -842,6 +852,7 @@ export function HomePageClient() {
         onToggle={() => setSidebarCollapsed((v) => !v)}
         onOpenSearch={() => setSearchOpen(true)}
         movePendingId={movePendingId}
+        onPrefetchConversation={prefetchConversationRoute}
       />
 
       <ConversationSearchModal

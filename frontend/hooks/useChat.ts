@@ -1533,13 +1533,14 @@ export function useChat(opts: {
       localStorage.setItem("tcm_conversation_id", id);
       setHasStarted(true);
       try {
-        try {
-          await loadMessagesWithToken(id, token);
-        } catch (e) {
+        const messagesPromise = loadMessagesWithToken(id, token).catch((e) => {
           console.error(e);
-        }
-        await refreshServerConversations();
-        await refreshConversationBillingTotals(id);
+        });
+        await Promise.all([
+          messagesPromise,
+          refreshServerConversations(),
+          refreshConversationBillingTotals(id),
+        ]);
       } catch (e) {
         console.error(e);
       }
