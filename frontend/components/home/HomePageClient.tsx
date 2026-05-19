@@ -61,7 +61,10 @@ export function HomePageClient() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
 
-  const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>("__ungrouped__");
+  const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>(() => {
+    const parsed = parseChatPathname(pathname);
+    return parsed.kind === "folder" ? parsed.groupId : "__ungrouped__";
+  });
   const [sidebarBatchMode, setSidebarBatchMode] = useState(false);
   const [sidebarSelectedIds, setSidebarSelectedIds] = useState<Set<string>>(() => new Set());
 
@@ -1117,7 +1120,7 @@ export function HomePageClient() {
                   autoFollowMainRef.current = true;
                   scrollToBottom(true);
                 }}
-                className="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#e5e5e5] bg-white/92 px-3.5 py-2 text-sm text-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.08)] backdrop-blur bottom-32 md:bottom-36 hover:bg-gray-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
+                className="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#e5e5e5] bg-white/92 px-3.5 py-2 text-sm text-gray-700 shadow-[0_8px_24px_rgba(0,0,0,0.08)] backdrop-blur bottom-40 md:bottom-44 hover:bg-gray-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300"
               >
                 <ArrowDown className="h-4 w-4" />
                 <span>回到底部</span>

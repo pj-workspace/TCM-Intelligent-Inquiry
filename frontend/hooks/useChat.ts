@@ -1753,6 +1753,26 @@ export function useChat(opts: {
     };
   }, [authLoading, token, chatPathname, refreshServerConversations, router]);
 
+  /** 已登录：刷新 `/chat/folder/:id` 时拉取会话与分组列表（否则侧栏与分组工作台为空） */
+  useEffect(() => {
+    if (authLoading || !token) return;
+    const parsed = parseChatPathname(chatPathname);
+    if (parsed.kind !== "folder") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refreshServerConversations();
+      } catch (e) {
+        if (!cancelled && process.env.NODE_ENV === "development") {
+          console.warn("[useChat] refresh on folder page:", e);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, token, chatPathname, refreshServerConversations]);
+
   /** 未登录：清空服务端会话缓存与本地残留匿名状态 */
   useEffect(() => {
     if (authLoading || token) return;
