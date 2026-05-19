@@ -15,11 +15,13 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import type { ServerConversation } from "@/types/chat";
+import type { ChatSurfacePhase } from "@/hooks/useChat";
 import { uiDropdownBelow } from "@/lib/ui-motion";
 
 type ChatHeaderProps = {
   token: string | null;
   authLoading: boolean;
+  chatSurfacePhase?: ChatSurfacePhase;
   /** 分组工作台：顶部显示文件夹标题，不传 conversation 菜单 */
   groupWorkspaceTitle?: string | null;
   hasStarted: boolean;
@@ -55,6 +57,7 @@ type ChatHeaderProps = {
 export function ChatHeader({
   token,
   authLoading,
+  chatSurfacePhase = "ready",
   groupWorkspaceTitle,
   hasStarted,
   conversationId,

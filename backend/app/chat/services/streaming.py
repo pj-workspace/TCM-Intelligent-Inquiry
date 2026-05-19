@@ -529,10 +529,16 @@ async def stream_chat(
                 )
             )
 
+        async with async_session_factory() as session:
+            conv_for_agent = await session.get(ConversationRecord, conv_id)
+            if conv_for_agent is not None and conv_for_agent.agent_id != effective_agent_id:
+                conv_for_agent.agent_id = effective_agent_id
+                await session.commit()
+
         meta_out: dict[str, Any] = {
             "type": "meta",
             "conversationId": conv_id,
-            "agentId": agent_id,
+            "agentId": effective_agent_id,
             "chatModel": _meta_chat_model_label(resolved),
             "safetyNotice": STREAM_SAFETY_NOTICE,
         }

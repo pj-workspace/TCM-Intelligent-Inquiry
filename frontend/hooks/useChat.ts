@@ -4,7 +4,15 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError, fetchConversationBillingTotals } from "@/lib/api";
-import { chatPathConversation, normalizePathname, parseChatPathname } from "@/lib/chatRoutes";
+import {
+  chatPathConversation,
+  chatPathNew,
+  normalizePathname,
+  parseChatPathname,
+} from "@/lib/chatRoutes";
+
+/** UI 门控：欢迎页/骨架/消息区；滚动与发送仍用 hasStarted */
+export type ChatSurfacePhase = "authPending" | "newChat" | "hydrating" | "ready";
 import {
   toolIoToPreview,
   groupMessagesIntoTraces,
@@ -32,6 +40,23 @@ import type { ChatModelCatalogResponse } from "@/types/models";
 const PINNED_IDS_KEY = "tcm_pinned_conversation_ids";
 
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
+
+const DEFAULT_AGENT_LS_KEY = "tcm_default_agent_id";
+
+function readStoredDefaultAgentId(): string | null {
+  try {
+    const raw = localStorage.getItem(DEFAULT_AGENT_LS_KEY)?.trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 策略 A：null 表示 omit agent_id，走后端系统默认或会话已存值 */
+function agentIdForChatRequest(chatAgentId: string | null): string | undefined {
+  const id = chatAgentId?.trim();
+  return id ? id : undefined;
+}
 
 /** 迁移用：旧版仅缓存模型 id */
 const CHAT_MODEL_LS_KEY = "tcm_chat_model";
@@ -226,8 +251,16 @@ export function useChat(opts: {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasStarted, setHasStarted] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
+  const [sessionRestorePending, setSessionRestorePending] = useState(false);
   const [genState, setGenState] = useState<GenerationState>("idle");
   const [conversationId, setConversationIdState] = useState<string | null>(null);
+  const loadMessagesAbortRef = useRef<AbortController | null>(null);
+  const loadMessagesGenRef = useRef(0);
+  const initialListLoadedRef = useRef(false);
+  /** 已加载过的会话消息，切换时先展示缓存避免清空闪屏 */
+  const messagesCacheRef = useRef<Map<string, Message[]>>(new Map());
 
   const setConversationId = useCallback((next: string | null) => {
     conversationIdRef.current = next;
@@ -268,6 +301,11 @@ export function useChat(opts: {
   );
   const [selectedProviderId, setSelectedProviderIdState] = useState("");
   const [selectedChatModelId, setSelectedChatModelIdState] = useState("");
+
+  /** 下一轮 SSE 使用的 Agent；null = omit（系统默认 / 会话回落） */
+  const [chatAgentId, setChatAgentId] = useState<string | null>(() =>
+    readStoredDefaultAgentId(),
+  );
 
   /** 已上传待发送的图片 URL（OSS 签名） */
   const [pendingImageUrls, setPendingImageUrls] = useState<string[]>([]);
@@ -559,6 +597,9 @@ export function useChat(opts: {
           title: string;
           created_at?: string;
           group_id?: string | null;
+          agent_id?: string | null;
+          agent_name?: string | null;
+          last_model_name?: string | null;
         }[];
         if (Array.isArray(data)) {
           listOut = data.map((x) => ({
@@ -566,6 +607,9 @@ export function useChat(opts: {
             title: x.title?.trim() || "未命名",
             created_at: x.created_at,
             group_id: x.group_id ?? null,
+            agent_id: x.agent_id ?? null,
+            agent_name: x.agent_name ?? null,
+            last_model_name: x.last_model_name ?? null,
           }));
           setServerConversations(listOut);
         }
@@ -587,18 +631,90 @@ export function useChat(opts: {
     }
   }, [token]);
 
-  const loadMessagesWithToken = useCallback(async (convId: string, accessToken: string) => {
-    const res = await fetch(`${API_BASE}/api/chat/conversations/${convId}/messages`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) throw new Error("Failed to fetch messages");
-    const data = (await res.json()) as ApiMessageRow[];
-    if (!Array.isArray(data)) return;
-    const grouped = groupMessagesIntoTraces(data.map(mapApiRowToMessage));
-    setMessages(grouped);
-    const fu = lastAssistantFollowUpFromMessages(grouped);
-    setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
-  }, []);
+  const loadMessagesWithToken = useCallback(
+    async (convId: string, accessToken: string, signal?: AbortSignal) => {
+      const res = await fetch(`${API_BASE}/api/chat/conversations/${convId}/messages`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal,
+      });
+      if (!res.ok) throw new Error("Failed to fetch messages");
+      const data = (await res.json()) as ApiMessageRow[];
+      if (signal?.aborted) return;
+      if (!Array.isArray(data)) return;
+      const grouped = groupMessagesIntoTraces(data.map(mapApiRowToMessage));
+      messagesCacheRef.current.set(convId, grouped);
+      setMessages(grouped);
+      const fu = lastAssistantFollowUpFromMessages(grouped);
+      setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
+    },
+    []
+  );
+
+  useEffect(() => {
+    const id = conversationId?.trim();
+    if (!id || messages.length === 0) return;
+    messagesCacheRef.current.set(id, messages);
+  }, [conversationId, messages]);
+
+  const refreshServerConversationsTracked = useCallback(async (): Promise<
+    ServerConversation[] | null
+  > => {
+    const trackFirst = Boolean(token) && !initialListLoadedRef.current;
+    if (trackFirst) setListLoading(true);
+    try {
+      return await refreshServerConversations();
+    } finally {
+      if (trackFirst) {
+        initialListLoadedRef.current = true;
+        setListLoading(false);
+      }
+    }
+  }, [token, refreshServerConversations]);
+
+  const urlConversationId = useMemo(() => {
+    const parsed = parseChatPathname(chatPathname);
+    return parsed.kind === "conversation" ? parsed.conversationId : null;
+  }, [chatPathname]);
+
+  const conversationRouteSynced = useMemo(
+    () => !urlConversationId || conversationId === urlConversationId,
+    [urlConversationId, conversationId]
+  );
+
+  const chatSurfacePhase = useMemo((): ChatSurfacePhase => {
+    if (authLoading || sessionRestorePending) return "authPending";
+
+    const parsed = parseChatPathname(chatPathname);
+
+    if (sseRouteAssignPending) return "hydrating";
+
+    if (parsed.kind === "conversation") {
+      if (!token) return "authPending";
+      if (conversationId !== parsed.conversationId || messagesLoading) return "hydrating";
+      return "ready";
+    }
+
+    if (!token) {
+      if (parsed.kind === "new" && !hasStarted) return "newChat";
+      return "ready";
+    }
+
+    if (parsed.kind === "new") {
+      if (!hasStarted) return "newChat";
+      return "ready";
+    }
+
+    return "ready";
+  }, [
+    authLoading,
+    sessionRestorePending,
+    chatPathname,
+    sseRouteAssignPending,
+    token,
+    conversationId,
+    messagesLoading,
+    hasStarted,
+  ]);
 
   const refreshConversationBillingTotals = useCallback(async (cid: string | null) => {
     if (!token || !cid?.trim()) {
@@ -703,7 +819,9 @@ export function useChat(opts: {
             message: userText,
             conversation_id: conversationIdRef.current ?? conversationId,
             regenerate_last_reply: streamOpts?.regenerateLastReply ?? false,
-            agent_id: localStorage.getItem("tcm_default_agent_id") ?? undefined,
+            ...(agentIdForChatRequest(chatAgentId)
+              ? { agent_id: agentIdForChatRequest(chatAgentId) }
+              : {}),
             deep_think: deepThinkEnabled,
             web_search_enabled: webSearchEnabled,
             web_search_mode: webSearchMode,
@@ -1232,6 +1350,7 @@ export function useChat(opts: {
       enqueueFollowUpsRequest,
       refreshConversationBillingTotals,
       router,
+      chatAgentId,
     ]
   );
 
@@ -1491,6 +1610,9 @@ export function useChat(opts: {
 
   const handleNewChat = useCallback(
     (options?: { skipNavigation?: boolean }) => {
+      loadMessagesAbortRef.current?.abort();
+      loadMessagesAbortRef.current = null;
+      setMessagesLoading(false);
       setSseRouteAssignPending(false);
       resetFollowUpSuggestions();
       localStorage.removeItem("tcm_conversation_id");
@@ -1507,6 +1629,7 @@ export function useChat(opts: {
       setIsGeneratingTitle(false);
       setPendingImageUrls([]);
       cancelAttachmentUploadAnimations();
+      setChatAgentId(readStoredDefaultAgentId());
       if (token) void refreshServerConversations();
       if (!options?.skipNavigation) onNavigateToNewChatSurface?.();
     },
@@ -1523,36 +1646,77 @@ export function useChat(opts: {
   const handleSelectConversation = useCallback(
     async (id: string) => {
       if (genState !== "idle" || !token) return;
+      const idTrim = id.trim();
+      if (!idTrim) return;
+      if (
+        idTrim === conversationId &&
+        !messagesLoading &&
+        (messages.length > 0 || messagesCacheRef.current.has(idTrim))
+      ) {
+        return;
+      }
+
+      loadMessagesAbortRef.current?.abort();
+      const ac = new AbortController();
+      loadMessagesAbortRef.current = ac;
+      const loadGen = ++loadMessagesGenRef.current;
+
       resetFollowUpSuggestions();
       setIsGeneratingTitle(false);
-      setMessages([]);
       setConversationUsageFromDb(null);
       setRoundTokensUsage(null);
       onNewChatScrollReset();
-      setConversationId(id);
-      localStorage.setItem("tcm_conversation_id", id);
+      setConversationId(idTrim);
+      localStorage.setItem("tcm_conversation_id", idTrim);
       setHasStarted(true);
+
+      const cached = messagesCacheRef.current.get(idTrim);
+      if (cached?.length) {
+        setMessages(cached);
+        const fu = lastAssistantFollowUpFromMessages(cached);
+        setFollowUpSuggestions(fu ? { messageId: fu.messageId, items: fu.items } : null);
+      } else if (idTrim !== conversationId) {
+        setMessages([]);
+        setFollowUpSuggestions(null);
+      }
+
+      setMessagesLoading(true);
+
       try {
-        const messagesPromise = loadMessagesWithToken(id, token).catch((e) => {
-          console.error(e);
-        });
-        await Promise.all([
-          messagesPromise,
+        const [, mapped] = await Promise.all([
+          loadMessagesWithToken(idTrim, token, ac.signal).catch((e) => {
+            if (ac.signal.aborted) return;
+            console.error(e);
+            toast.error("加载对话失败，请稍后重试");
+          }),
           refreshServerConversations(),
-          refreshConversationBillingTotals(id),
+          refreshConversationBillingTotals(idTrim),
         ]);
+        if (!ac.signal.aborted && mapped) {
+          const row = mapped.find((c) => c.id === idTrim);
+          const aid = row?.agent_id?.trim();
+          setChatAgentId(aid || null);
+        }
       } catch (e) {
-        console.error(e);
+        if (!ac.signal.aborted) console.error(e);
+      } finally {
+        if (loadMessagesGenRef.current === loadGen) {
+          setMessagesLoading(false);
+        }
       }
     },
     [
       genState,
       token,
+      conversationId,
+      messages.length,
+      messagesLoading,
       loadMessagesWithToken,
       onNewChatScrollReset,
       resetFollowUpSuggestions,
       refreshConversationBillingTotals,
       refreshServerConversations,
+      setConversationId,
     ]
   );
 
@@ -1590,6 +1754,7 @@ export function useChat(opts: {
         return next;
       });
       if (conversationId === id) handleNewChat();
+      messagesCacheRef.current.delete(id);
       setDeleteTargetId(null);
     } catch (e) {
       console.error(e);
@@ -1733,16 +1898,24 @@ export function useChat(opts: {
   /** 已登录：仅当停在 `/chat` 时可用 localStorage 恢复到 `/chat/:id` */
   useEffect(() => {
     if (authLoading || !token) return;
-    if (normalizePathname(chatPathname) !== "/chat") return;
+    if (normalizePathname(chatPathname) !== "/chat") {
+      setSessionRestorePending(false);
+      return;
+    }
+    setSessionRestorePending(true);
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
-        const mapped = await refreshServerConversations();
+        const mapped = await refreshServerConversationsTracked();
         if (cancelled) return;
         const savedId = localStorage.getItem("tcm_conversation_id")?.trim();
-        if (!savedId || !mapped?.some((c) => c.id === savedId)) return;
+        if (!savedId || !mapped?.some((c) => c.id === savedId)) {
+          setSessionRestorePending(false);
+          return;
+        }
         router.replace(chatPathConversation(savedId));
       } catch (e) {
+        if (!cancelled) setSessionRestorePending(false);
         if (process.env.NODE_ENV === "development") {
           console.warn("[useChat] restore session:", e);
         }
@@ -1751,7 +1924,21 @@ export function useChat(opts: {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, token, chatPathname, refreshServerConversations, router]);
+  }, [authLoading, token, chatPathname, refreshServerConversationsTracked, router]);
+
+  /** 路径为会话 id 时：认证后加载消息（folder/invalid/new 仍由 HomePageClient 处理） */
+  useEffect(() => {
+    if (authLoading) return;
+    const parsed = parseChatPathname(chatPathname);
+    if (parsed.kind !== "conversation") return;
+    if (!token) {
+      router.replace(chatPathNew());
+      return;
+    }
+    const urlId = parsed.conversationId;
+    if (conversationId === urlId) return;
+    void handleSelectConversation(urlId);
+  }, [authLoading, token, chatPathname, conversationId, router, handleSelectConversation]);
 
   /** 已登录：刷新 `/chat/folder/:id` 时拉取会话与分组列表（否则侧栏与分组工作台为空） */
   useEffect(() => {
@@ -1761,7 +1948,7 @@ export function useChat(opts: {
     let cancelled = false;
     void (async () => {
       try {
-        await refreshServerConversations();
+        await refreshServerConversationsTracked();
       } catch (e) {
         if (!cancelled && process.env.NODE_ENV === "development") {
           console.warn("[useChat] refresh on folder page:", e);
@@ -1771,11 +1958,22 @@ export function useChat(opts: {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, token, chatPathname, refreshServerConversations]);
+  }, [authLoading, token, chatPathname, refreshServerConversationsTracked]);
+
+  useEffect(() => {
+    const parsed = parseChatPathname(chatPathname);
+    if (parsed.kind === "conversation") setSessionRestorePending(false);
+  }, [chatPathname]);
 
   /** 未登录：清空服务端会话缓存与本地残留匿名状态 */
   useEffect(() => {
     if (authLoading || token) return;
+    loadMessagesAbortRef.current?.abort();
+    loadMessagesAbortRef.current = null;
+    initialListLoadedRef.current = false;
+    setMessagesLoading(false);
+    setListLoading(false);
+    setSessionRestorePending(false);
     resetFollowUpSuggestions();
     setServerConversations([]);
     setConversationFolders([]);
@@ -1792,13 +1990,19 @@ export function useChat(opts: {
     cancelAttachmentUploadAnimations();
     thinkingStepStartedAt.current = {};
     traceStartedAt.current = {};
-  }, [authLoading, token, cancelAttachmentUploadAnimations, resetFollowUpSuggestions]);
+  }, [authLoading, token, cancelAttachmentUploadAnimations, resetFollowUpSuggestions, setConversationId]);
 
   return {
     // state
     messages,
     setMessages,
     hasStarted,
+    chatSurfacePhase,
+    urlConversationId,
+    conversationRouteSynced,
+    messagesLoading,
+    listLoading,
+    sessionRestorePending,
     genState,
     conversationId,
     inputBarUsageHint,
@@ -1821,6 +2025,8 @@ export function useChat(opts: {
     webSearchMode,
     setWebSearchMode,
     chatModelCatalog: modelCatalog,
+    chatAgentId,
+    setChatAgentId,
     selectedProviderId,
     selectedChatModelId,
     setModelPick,

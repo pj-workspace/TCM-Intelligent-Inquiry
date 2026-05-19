@@ -32,9 +32,15 @@ import {
   FileText,
   X,
   ArrowUpRight,
+  Bot,
 } from "lucide-react";
+import {
+  SYSTEM_AGENT_LABEL,
+  SYSTEM_AGENT_SELECT_VALUE,
+} from "@/lib/chatAgentConstants";
 import type { GenerationState } from "@/types/chat";
 import type { ChatModelCatalogResponse } from "@/types/models";
+import type { ChatSurfacePhase } from "@/hooks/useChat";
 import { CHAT_PENDING_ATTACHMENT_MAX } from "@/lib/chatAttachmentConstants";
 import type { RoundTokensUsage } from "@/components/chat/input/RoundTokensHint";
 import { RoundTokensHint } from "@/components/chat/input/RoundTokensHint";
@@ -285,6 +291,14 @@ type ChatInputBarProps = {
   placeholder?: string;
   /** 输入区用量提示（本轮 SSE / 本会话库累计） */
   usageHint?: ChatInputBarUsageHint | null;
+  /** 与主区阶段联动，避免恢复态误显快捷卡 */
+  chatSurfacePhase?: ChatSurfacePhase;
+  /** 已登录时展示 Agent 选择 */
+  showAgentPicker?: boolean;
+  agents?: { id: string; name: string }[];
+  selectedAgentId?: string | null;
+  onSelectAgent?: (agentId: string | null) => void;
+  agentsLoading?: boolean;
 };
 
 export function ChatInputBar({
@@ -320,6 +334,12 @@ export function ChatInputBar({
   fetchAiImageQuickPrompts,
   placeholder = "有问题，尽管问，Shift+Enter 换行",
   usageHint = null,
+  chatSurfacePhase = "ready",
+  showAgentPicker = false,
+  agents = [],
+  selectedAgentId = null,
+  onSelectAgent,
+  agentsLoading = false,
 }: ChatInputBarProps) {
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const imgSuggestAbortRef = useRef<AbortController | null>(null);
@@ -393,9 +413,9 @@ export function ChatInputBar({
     ],
   );
 
-  /** 首屏五张大卡：仅无待传图、无输入文字、未在上传时展示，避免与附件区、附图话术条抢位 */
+  /** 首屏五张大卡：仅新对话工作台且无待传图、无输入文字、未在上传时展示 */
   const showLandingQuickPromptCards =
-    !hasStarted &&
+    chatSurfacePhase === "newChat" &&
     pendingImageUrls.length === 0 &&
     !attachmentUploadBusy &&
     attachmentUploadSkeletonCount === 0 &&
@@ -669,10 +689,7 @@ export function ChatInputBar({
             }}
           />
 
-          <motion.div
-            layout="position"
-            className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3 pt-1"
-          >
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3 pt-1">
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               {/* 深度思考按钮 */}
               <button
@@ -867,6 +884,65 @@ export function ChatInputBar({
                 </DropdownMenu.Portal>
               </DropdownMenu.Root>
 
+              {showAgentPicker && onSelectAgent && (
+                <div className="max-w-[min(20rem,46vw)] shrink-0">
+                  <Select.Root
+                    disabled={genState !== "idle" || agentsLoading}
+                    value={
+                      selectedAgentId?.trim()
+                        ? selectedAgentId.trim()
+                        : SYSTEM_AGENT_SELECT_VALUE
+                    }
+                    onValueChange={(v) => {
+                      if (v === SYSTEM_AGENT_SELECT_VALUE) onSelectAgent(null);
+                      else onSelectAgent(v);
+                    }}
+                  >
+                    <Select.Trigger className="flex w-full max-w-[min(20rem,46vw)] items-center gap-1 rounded-lg border border-transparent px-2 py-1.5 text-sm font-medium text-gray-800 outline-none transition-colors hover:bg-gray-100 focus-visible:border-gray-300 disabled:opacity-45">
+                      <Bot className="h-3.5 w-3.5 shrink-0 opacity-55" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        <Select.Value placeholder={SYSTEM_AGENT_LABEL} />
+                      </span>
+                      <Select.Icon aria-hidden>
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-55" />
+                      </Select.Icon>
+                    </Select.Trigger>
+                    <Select.Portal>
+                      <Select.Content
+                        position="popper"
+                        sideOffset={6}
+                        collisionPadding={12}
+                        className="ui-radix-floating z-[9999] max-h-[min(16rem,calc(100vh-6rem))] min-w-[10.5rem] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg"
+                      >
+                        <Select.Viewport className="max-h-[min(15rem,calc(100vh-8rem))] p-1">
+                          <Select.Item
+                            value={SYSTEM_AGENT_SELECT_VALUE}
+                            className="relative cursor-pointer select-none rounded-lg px-2.5 py-2 text-xs outline-none data-[highlighted]:bg-gray-50"
+                          >
+                            <Select.ItemText>{SYSTEM_AGENT_LABEL}</Select.ItemText>
+                            <Select.ItemIndicator className="absolute right-2 top-1/2 -translate-y-1/2">
+                              <Check className="h-3.5 w-3.5" />
+                            </Select.ItemIndicator>
+                          </Select.Item>
+                          {agents.map((a) => (
+                            <Select.Item
+                              key={a.id}
+                              value={a.id}
+                              className="relative cursor-pointer select-none rounded-lg px-2.5 py-2 text-xs outline-none data-[highlighted]:bg-gray-50"
+                            >
+                              <Select.ItemText className="line-clamp-2">{a.name}</Select.ItemText>
+                              <Select.ItemIndicator className="absolute right-2 top-1/2 -translate-y-1/2">
+                                <Check className="h-3.5 w-3.5" />
+                              </Select.ItemIndicator>
+                            </Select.Item>
+                          ))}
+                        </Select.Viewport>
+                      </Select.Content>
+                    </Select.Portal>
+                  </Select.Root>
+                </div>
+              )}
+
               {!modelCatalog?.providers?.length ? (
                 <span
                   className="truncate rounded-lg px-2 py-1.5 text-xs font-medium text-gray-500 opacity-75"
@@ -1030,14 +1106,18 @@ export function ChatInputBar({
                 </button>
               )}
             </div>
-          </motion.div>
+          </div>
         </motion.div>
 
         {/* 免责声明 */}
         <AnimatePresence>
           <motion.div
             key="disclaimer"
-            initial={{ opacity: 0, y: 6 }}
+            initial={
+              chatSurfacePhase === "authPending" || chatSurfacePhase === "hydrating"
+                ? false
+                : { opacity: 0, y: 6 }
+            }
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             className="text-center mt-3 text-xs text-gray-400 font-medium px-2"

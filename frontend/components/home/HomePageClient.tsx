@@ -23,8 +23,10 @@ import { downloadConversationMarkdown } from "@/lib/conversation-export";
 import { conversationToMarkdown, sanitizeDownloadBasename } from "@/lib/chatUtils";
 import { useScrollBehavior } from "@/hooks/useScrollBehavior";
 import { useChat } from "@/hooks/useChat";
+import { useChatAgentsCatalog } from "@/hooks/useChatAgentsCatalog";
 import type { ChatMessage, Message, ServerConversation, WidgetMessage } from "@/types/chat";
 import { uiModalBackdrop, uiModalPanel } from "@/lib/ui-motion";
+import { ConversationSkeleton } from "@/components/chat/ConversationSkeleton";
 import { WelcomeHero } from "./WelcomeHero";
 import {
   chatPathConversation,
@@ -34,6 +36,8 @@ import {
 } from "@/lib/chatRoutes";
 
 const messageTransition = { type: "spring" as const, stiffness: 200, damping: 28, mass: 0.6 };
+const messageEnterInitial = { opacity: 0, y: 20, scale: 0.98 };
+const traceEnterInitial = { opacity: 0, y: 15 };
 const PENDING_CHAT_DRAFT_KEY = "tcm_pending_chat_draft";
 
 /** 工具调用会在 trace 前后拆出多条助手消息：只在「该轮最后一次助手分段」显示工具栏，避免像两段独立对话 */
@@ -117,6 +121,11 @@ export function HomePageClient() {
     messages,
     setMessages,
     hasStarted,
+    chatSurfacePhase,
+    urlConversationId,
+    conversationRouteSynced,
+    messagesLoading,
+    listLoading,
     genState,
     conversationId,
     inputBarUsageHint,
@@ -137,6 +146,8 @@ export function HomePageClient() {
     webSearchMode,
     setWebSearchMode,
     chatModelCatalog,
+    chatAgentId,
+    setChatAgentId,
     selectedProviderId,
     selectedChatModelId,
     setModelPick,
@@ -166,7 +177,26 @@ export function HomePageClient() {
     sseRouteAssignPending,
   } = chat;
 
+  const { agents: agentCatalog, loading: agentsLoading } = useChatAgentsCatalog(token);
+
+  const agentPickerList = useMemo(
+    () => agentCatalog.map((a) => ({ id: a.id, name: a.name })),
+    [agentCatalog],
+  );
+
   hasStartedRef.current = hasStarted;
+
+  const [historyAnimUnlocked, setHistoryAnimUnlocked] = useState(false);
+  useEffect(() => {
+    setHistoryAnimUnlocked(false);
+  }, [conversationId]);
+  useEffect(() => {
+    if (messagesLoading) return;
+    const raf = requestAnimationFrame(() => setHistoryAnimUnlocked(true));
+    return () => cancelAnimationFrame(raf);
+  }, [messagesLoading, conversationId]);
+
+  const skipHistoryEnter = messagesLoading || !historyAnimUnlocked;
 
   // 找到最后一个未回答的 widget，用于渲染在底部覆盖输入框
   const activeWidget = useMemo(
@@ -290,6 +320,21 @@ export function HomePageClient() {
     return conv?.group_id !== sidebarFilter;
   }, [token, sidebarFilter, conversationId, serverConversations]);
 
+  const showWelcomeHero = chatSurfacePhase === "newChat" && !viewingGroupLanding;
+  /** 仅无缓存的首载/刷新用骨架；切换已有缓存会话时不顶替消息区 */
+  const showConversationSkeleton =
+    !viewingGroupLanding &&
+    Boolean(urlConversationId) &&
+    conversationRouteSynced &&
+    messages.length === 0 &&
+    (chatSurfacePhase === "authPending" || chatSurfacePhase === "hydrating");
+  const showMessageList =
+    hasStarted &&
+    conversationRouteSynced &&
+    (chatSurfacePhase === "ready" || messages.length > 0 || genState !== "idle");
+  const showMessagesRefreshingOverlay =
+    messagesLoading && messages.length > 0 && conversationRouteSynced;
+
   const selectedGroupFolderName =
     conversationFolders.find((f) => f.id === sidebarFilter)?.name?.trim() || "分组";
 
@@ -300,7 +345,7 @@ export function HomePageClient() {
 
   const showBackToGroupWorkspace = Boolean(token) && activeConvInSidebarGroup;
 
-  /** 仅更新 URL；会话加载与列表刷新由 pathname effect → handleSelectConversation 统一执行，避免二次请求与重复清空消息 */
+  /** 仅更新 URL；加载由 useChat pathname effect 触发（含消息缓存） */
   const selectConversationSyncSidebar = useCallback(
     (id: string) => {
       router.push(chatPathConversation(id));
@@ -358,10 +403,7 @@ export function HomePageClient() {
       }
       return;
     }
-    if (!token) return;
-    const id = parsed.conversationId;
-    if (conversationId === id) return;
-    void handleSelectConversation(id);
+    /* conversation：加载与未登录 redirect 由 useChat 内 effect 处理 */
   }, [
     pathname,
     authLoading,
@@ -369,7 +411,6 @@ export function HomePageClient() {
     conversationId,
     router,
     handleNewChat,
-    handleSelectConversation,
     sseRouteAssignPending,
   ]);
 
@@ -383,7 +424,11 @@ export function HomePageClient() {
     const conv = serverConversations.find((c) => c.id === conversationId);
     if (conv?.group_id) setSidebarFilter(conv.group_id);
     else setSidebarFilter("__ungrouped__");
-  }, [pathname, authLoading, token, conversationId, serverConversations]);
+    if (conv) {
+      const aid = conv.agent_id?.trim();
+      setChatAgentId(aid || null);
+    }
+  }, [pathname, authLoading, token, conversationId, serverConversations, setChatAgentId]);
 
   const prefetchConversationRoute = useCallback(
     (id: string) => {
@@ -619,11 +664,13 @@ export function HomePageClient() {
   /** 侧栏在 md 以下隐藏，移动端用顶栏骨架表示「会话标题加载中」 */
   const showMobileTitleSkeleton =
     Boolean(token) &&
+    !authLoading &&
     !viewingGroupLanding &&
-    hasStarted &&
-    genState !== "idle" &&
-    (!conversationId ||
-      !(serverConversations.find((c) => c.id === conversationId)?.title ?? "").trim());
+    (chatSurfacePhase === "hydrating" ||
+      (hasStarted &&
+        genState !== "idle" &&
+        (!conversationId ||
+          !(serverConversations.find((c) => c.id === conversationId)?.title ?? "").trim())));
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#fdfdfc]">
@@ -856,6 +903,7 @@ export function HomePageClient() {
         onOpenSearch={() => setSearchOpen(true)}
         movePendingId={movePendingId}
         onPrefetchConversation={prefetchConversationRoute}
+        conversationsLoading={listLoading}
       />
 
       <ConversationSearchModal
@@ -876,6 +924,7 @@ export function HomePageClient() {
         <ChatHeader
           token={token}
           authLoading={authLoading}
+          chatSurfacePhase={chatSurfacePhase}
           groupWorkspaceTitle={viewingGroupLanding ? selectedGroupFolderName : null}
           hasStarted={hasStarted}
           conversationId={conversationId}
@@ -929,21 +978,23 @@ export function HomePageClient() {
                 className={`chat-scroll-area no-scrollbar flex-1 overflow-y-auto ${
                   !viewingGroupLanding
                     ? [
-                        !hasStarted ? "flex min-h-0 flex-col" : "",
+                        showWelcomeHero ? "flex min-h-0 flex-col" : "",
                         "pb-[clamp(6.25rem,10vh,8.75rem)] md:pb-[clamp(6.5rem,10.25vh,9rem)]",
                       ].join(" ")
                     : ""
                 }`}
               >
-                {!hasStarted && !viewingGroupLanding && <WelcomeHero />}
-                <AnimatePresence>
-                  {hasStarted && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.3 }}
-                  className="pt-8 pb-4 md:pb-5"
-                >
+                {showWelcomeHero && <WelcomeHero />}
+                {showConversationSkeleton && <ConversationSkeleton />}
+                {showMessageList ? (
+                <div className="relative pt-8 pb-4 md:pb-5">
+                  {showMessagesRefreshingOverlay ? (
+                    <div
+                      className="pointer-events-none absolute inset-0 z-10 bg-[#fdfdfc]/50"
+                      aria-busy
+                      aria-label="正在加载对话"
+                    />
+                  ) : null}
                   {messages.map((msg, idx) => {
                     const prevMsg = messages[idx - 1];
                     const nextMsg = messages[idx + 1];
@@ -954,7 +1005,7 @@ export function HomePageClient() {
                       return (
                         <motion.div
                           key={msg.id}
-                          initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                          initial={skipHistoryEnter ? false : messageEnterInitial}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           transition={messageTransition}
                         >
@@ -1027,7 +1078,7 @@ export function HomePageClient() {
                       return (
                         <motion.div
                           key={msg.id}
-                          initial={{ opacity: 0, y: 15 }}
+                          initial={skipHistoryEnter ? false : traceEnterInitial}
                           animate={{ opacity: 1, y: 0 }}
                           transition={messageTransition}
                         >
@@ -1061,7 +1112,7 @@ export function HomePageClient() {
                       return (
                         <motion.div
                           key={msg.id}
-                          initial={{ opacity: 0, y: 15 }}
+                          initial={skipHistoryEnter ? false : traceEnterInitial}
                           animate={{ opacity: 1, y: 0 }}
                           transition={messageTransition}
                         >
@@ -1103,13 +1154,12 @@ export function HomePageClient() {
                     className="min-h-[min(8.25vh,4rem)] shrink-0 md:min-h-[min(7.5vh,4.25rem)]"
                     aria-hidden
                   />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                </div>
+                ) : null}
+                </div>
 
-          <AnimatePresence>
-            {showScrollToBottom && hasStarted && !viewingGroupLanding && (
+              <AnimatePresence>
+                {showScrollToBottom && hasStarted && !viewingGroupLanding && (
               <motion.button
                 type="button"
                 initial={{ opacity: 0, y: 10, scale: 0.92 }}
@@ -1203,6 +1253,12 @@ export function HomePageClient() {
               viewingGroupLanding ? "在这里提问，新建对话" : undefined
             }
             usageHint={inputBarUsageHint}
+            chatSurfacePhase={chatSurfacePhase}
+            showAgentPicker={Boolean(token) && !authLoading}
+            agents={agentPickerList}
+            selectedAgentId={chatAgentId}
+            onSelectAgent={setChatAgentId}
+            agentsLoading={agentsLoading}
           />
         </div>
       </main>

@@ -3,6 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.models import AgentRecord
 from app.auth.models import UserRecord
 from app.chat.models import ConversationRecord, MessageRecord
 from app.chat.policy.access import assert_can_use_conversation
@@ -16,26 +17,53 @@ def _normalized_follow_up_suggestions(v: object | None) -> list[str] | None:
     return out if out else None
 
 
+def _last_assistant_model_subquery():
+    """每个 conversation_id 对应最新一条 assistant 的 model_name。"""
+    return (
+        select(MessageRecord.model_name)
+        .where(
+            MessageRecord.conversation_id == ConversationRecord.id,
+            MessageRecord.role == "assistant",
+        )
+        .order_by(MessageRecord.created_at.desc())
+        .limit(1)
+        .correlate(ConversationRecord)
+        .scalar_subquery()
+    )
+
+
 async def list_my_conversations(
     session: AsyncSession,
     user: UserRecord,
 ) -> list[ConversationItem]:
+    last_model = _last_assistant_model_subquery()
     r = await session.execute(
-        select(ConversationRecord)
+        select(
+            ConversationRecord,
+            AgentRecord.name.label("agent_name"),
+            last_model.label("last_model_name"),
+        )
+        .outerjoin(AgentRecord, AgentRecord.id == ConversationRecord.agent_id)
         .where(ConversationRecord.user_id == user.id)
         .order_by(ConversationRecord.created_at.desc())
     )
-    rows = r.scalars().all()
-    return [
-        ConversationItem(
-            id=x.id,
-            title=x.title or "",
-            agent_id=x.agent_id,
-            created_at=x.created_at,
-            group_id=x.group_id,
+    rows = r.all()
+    out: list[ConversationItem] = []
+    for conv, agent_name, last_model_name in rows:
+        an = (agent_name or "").strip() or None
+        lmn = (last_model_name or "").strip() or None
+        out.append(
+            ConversationItem(
+                id=conv.id,
+                title=conv.title or "",
+                agent_id=conv.agent_id,
+                agent_name=an,
+                last_model_name=lmn,
+                created_at=conv.created_at,
+                group_id=conv.group_id,
+            )
         )
-        for x in rows
-    ]
+    return out
 
 
 async def list_messages_for_conversation(

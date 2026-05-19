@@ -65,6 +65,8 @@ type SidebarProps = {
   movePendingId?: string | null;
   /** 悬停会话行时预取 `/chat/:id`，减轻切换卡顿 */
   onPrefetchConversation?: (id: string) => void;
+  /** 首次拉取会话列表中（避免闪「暂无会话」） */
+  conversationsLoading?: boolean;
 };
 
 export function Sidebar({
@@ -100,8 +102,10 @@ export function Sidebar({
   onOpenSearch,
   movePendingId,
   onPrefetchConversation,
+  conversationsLoading = false,
 }: SidebarProps) {
-  const { loading, token } = useAuth();
+  const { loading: authLoading, token } = useAuth();
+  const listAreaLoading = authLoading || conversationsLoading;
 
   const showPendingNewChatSkeleton = Boolean(
     token && streamBusy && activeId == null
@@ -268,10 +272,10 @@ export function Sidebar({
               />
             )}
 
-            {loading ? (
-              <div className="px-2 space-y-2">
-                <div className="h-4 w-48 rounded bg-gray-100 animate-pulse" />
-                <div className="h-4 w-36 rounded bg-gray-100/80 animate-pulse" />
+            {listAreaLoading ? (
+              <div className="px-2 py-2 flex items-center gap-2 text-sm text-gray-400">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-70" aria-hidden />
+                <span>加载会话…</span>
               </div>
             ) : conversationsFull.length === 0 && !showPendingNewChatSkeleton ? (
               <p className="px-2 text-sm text-gray-400 leading-relaxed">暂无会话。</p>
@@ -477,7 +481,7 @@ export function Sidebar({
         </div>
 
         <div className="p-4 border-t border-[#e5e5e5] space-y-2">
-          {loading ? (
+          {authLoading ? (
             <div className="h-10 w-full rounded-lg bg-gray-200/60 animate-pulse" aria-hidden />
           ) : !token ? (
             <div className="flex gap-2">

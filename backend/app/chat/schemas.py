@@ -95,6 +95,10 @@ class ConversationItem(BaseModel):
     id: str
     title: str
     agent_id: str | None = None
+    #: 自定义 Agent 名称；agent_id 为空时由前端展示「系统默认」
+    agent_name: str | None = None
+    #: 该会话最新一条助手消息的 model_name
+    last_model_name: str | None = None
     created_at: datetime
     group_id: str | None = None
 

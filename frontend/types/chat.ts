@@ -61,6 +61,9 @@ export type ServerConversation = {
   created_at?: string;
   /** 服务端分组 id；无则会话在「聊天」未分组 */
   group_id?: string | null;
+  agent_id?: string | null;
+  agent_name?: string | null;
+  last_model_name?: string | null;
 };
 
 /** 服务端返回的会话文件夹 */

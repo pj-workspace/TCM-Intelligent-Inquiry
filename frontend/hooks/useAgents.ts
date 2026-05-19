@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_BASE, apiHeaders, apiJsonHeaders, parseApiError } from "@/lib/api";
 import { toast } from "sonner";
+import { notifyChatAgentsCatalogChanged } from "@/hooks/useChatAgentsCatalog";
 import type { Agent, AgentFormData, KnowledgeBaseLite } from "@/types/agent";
 import type { BuiltinToolInfo } from "@/types/tool";
 
@@ -159,6 +160,7 @@ export function useAgents(token: string | null) {
       });
       if (!res.ok) throw new Error(await parseApiError(res));
       await fetchData();
+      notifyChatAgentsCatalogChanged();
       setEditingId(null);
       toast.success(isNew ? "Agent 已创建" : "已保存");
     } catch (err) {
@@ -180,6 +182,7 @@ export function useAgents(token: string | null) {
       if (defaultAgentId === deleteId) handleSetDefault(null);
       setDeleteId(null);
       await fetchData();
+      notifyChatAgentsCatalogChanged();
       toast.success("已删除该 Agent");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "删除失败");
